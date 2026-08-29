@@ -1,0 +1,21 @@
+# 라이즈 컨디셔닝 — 저장소 루트 무시 목록.
+#
+# git 전환 **전에** 둔다. backend/README.md가 `.env.example` 복사를 안내하므로,
+# 누군가 실제 체크인 토큰을 넣은 .env를 만드는 순간 무방비로 커밋될 수 있다.
+
+# 자격증명 — 한 번 커밋되면 히스토리에서 지우기 어렵다
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.p8
+*.keystore
+*.jks
+serviceAccount*.json
+*-adminsdk-*.json
+
+# 도구 산출물
+.firebase/
+.DS_Store
+.claude/scheduled_tasks.lock

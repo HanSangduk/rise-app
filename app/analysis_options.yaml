@@ -1,0 +1,19 @@
+# Flutter 표준 린트 + 프로젝트 컨벤션.
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    # SwiftPM 패키지 체크아웃(firebase 등 서드파티 소스·테스트)이 들어오는 산출물 폴더.
+    - "build/**"
+  errors:
+    invalid_annotation_target: ignore
+
+linter:
+  rules:
+    prefer_const_constructors: true
+    prefer_final_locals: true
+    avoid_print: true
+    sort_child_properties_last: false
+    public_member_api_docs: false

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    기동 창 배경 (P32).
+
+    **Flutter의 첫 프레임과 픽셀로 맞춰야 한다.** 크림 #F6F4EF는 SplashGate가 까는
+    배경과 같은 값이고, 마크 위치·크기도 SplashGate의 RiseMark(size 132)와 같다.
+    한쪽만 바꾸면 네이티브 → Flutter 전환에서 배경색이 튀거나 마크가 점프한다.
+
+    종전엔 `@android:color/white` 단색이었다(Flutter 템플릿 그대로). 흰색 → 크림
+    전환이 눈에 띄지는 않았지만, 로고가 아예 없어서 "브랜드가 나왔다가 사라지는"
+    느낌 자체가 없었다.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/brand_cream" />
+    <!--
+        점(#CEBBAA)이 없는 마크 — 점은 Flutter가 도착시킨다(rise_mark.xml 주석).
+
+        ⚠ `<bitmap>`이 아니라 `<item android:drawable>`이다. `<bitmap>`은 **래스터만**
+        받아서 벡터 드로어블을 넣으면 조용히 아무것도 안 그린다 — 실기기에서 배경만
+        나오고 마크가 없는 걸로 드러났다.
+    -->
+    <item
+        android:drawable="@drawable/rise_mark"
+        android:gravity="center" />
+</layer-list>

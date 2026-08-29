@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PT데스크 회원 앱 — 클릭 목업 (2026-08-14)</title>
+<style>
+  :root{--brand:#0d9488; --brand-l:#f0fdfa; --brand-b:#99f6e4; --ink:#0f172a; --line:#e2e8f0; --muted:#64748b; --ok:#16a34a; --warn:#d97706; --danger:#dc2626; --indigo:#4f46e5}
+  *{box-sizing:border-box; margin:0}
+  body{font-family:"Pretendard","Apple SD Gothic Neo",system-ui,sans-serif; background:linear-gradient(135deg,#0b1220,#134e4a); min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:26px 12px}
+  .hint{color:#94a3b8; font-size:12.5px; margin-bottom:14px; text-align:center}
+  .hint b{color:#5eead4}
+  /* 폰 프레임 */
+  .phone{width:392px; max-width:100%; height:800px; background:#fff; border:10px solid #0b1220; border-radius:44px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 30px 80px rgba(0,0,0,.5)}
+  .statusbar{height:34px; display:flex; align-items:center; justify-content:space-between; padding:0 22px; font-size:12px; font-weight:700; color:var(--ink); flex-shrink:0}
+  .apphead{padding:6px 18px 10px; display:flex; align-items:center; justify-content:space-between; flex-shrink:0}
+  .apphead .t{font-size:18px; font-weight:900}
+  .apphead .shop{font-size:10.5px; color:var(--muted)}
+  .bell{position:relative; font-size:17px}
+  .bell i{position:absolute; top:-2px; right:-4px; width:7px; height:7px; background:var(--danger); border-radius:50%}
+  .body{flex:1; overflow-y:auto; padding:2px 16px 16px; background:#f8fafc}
+  /* 하단 탭 */
+  .tabbar{display:flex; border-top:1px solid var(--line); background:#fff; flex-shrink:0; padding:6px 4px 14px}
+  .tab{flex:1; background:none; border:0; font-size:10px; color:#94a3b8; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:3px; font-weight:600}
+  .tab .ic{font-size:19px}
+  .tab.on{color:var(--brand)}
+  .tab.qr-tab .ic{width:46px; height:46px; background:var(--brand); color:#fff; border-radius:50%; display:flex; align-items:center; justify-content:center; margin-top:-20px; box-shadow:0 6px 14px rgba(13,148,136,.4); font-size:21px}
+  /* 공통 */
+  .scr{display:none} .scr.on{display:block}
+  .card{background:#fff; border:1px solid var(--line); border-radius:14px; padding:14px; margin-top:12px}
+  .card h4{font-size:13px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center}
+  .badge{display:inline-block; padding:2px 8px; border-radius:99px; font-size:10px; font-weight:700}
+  .b-ok{background:#dcfce7; color:#15803d}.b-warn{background:#fef3c7; color:#b45309}.b-brand{background:#ccfbf1; color:#0f766e}.b-muted{background:#f1f5f9; color:#64748b}.b-indigo{background:#e0e7ff;color:#4338ca}
+  .btn{border:0; border-radius:10px; padding:9px 14px; font-size:12.5px; font-weight:800; cursor:pointer}
+  .btn-p{background:var(--brand); color:#fff} .btn-o{background:#fff; border:1.5px solid var(--line); color:var(--ink)}
+  .btn-sm{padding:5px 10px; font-size:11px}
+  .note{font-size:10.5px; color:var(--muted); margin-top:8px; line-height:1.6}
+  .row{display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9; font-size:12.5px}
+  .row:last-child{border-bottom:0}
+  .seg{display:flex; background:#f1f5f9; border-radius:10px; padding:3px; margin-top:12px}
+  .seg button{flex:1; border:0; background:none; padding:7px; border-radius:8px; font-size:12px; font-weight:700; color:#64748b; cursor:pointer}
+  .seg button.on{background:#fff; color:var(--brand); box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .datechip{display:inline-flex; flex-direction:column; align-items:center; min-width:46px; padding:7px 4px; border-radius:11px; border:1px solid var(--line); background:#fff; font-size:10px; color:var(--muted); margin-right:6px}
+  .datechip b{font-size:14px; color:var(--ink)}
+  .datechip.on{background:var(--brand); border-color:var(--brand)} .datechip.on *{color:#fff}
+  .slot{display:flex; justify-content:space-between; align-items:center; background:#fff; border:1px solid var(--line); border-radius:12px; padding:11px 12px; margin-top:8px; font-size:12.5px}
+  .ring-wrap{display:flex; align-items:center; gap:14px}
+  .sil-mini{background:#f8fafc; border:1px solid var(--line); border-radius:10px; height:110px; flex:1; display:flex; align-items:flex-end; justify-content:center; position:relative}
+  .sil-mini .tag{position:absolute; top:5px; left:7px; font-size:9.5px; color:var(--muted); font-weight:700}
+  .qrbox{width:190px; height:190px; margin:14px auto 8px; background:#fff; border:1px solid var(--line); border-radius:14px; padding:12px; display:grid; grid-template-columns:repeat(12,1fr); grid-template-rows:repeat(12,1fr); gap:2px}
+  .qrbox i{background:#0f172a; border-radius:1px}
+  .sigpad{border:2px dashed #cbd5e1; border-radius:12px; height:110px; display:flex; align-items:center; justify-content:center; background:#fbfdff; margin-top:8px}
+  .toast{position:absolute; left:50%; transform:translateX(-50%); bottom:110px; background:#0f172a; color:#fff; font-size:12px; padding:9px 16px; border-radius:99px; opacity:0; transition:.3s; pointer-events:none; white-space:nowrap}
+  .toast.show{opacity:.95}
+  .phone-wrap{position:relative}
+  ul.clean{list-style:none}
+  .checkline{display:flex; gap:8px; align-items:flex-start; font-size:11.5px; margin-top:7px; color:#334155}
+  .checkline input{margin-top:2px}
+</style>
+</head>
+<body>
+<div class="hint">📱 <b>회원 앱 클릭 목업</b> — 하단 탭을 눌러보세요 · '마이 → 계약서 서명하기'로 서명 화면 데모 · 데이터는 가상값</div>
+<div class="phone-wrap">
+<div class="phone">
+  <div class="statusbar"><span>19:02</span><span>🔋 82% &nbsp;📶</span></div>
+  <div class="apphead">
+    <div><div class="t">코어핏 <span style="color:var(--brand)">스튜디오</span></div><div class="shop">PT데스크 회원 앱 · 김민지 님</div></div>
+    <div class="bell">🔔<i></i></div>
+  </div>
+  <div class="body">
+
+  <!-- ═══ 홈 ═══ -->
+  <section class="scr on" id="m-home">
+    <div class="card" style="background:var(--brand-l); border-color:var(--brand-b)">
+      <h4>다음 예약 <span class="badge b-brand">오늘</span></h4>
+      <div style="font-size:16px; font-weight:900">20:00 · 1:1 PT</div>
+      <div style="font-size:12px; color:var(--muted); margin:2px 0 10px">정혜린 코치 · 코어핏 스튜디오</div>
+      <div style="display:flex; gap:8px">
+        <button class="btn btn-p btn-sm" onclick="tab('qr')">체크인 QR 열기</button>
+        <button class="btn btn-o btn-sm" style="opacity:.55">취소 마감 (24시간 전 규정)</button>
+      </div>
+    </div>
+    <div class="card">
+      <h4>오늘 운동 <span style="font-size:10.5px; color:var(--muted); font-weight:400">정혜린 코치가 보냈어요</span></h4>
+      <div class="row"><span>A1 · 고블릿 스쿼트</span><b>3 × 12 · 16kg</b></div>
+      <div class="row"><span>A2 · 루마니안 데드리프트</span><b>3 × 10 · 40kg</b></div>
+      <div class="row"><span>B1 · 원암 덤벨 로우</span><b>3 × 10/측 · 14kg</b></div>
+      <div class="row" style="color:var(--muted)"><span>+ 2개 더 보기</span><span>▾</span></div>
+      <p class="note">미리 보고 가면 수업이 두 배로 알찹니다 💪</p>
+    </div>
+    <div class="card">
+      <h4>내 회원권</h4>
+      <div class="ring-wrap">
+        <svg width="86" height="86" viewBox="0 0 86 86">
+          <circle cx="43" cy="43" r="36" fill="none" stroke="#f1f5f9" stroke-width="9"/>
+          <circle cx="43" cy="43" r="36" fill="none" stroke="#0d9488" stroke-width="9" stroke-linecap="round"
+                  stroke-dasharray="79 226" transform="rotate(-90 43 43)"/>
+          <text x="43" y="41" text-anchor="middle" font-size="17" font-weight="900" fill="#0f172a">7회</text>
+          <text x="43" y="56" text-anchor="middle" font-size="9" fill="#64748b">/ 20회</text>
+        </svg>
+        <div style="font-size:12px; line-height:1.8">
+          <b>PT 20회권</b><br>
+          <span style="color:var(--muted)">유효기간 2026-11-30 (D-108)</span><br>
+          <span class="badge b-warn">잔여 7회 — 재계약 상담 가능</span>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="background:#fffbeb; border-color:#fde68a">
+      <div style="font-size:11.5px">📢 <b>공지</b> · 8/15(토)는 광복절 휴무입니다. 예약은 8/16부터!</div>
+    </div>
+  </section>
+
+  <!-- ═══ 예약 ═══ -->
+  <section class="scr" id="m-book">
+    <div style="margin-top:12px; overflow-x:auto; white-space:nowrap; padding-bottom:4px">
+      <span class="datechip"><span>금</span><b>14</b></span><span class="datechip"><span>토</span><b>15</b></span><span class="datechip"><span>일</span><b>16</b></span><span class="datechip"><span>월</span><b>17</b></span><span class="datechip on"><span>화</span><b>18</b></span><span class="datechip"><span>수</span><b>19</b></span>
+    </div>
+    <div class="slot"><div><b>10:00</b> · 1:1 PT<br><span style="font-size:10.5px; color:var(--muted)">정혜린 코치</span></div><button class="btn btn-p btn-sm">예약</button></div>
+    <div class="slot"><div><b>17:00</b> · 1:1 PT<br><span style="font-size:10.5px; color:var(--muted)">김태오 코치</span></div><button class="btn btn-p btn-sm">예약</button></div>
+    <div class="slot"><div><b>19:00</b> · 그룹 컨디셔닝 <span class="badge b-indigo">7/8</span><br><span style="font-size:10.5px; color:var(--muted)">정혜린 코치 · 50분</span></div><button class="btn btn-p btn-sm">예약</button></div>
+    <div class="slot" style="opacity:.75"><div><b>20:00</b> · 그룹 컨디셔닝 <span class="badge b-danger">마감 8/8</span><br><span style="font-size:10.5px; color:var(--muted)">취소가 나면 순서대로 자동 확정</span></div><button class="btn btn-o btn-sm">대기 신청 (2번째)</button></div>
+    <div class="card">
+      <h4>내 예약</h4>
+      <div class="row"><span><b>8/14 (금) 20:00</b> · 1:1 PT · 정혜린</span><span class="badge b-ok">확정</span></div>
+      <div class="row"><span>8/18 (화) 10:00 · 1:1 PT · 정혜린</span><button class="btn btn-o btn-sm">취소</button></div>
+      <p class="note">취소는 <b>수업 24시간 전까지</b> 무료예요. 이후 취소·노쇼는 세션이 차감될 수 있어요 (최초 1회는 유예!). 정책은 샵 규정을 따라요.</p>
+    </div>
+  </section>
+
+  <!-- ═══ QR 체크인 ═══ -->
+  <section class="scr" id="m-qr">
+    <div class="card" style="text-align:center">
+      <h4 style="justify-content:center">체크인 QR</h4>
+      <div class="qrbox" id="qrgrid"></div>
+      <div style="font-size:12px; font-weight:700">김민지 · PT 20회권 (잔여 7)</div>
+      <div style="font-size:10.5px; color:var(--muted); margin-top:2px">카운터 태블릿 카메라에 보여주세요</div>
+      <div style="margin-top:8px"><span class="badge b-brand" id="qrTimer">🔄 23초 후 자동 갱신</span></div>
+      <p class="note">QR은 30초마다 바뀌어요 — 캡처해서 다른 사람이 쓸 수 없습니다. 오프라인에서도 열려요.</p>
+    </div>
+    <div class="card">
+      <h4>최근 출석</h4>
+      <div class="row"><span>8/12 (화) 10:02</span><span class="badge b-brand">1:1 PT ✓</span></div>
+      <div class="row"><span>8/08 (금) 10:01</span><span class="badge b-brand">1:1 PT ✓</span></div>
+      <div class="row"><span>8/05 (화) 10:03</span><span class="badge b-brand">1:1 PT ✓</span></div>
+    </div>
+  </section>
+
+  <!-- ═══ 기록 ═══ -->
+  <section class="scr" id="m-log">
+    <div class="seg">
+      <button class="on" onclick="seg(this,'lw')">운동</button>
+      <button onclick="seg(this,'li')">인바디</button>
+      <button onclick="seg(this,'lb')">눈바디</button>
+    </div>
+    <div id="seg-lw">
+      <div class="card">
+        <h4>8/12 (화) · 1:1 PT <span class="badge b-ok">완료</span></h4>
+        <div class="row"><span>고블릿 스쿼트</span><b>3×12 · 16kg</b></div>
+        <div class="row"><span>루마니안 데드리프트</span><b>3×10 · 37.5kg</b></div>
+        <div class="row"><span>어시스트 바이크</span><b>8분 인터벌</b></div>
+        <div style="background:#f8fafc; border-radius:9px; padding:8px 10px; font-size:11.5px; margin-top:8px">💬 <b>정혜린 코치</b> · 데드리프트 폼 안정! 다음엔 40kg 도전해요.</div>
+      </div>
+      <div class="card">
+        <h4>8/08 (금) · 1:1 PT <span class="badge b-ok">완료</span></h4>
+        <div class="row"><span>백 스쿼트</span><b>4×8 · 45kg</b></div>
+        <div class="row"><span>원암 로우</span><b>3×10 · 12kg</b></div>
+      </div>
+    </div>
+    <div id="seg-li" style="display:none">
+      <div class="card">
+        <h4>인바디 추이 <span style="font-size:10px; color:var(--muted)">최근 4회</span></h4>
+        <svg width="100%" height="90" viewBox="0 0 320 90">
+          <polyline points="20,62 115,54 210,46 300,38" fill="none" stroke="#0d9488" stroke-width="2.5"/>
+          <polyline points="20,26 115,36 210,45 300,55" fill="none" stroke="#f59e0b" stroke-width="2.5"/>
+          <circle cx="300" cy="38" r="3.5" fill="#0d9488"/><circle cx="300" cy="55" r="3.5" fill="#f59e0b"/>
+        </svg>
+        <div class="row"><span style="color:#0f766e">■ 골격근량(SMM)</span><b>24.1kg <span style="color:var(--ok)">▲0.4</span></b></div>
+        <div class="row"><span style="color:#b45309">■ 체지방률(PBF)</span><b>26.8% <span style="color:var(--ok)">▼0.9</span></b></div>
+        <div class="row"><span>체중</span><b>61.9kg</b></div>
+        <div class="row"><span>체지방량(BFM)</span><b>16.6kg</b></div>
+      </div>
+    </div>
+    <div id="seg-lb" style="display:none">
+      <div class="card">
+        <h4>눈바디 <button class="btn btn-p btn-sm">📸 촬영</button></h4>
+        <div style="display:flex; gap:8px">
+          <div class="sil-mini"><span class="tag">6/2</span><svg width="42" height="96" viewBox="0 0 42 96"><ellipse cx="21" cy="11" rx="7.5" ry="9" fill="#cbd5e1"/><path d="M9 23 Q21 19 33 23 L35 60 Q21 65 7 60 Z" fill="#cbd5e1"/><rect x="10" y="61" width="8" height="32" rx="4" fill="#cbd5e1"/><rect x="24" y="61" width="8" height="32" rx="4" fill="#cbd5e1"/></svg></div>
+          <div class="sil-mini"><span class="tag" style="color:#0f766e">8/12</span><svg width="38" height="96" viewBox="0 0 38 96"><ellipse cx="19" cy="11" rx="7.5" ry="9" fill="#5eead4"/><path d="M9 23 Q19 20 29 23 L30 60 Q19 64 8 60 Z" fill="#5eead4"/><rect x="9" y="61" width="7.5" height="32" rx="4" fill="#5eead4"/><rect x="21.5" y="61" width="7.5" height="32" rx="4" fill="#5eead4"/></svg></div>
+        </div>
+        <input type="range" min="0" max="100" value="50" style="width:100%; margin-top:8px">
+        <p class="note">촬영할 때 <b>실루엣 가이드</b>가 떠서 매번 같은 자세·거리로 찍혀요. 사진은 <b>나와 담당 코치만</b> 볼 수 있어요 — 동의 후에만 저장됩니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 마이 ═══ -->
+  <section class="scr" id="m-my">
+    <div class="card">
+      <h4>내 회원권 · 이용 내역</h4>
+      <div style="font-size:13px; font-weight:800; margin-bottom:6px">PT 20회권 · 잔여 7회 <span style="font-weight:400; color:var(--muted)">(~11/30)</span></div>
+      <div class="row"><span>8/12 수업 완료 (정혜린)</span><b style="color:var(--danger)">−1</b></div>
+      <div class="row"><span>8/08 수업 완료 (정혜린)</span><b style="color:var(--danger)">−1</b></div>
+      <div class="row"><span>8/01 노쇼 · 최초 1회 유예</span><b style="color:var(--muted)">0</b></div>
+      <div class="row" style="color:var(--muted)"><span>… 이전 내역 11건 · 6/02 시작 +20</span><span>전체 보기 ▾</span></div>
+      <p class="note">언제 왜 차감됐는지 전부 보여드려요 — 샵과 회원이 같은 내역을 봅니다.</p>
+    </div>
+    <div class="card">
+      <h4>계약서</h4>
+      <div class="row"><span>PT 20회권 이용계약 (6/2)</span><span class="badge b-ok">서명완료</span></div>
+      <div class="row"><span>그룹 3개월 추가 계약</span><button class="btn btn-p btn-sm" onclick="openSign()">서명하기</button></div>
+      <p class="note">서명한 계약서 원본(PDF)은 언제든 다시 볼 수 있어요.</p>
+    </div>
+    <div class="card">
+      <h4>동의 관리</h4>
+      <div class="row"><span>개인정보 수집·이용 (필수)</span><span class="badge b-ok">동의 ✓</span></div>
+      <div class="row"><span>민감정보 — 인바디·체형사진 (선택)</span><span class="badge b-brand">동의 ✓ · 철회 가능</span></div>
+      <div class="row"><span>마케팅 알림 (선택)</span><span class="badge b-muted">미동의</span></div>
+      <p class="note">민감정보 동의를 철회하면 새 기록 저장이 중단되고, 삭제를 요청하면 즉시 지워드려요.</p>
+    </div>
+    <div class="card">
+      <h4>알림 설정</h4>
+      <div class="row"><span>수업 전날 리마인드 (20:00)</span><span class="badge b-ok">켜짐</span></div>
+      <div class="row"><span>오늘 운동 도착 알림</span><span class="badge b-ok">켜짐</span></div>
+      <div class="row"><span>대기 → 확정 알림</span><span class="badge b-ok">켜짐</span></div>
+    </div>
+  </section>
+
+  <!-- ═══ 계약 서명 ═══ -->
+  <section class="scr" id="m-sign">
+    <div class="card">
+      <h4>그룹 3개월 이용계약 <span class="badge b-warn">서명 대기</span></h4>
+      <div class="row"><span>이용료 (실결제)</span><b>₩390,000</b></div>
+      <div class="row"><span>기간</span><b>2026-09-01 ~ 11-30</b></div>
+      <div class="row"><span>환불 규정</span><span style="font-size:11px; text-align:right"><b>실결제 금액 기준</b> 이용분 공제<br>+ 위약금 10% (법정 상한)</span></div>
+      <div class="row"><span>취소·노쇼</span><span style="font-size:11px; text-align:right">24시간 전 무료 취소<br>노쇼 차감 · 최초 1회 유예</span></div>
+      <div class="row"><span>휴·폐업 통지</span><span style="font-size:11px">14일 전 고지 의무</span></div>
+      <button class="btn btn-o btn-sm" style="width:100%; margin-top:8px">전문 전체 보기 ▾</button>
+    </div>
+    <div class="card">
+      <label class="checkline"><input type="checkbox" checked> 계약 내용(이용료·환불·취소 규정)을 확인했습니다 (필수)</label>
+      <label class="checkline"><input type="checkbox" checked> 개인정보 수집·이용에 동의합니다 (필수)</label>
+      <label class="checkline"><input type="checkbox"> 민감정보(인바디·체형사진) 처리에 동의합니다 (선택 · 거부해도 계약 가능)</label>
+      <div class="sigpad">
+        <svg width="150" height="52" viewBox="0 0 150 52"><path d="M12 38 Q30 8 44 30 T78 26 Q92 12 104 30 T140 22" fill="none" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round"/></svg>
+      </div>
+      <div style="font-size:10px; color:var(--muted); text-align:center; margin-top:4px">위 영역에 손가락으로 서명하세요</div>
+      <button class="btn btn-p" style="width:100%; margin-top:10px" onclick="signDone()">서명 완료</button>
+      <p class="note">서명하면 <b>서명 시각·문서 지문(위변조 방지)</b>이 함께 저장되고, 계약서 사본이 바로 발송됩니다.</p>
+    </div>
+    <button class="btn btn-o" style="width:100%; margin-top:10px" onclick="tab('my')">← 마이로 돌아가기</button>
+  </section>
+
+  </div><!-- /body -->
+
+  <!-- 탭바 -->
+  <div class="tabbar">
+    <button class="tab on" data-t="home" onclick="tab('home')"><span class="ic">🏠</span>홈</button>
+    <button class="tab" data-t="book" onclick="tab('book')"><span class="ic">🗓</span>예약</button>
+    <button class="tab qr-tab" data-t="qr" onclick="tab('qr')"><span class="ic">▦</span>체크인</button>
+    <button class="tab" data-t="log" onclick="tab('log')"><span class="ic">📈</span>기록</button>
+    <button class="tab" data-t="my" onclick="tab('my')"><span class="ic">👤</span>마이</button>
+  </div>
+</div>
+<div class="toast" id="toast">✍️ 서명이 완료됐어요 — 사본을 보냈습니다</div>
+</div>
+
+<script>
+function tab(t){
+  document.querySelectorAll(".scr").forEach(s=>s.classList.remove("on"));
+  document.getElementById("m-"+t).classList.add("on");
+  document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("on", b.dataset.t===t));
+}
+function seg(btn,id){
+  btn.parentElement.querySelectorAll("button").forEach(b=>b.classList.remove("on"));
+  btn.classList.add("on");
+  ["lw","li","lb"].forEach(k=>document.getElementById("seg-"+k).style.display = (k===id?"block":"none"));
+}
+function openSign(){ tab("my"); document.querySelectorAll(".scr").forEach(s=>s.classList.remove("on")); document.getElementById("m-sign").classList.add("on"); }
+function signDone(){
+  const t=document.getElementById("toast"); t.classList.add("show");
+  setTimeout(()=>{ t.classList.remove("show"); tab("my"); }, 1600);
+}
+// QR 목업: 12×12 랜덤 모듈 + 30초 회전 시늉(5초마다 재생성 데모)
+function drawQR(){
+  const g=document.getElementById("qrgrid"); g.innerHTML="";
+  for(let i=0;i<144;i++){ const c=document.createElement("i");
+    const r=Math.floor(i/12), col=i%12;
+    const finder=(r<3&&col<3)||(r<3&&col>8)||(r>8&&col<3);
+    if(finder||Math.random()<.45) g.appendChild(c); else {c.style.background="transparent"; g.appendChild(c);}
+  }
+}
+drawQR();
+let left=23;
+setInterval(()=>{ left--; if(left<=0){left=30; drawQR();} const el=document.getElementById("qrTimer"); if(el) el.textContent=`🔄 ${left}초 후 자동 갱신`; },1000);
+</script>
+</body>
+</html>

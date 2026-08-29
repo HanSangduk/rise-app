@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="index,follow">
+<meta name="description" content="라이즈 컨디셔닝 회원 앱 개인정보처리방침 — 수집 항목, 이용 목적, 보유기간, 처리위탁·국외이전, 정보주체의 권리">
+<title>개인정보처리방침 — 라이즈 컨디셔닝</title>
+<style>
+:root{
+  --bg:#14181f; --bg-soft:#181d25; --panel:#1c222c; --panel-2:#222a36;
+  --line:#2b3441; --line-soft:#232b37;
+  --text:#d7dde6; --dim:#a6b2c2; --faint:#7d8a9c;
+  --accent:#7db3f0; --ok:#86c48f; --warn:#e0af68; --danger:#e2726e;
+  --measure:76ch;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,
+    "Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+  font-size:16px; line-height:1.78; word-break:keep-all; overflow-wrap:anywhere;
+  letter-spacing:-.003em;
+}
+.wrap{max-width:var(--measure); margin:0 auto; padding:0 20px 96px}
+header.doc{padding:56px 0 28px; border-bottom:1px solid var(--line)}
+.eyebrow{font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); font-weight:700; margin:0 0 10px}
+h1{font-size:clamp(26px,4.6vw,34px); line-height:1.32; margin:0 0 14px; font-weight:800; letter-spacing:-.02em}
+.meta{margin:0; color:var(--dim); font-size:14.5px; line-height:1.7}
+.meta b{color:var(--text); font-weight:600}
+h2{font-size:20.5px; line-height:1.45; margin:52px 0 12px; font-weight:750; letter-spacing:-.012em; scroll-margin-top:20px}
+h2 .num{color:var(--accent); font-weight:700; margin-right:.4em; font-variant-numeric:tabular-nums}
+h3{font-size:16.5px; margin:28px 0 8px; font-weight:700; color:#e6ebf2}
+p{margin:0 0 14px}
+ul,ol{margin:0 0 14px; padding-left:1.35em}
+li{margin:0 0 7px}
+li::marker{color:var(--faint)}
+ol.legal{list-style:none; padding-left:0; counter-reset:cl}
+ol.legal>li{counter-increment:cl; position:relative; padding-left:2.1em; margin-bottom:11px}
+ol.legal>li::before{content:"(" counter(cl) ")"; position:absolute; left:0; top:0; color:var(--faint); font-variant-numeric:tabular-nums; font-size:14.5px}
+a{color:var(--accent); text-decoration:none; border-bottom:1px solid rgba(125,179,240,.35)}
+a:hover{border-bottom-color:var(--accent)}
+strong{color:#eaeff5; font-weight:700}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.9em; background:var(--panel-2); border:1px solid var(--line-soft); border-radius:5px; padding:.1em .38em; color:#c9d6e6}
+hr{border:0; border-top:1px solid var(--line); margin:44px 0}
+.callout{margin:20px 0; padding:15px 18px; border-radius:10px; background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--accent); font-size:15.3px; line-height:1.72}
+.callout>:last-child{margin-bottom:0}
+.callout .t{display:block; font-weight:750; margin-bottom:6px; color:var(--accent); font-size:14.5px; letter-spacing:.01em}
+.callout.warn{border-left-color:var(--warn)} .callout.warn .t{color:var(--warn)}
+.callout.danger{border-left-color:var(--danger)} .callout.danger .t{color:var(--danger)}
+.callout.ok{border-left-color:var(--ok)} .callout.ok .t{color:var(--ok)}
+.tablewrap{overflow-x:auto; margin:20px 0; border:1px solid var(--line); border-radius:10px; background:var(--panel)}
+table{border-collapse:collapse; width:100%; min-width:520px; font-size:14.8px; line-height:1.62}
+th,td{padding:11px 14px; text-align:left; vertical-align:top; border-bottom:1px solid var(--line-soft)}
+thead th{background:var(--panel-2); color:#e6ebf2; font-weight:700; font-size:13.8px; letter-spacing:.01em; white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+td.num{font-variant-numeric:tabular-nums; white-space:nowrap}
+.tag{display:inline-block; font-size:12.5px; font-weight:700; padding:1px 8px; border-radius:999px; border:1px solid; white-space:nowrap; line-height:1.6}
+.tag.req{color:var(--danger); border-color:rgba(226,114,110,.5); background:rgba(226,114,110,.09)}
+.tag.opt{color:var(--ok); border-color:rgba(134,196,143,.5); background:rgba(134,196,143,.09)}
+.tag.sen{color:var(--warn); border-color:rgba(224,175,104,.5); background:rgba(224,175,104,.09)}
+details{margin:16px 0; border:1px solid var(--line); border-radius:10px; background:var(--panel); overflow:hidden}
+details>summary{cursor:pointer; padding:13px 16px; font-weight:700; font-size:15.2px; color:#e6ebf2; list-style:none; display:flex; align-items:center; gap:9px}
+details>summary::-webkit-details-marker{display:none}
+details>summary::before{content:"▸"; color:var(--accent); font-size:13px; transition:transform .16s ease; flex:none}
+details[open]>summary::before{transform:rotate(90deg)}
+details>summary:hover{background:var(--panel-2)}
+.dbody{padding:2px 16px 16px; border-top:1px solid var(--line-soft)}
+.dbody>:first-child{margin-top:12px}
+.dbody>:last-child{margin-bottom:0}
+nav.toc{margin:32px 0 8px; padding:18px 20px; background:var(--bg-soft); border:1px solid var(--line); border-radius:12px}
+nav.toc .th{font-size:13px; font-weight:750; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); margin:0 0 10px}
+nav.toc ol{list-style:none; margin:0; padding:0; columns:2; column-gap:26px}
+nav.toc li{margin:0 0 5px; break-inside:avoid; font-size:14.6px}
+nav.toc a{border-bottom:0; color:var(--dim)}
+nav.toc a:hover{color:var(--accent)}
+nav.toc a .n{color:var(--faint); font-variant-numeric:tabular-nums; margin-right:.35em}
+@media (max-width:560px){nav.toc ol{columns:1}}
+.docnav{display:flex; flex-wrap:wrap; gap:9px; margin:26px 0 0}
+.docnav a{border:1px solid var(--line); border-radius:999px; padding:7px 15px; font-size:14px; color:var(--dim); background:var(--panel); border-bottom:1px solid var(--line)}
+.docnav a:hover{border-color:var(--accent); color:var(--accent)}
+.docnav a[aria-current="page"]{border-color:var(--accent); color:var(--accent); background:var(--panel-2)}
+.ph{color:var(--warn); background:rgba(224,175,104,.1); border:1px dashed rgba(224,175,104,.45); border-radius:5px; padding:.05em .4em; font-size:.95em; font-weight:600; white-space:nowrap}
+footer.doc{margin-top:60px; padding-top:26px; border-top:1px solid var(--line); color:var(--faint); font-size:14px}
+footer.doc p{margin:0 0 8px}
+.totop{position:fixed; right:18px; bottom:18px; width:42px; height:42px; border-radius:999px; display:none; place-items:center; background:var(--panel-2); border:1px solid var(--line); color:var(--dim); font-size:16px; cursor:pointer; z-index:9}
+.totop.on{display:grid}
+.totop:hover{color:var(--accent); border-color:var(--accent)}
+@media print{
+  :root{--bg:#fff;--panel:#fff;--panel-2:#fff;--text:#111;--dim:#333;--faint:#555;--line:#ccc;--line-soft:#e2e2e2}
+  body{font-size:11pt} nav.toc,.totop,.docnav{display:none}
+  details{border:0} details>summary{padding-left:0} .dbody{padding-left:0}
+  details:not([open])>.dbody{display:block}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <p class="eyebrow">라이즈 컨디셔닝</p>
+  <h1>개인정보처리방침</h1>
+  <p class="meta">
+    <b>시행일</b> <span class="ph" data-biz="effective_date">(시행일 미정)</span> · <b>버전</b> v1.0 (최초 수립)<br>
+    <b>적용 대상</b> 라이즈 컨디셔닝 회원 앱(iOS · Android, <code>ai.stra.rize</code>)과 센터 운영 도구(어드민)
+  </p>
+  <div class="docnav">
+    <a href="./terms.html">이용약관</a>
+    <a href="./privacy.html" aria-current="page">개인정보처리방침</a>
+    <a href="./sensitive-consent.html">민감정보 동의</a>
+    <a href="./account-deletion.html">계정 삭제</a>
+  </div>
+</header>
+
+<div class="callout danger" id="draft-notice">
+  <span class="t">아직 시행 전 초안입니다</span>
+  <p>본문에 <b>(항목명 미정)</b>으로 표시된 자리가 남아 있습니다 — 사업자 정보와 개인정보
+  보호책임자가 아직 등록되지 않아 채우지 못한 항목이에요. 어드민 <b>설정 → 사업자 정보</b>에서
+  12개 항목을 모두 등록하고 약관 시행일을 지정하면 이 안내는 자동으로 사라집니다.
+  <b>그 전까지 이 문서는 효력이 없고, 앱 스토어 제출·회원 고지에 그대로 쓰면 안 됩니다.</b>
+  지금은 내용 검토용으로만 봐주세요.</p>
+</div>
+
+
+<p><span class="ph" data-biz="biz_name">(사업자명 미정)</span>(이하 “센터”)은 「개인정보 보호법」 제30조에 따라 정보주체의 개인정보를
+보호하고 이와 관련한 고충을 신속하게 처리할 수 있도록 다음과 같이 개인정보처리방침을 수립·공개합니다.</p>
+
+<div class="callout">
+  <span class="t">한눈에 보기</span>
+  <ul style="margin-bottom:0">
+    <li>회원 로그인에 필요한 것은 <b>휴대폰 번호</b>와 <b>이름</b>뿐입니다. 이메일·생년월일·성별·주소는 받지 않습니다.</li>
+    <li><b>체성분 수치·체형사진·부상 메모</b>는 「개인정보 보호법」 제23조의 <b>민감정보</b>입니다. 다른 항목과 <b>분리된 별도 동의</b>가 있어야만 저장되고, 동의를 철회하면 <b>즉시</b> 신규 저장이 차단됩니다.</li>
+    <li><b>광고·분석·크래시 수집 SDK를 하나도 사용하지 않습니다.</b> 위치정보·연락처·마이크·광고식별자를 수집하지 않고, 푸시 알림과 광고성 정보를 발송하지 않습니다.</li>
+    <li>건강 관련 정보를 <b>광고·마케팅·데이터 마이닝·인공지능 학습에 사용하지 않으며</b>, 어떤 제3자에게도 제공하거나 판매하지 않습니다.</li>
+    <li>데이터는 <b>대한민국(서울) 리전</b>에 보관합니다. 국외로 나가는 것은 <b>로그인 인증에 필요한 휴대폰 번호</b>뿐입니다(<a href="#c8">제8조</a>).</li>
+  </ul>
+</div>
+
+<nav class="toc" aria-label="목차">
+  <p class="th">목차</p>
+  <ol>
+    <li><a href="#c1"><span class="n">제1조</span>처리하는 개인정보 항목</a></li>
+    <li><a href="#c2"><span class="n">제2조</span>개인정보의 처리 목적</a></li>
+    <li><a href="#c3"><span class="n">제3조</span>처리 및 보유 기간</a></li>
+    <li><a href="#c4"><span class="n">제4조</span>민감정보의 처리</a></li>
+    <li><a href="#c5"><span class="n">제5조</span>만 14세 미만 아동</a></li>
+    <li><a href="#c6"><span class="n">제6조</span>제3자 제공</a></li>
+    <li><a href="#c7"><span class="n">제7조</span>처리의 위탁</a></li>
+    <li><a href="#c8"><span class="n">제8조</span>국외 이전</a></li>
+    <li><a href="#c9"><span class="n">제9조</span>파기 절차 및 방법</a></li>
+    <li><a href="#c10"><span class="n">제10조</span>정보주체의 권리와 행사방법</a></li>
+    <li><a href="#c11"><span class="n">제11조</span>계정·데이터 삭제 요청</a></li>
+    <li><a href="#c12"><span class="n">제12조</span>안전성 확보 조치</a></li>
+    <li><a href="#c13"><span class="n">제13조</span>자동 수집 장치</a></li>
+    <li><a href="#c14"><span class="n">제14조</span>수집하지 않는 정보</a></li>
+    <li><a href="#c15"><span class="n">제15조</span>개인정보 보호책임자</a></li>
+    <li><a href="#c16"><span class="n">제16조</span>권익침해 구제방법</a></li>
+    <li><a href="#c17"><span class="n">제17조</span>처리방침의 변경</a></li>
+  </ol>
+</nav>
+
+<h2 id="c1"><span class="num">제1조</span>처리하는 개인정보 항목</h2>
+<p>센터는 다음의 개인정보를 처리합니다. 「개인정보 보호법」 제22조 제3항에 따라
+<b>동의 없이 처리할 수 있는 항목과 그 법적 근거</b>를 동의를 받아 처리하는 항목과 구분하여 공개합니다.</p>
+<ul style="font-size:15.2px">
+  <li><span class="tag req">계약이행</span> — 회원권 계약의 체결·이행에 <b>불가피하게 필요</b>한 항목입니다.
+      법 제15조 제1항 제4호에 따라 <b>동의 없이</b> 처리합니다.</li>
+  <li><span class="tag opt">정당한 이익</span> — 서비스 보안과 부정 이용 방지를 위한 항목입니다.
+      법 제15조 제1항 제6호에 따라 처리하며, 회원의 권리보다 명백히 우선하는 범위로 한정합니다.</li>
+  <li><span class="tag sen">민감정보</span> — 「개인정보 보호법」 제23조 제1항의 <b>건강에 관한 정보</b>로,
+      다른 항목과 <b>분리된 별도 동의</b>가 있어야만 처리합니다.</li>
+</ul>
+
+<h3>1. 회원(앱 이용자)</h3>
+<div class="tablewrap">
+<table>
+<thead><tr><th>구분</th><th>항목</th><th>수집 방법</th><th>처리 근거</th></tr></thead>
+<tbody>
+<tr><td>계정·본인확인</td><td>휴대폰 번호, 이름, 인증 계정 식별자(UID)</td><td>회원이 앱에 입력(휴대폰 인증) 또는 센터가 등록 시 입력</td><td><span class="tag req">계약이행</span></td></tr>
+<tr><td>회원 관리</td><td>담당 코치, 진입경로(지인소개·인스타·워크인·재등록·기타), 회원 상태(이용중·휴면), 최종 방문일시, 앱 연결 여부</td><td>센터가 입력 / 이용 과정에서 자동 생성</td><td><span class="tag req">계약이행</span></td></tr>
+<tr><td>동의 관리</td><td>일반 이용 동의 여부, 민감정보 동의 여부, 동의 시각, 철회 시각</td><td>회원이 앱에서 설정 / 센터가 데스크에서 접수</td><td><span class="tag opt">법령상 의무</span><br><span style="color:var(--dim);font-size:.92em">동의 사실의 입증 책임이 센터에 있어 보관합니다</span></td></tr>
+<tr><td>회원권·거래</td><td>회원권 상품명·결제금액·총 횟수·잔여 횟수·유효기간·상태, 일시정지 기간과 <b>사유(자유 입력)</b>, 세션 차감·복구·환불 이용내역</td><td>센터가 입력 / 회원이 앱에서 일시정지 신청 시 입력</td><td><span class="tag req">계약이행</span></td></tr>
+<tr><td>결제 기록</td><td>결제 수단 구분(카드·현금·계좌이체), 총액, 분할 회차별 금액·납부 예정일·납부일시</td><td>센터가 결제 후 입력</td><td><span class="tag req">계약이행</span></td></tr>
+<tr><td>전자계약</td><td>계약 대상 상품·금액·위약금율, 계약 상태, 발송·서명 일시, <b>서명 당시 IP 주소</b>, 문서 해시값, 문서 경로</td><td>회원이 앱에서 서명할 때 자동 기록</td><td><span class="tag req">계약이행</span></td></tr>
+<tr><td>예약·출석</td><td>예약 일시·담당 코치·사용 회원권·예약 상태, 고정 스케줄, 체크인 기록</td><td>회원 또는 센터가 입력 / QR 체크인 시 자동 기록</td><td><span class="tag req">계약이행</span></td></tr>
+<tr><td>운동 기록</td><td>수업별 운동 종목·세트·횟수·중량·메모, <b>코치 코멘트</b>, 홈워크 배정 내용과 수행 체크 결과</td><td>코치가 작성 / 회원이 앱에서 체크</td><td><span class="tag req">계약이행</span></td></tr>
+<tr><td><b>체성분(InBody)</b></td><td>측정일, 체중(kg), 골격근량 SMM(kg), 체지방량 BFM(kg), 체지방률 PBF(%), 내장지방레벨 VFL, 기초대사량 BMR(kcal), 입력 주체(본인·센터)</td><td>회원이 결과지를 보고 앱에 직접 입력(결과지 사진을 이용한 자동 입력 보조 포함) 또는 센터가 입력</td><td><span class="tag sen">민감</span></td></tr>
+<tr><td><b>체형사진</b></td><td>촬영 이미지 파일, 촬영일, 포즈, 촬영 방향(정면·측면·후면)</td><td>회원이 앱 카메라로 직접 촬영·업로드</td><td><span class="tag sen">민감</span></td></tr>
+<tr><td><b>건강 상태 메모</b></td><td>부상·통증 등 트레이닝에 영향을 주는 신체 상태에 관한 메모</td><td>회원이 알린 내용을 센터가 입력</td><td><span class="tag sen">민감</span></td></tr>
+<tr><td>서비스 이용 기록</td><td>서버 접속 로그(접속 일시, 요청 경로, IP 주소, 브라우저·앱 정보), 인증 로그</td><td>서비스 이용 과정에서 자동 생성</td><td><span class="tag opt">정당한 이익</span></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="callout warn">
+  <span class="t">체형사진에 함께 담기는 정보</span>
+  <p>스마트폰 카메라가 만드는 이미지 파일에는 <b>촬영 시각·기기 모델·이미지 방향 같은 촬영 정보(EXIF)</b>가
+  함께 저장되며, 센터는 이를 별도로 제거하지 않습니다. 다만 앱은 <b>위치 권한을 요청하지 않으므로</b>
+  운영체제가 사진에 <b>위치(GPS) 정보를 기록하지 않습니다.</b></p>
+  <p>또한 앱은 배경에 다른 사람이 함께 찍히지 않도록 <b>안내만 하며, 자동으로 흐리게 처리하지 않습니다.</b>
+  촬영 전에 주위를 확인해 주세요.</p>
+</div>
+
+<h3>2. 스태프(센터 대표·트레이너)</h3>
+<div class="tablewrap">
+<table>
+<thead><tr><th>항목</th><th>수집 방법</th></tr></thead>
+<tbody>
+<tr><td>이메일 주소(로그인 ID), 이름, 담당 색상, 재직 상태, 입·퇴사 일자, 휴무일</td><td>센터 대표가 등록</td></tr>
+<tr><td>정산 조건(세션당 금액 또는 요율)</td><td>센터 대표가 등록</td></tr>
+<tr><td>프로필 — 직함, 경력 연차, 전문분야, 자격, 수상·선수 경력, 소개문</td><td>센터가 등록(회원 앱에 공개됩니다)</td></tr>
+<tr><td>프로필 사진의 <b>인터넷 주소</b><br><span style="color:var(--dim);font-size:.94em">(이미지 파일 자체를 센터가 보관하지 않고, 센터가 입력한 주소를 앱이 불러와 표시합니다)</span></td><td>센터가 등록(회원 앱에 공개됩니다)</td></tr>
+</tbody>
+</table>
+</div>
+<p>스태프의 <b>비밀번호는 센터가 저장하지 않습니다.</b> 비밀번호는 인증 서비스(Google LLC)가 단방향
+암호화하여 보관하며, 센터는 초기 등록과 비밀번호 재설정 메일 발송만 요청할 수 있습니다.</p>
+
+<h3>3. 이용자의 기기 안에 저장되는 정보</h3>
+<p>다음 정보는 서버로 전송되지 않고 회원의 기기 안에만 저장됩니다.</p>
+<ul>
+  <li><b>가입 요청 중인 휴대폰 번호와 요청 시각</b> — “승인 대기 중” 상태를 앱을 껐다 켜도 유지하기 위한 것으로, 계정 연결이 끝나면 삭제됩니다.</li>
+  <li><b>로그인 토큰</b> — 인증 서비스 SDK가 iOS 키체인 / Android 내부 저장소에 보관합니다.</li>
+  <li><b>체형사진 임시 사본</b> — 촬영 직후 업로드에 사용한 임시 파일은 <b>즉시 삭제</b>되고, 조회한 사진은 <b>메모리에만</b> 캐시되어 앱을 종료하면 사라집니다. 기기 앨범이나 앱 저장소에 저장하지 않습니다.</li>
+  <li><b>체성분 결과지 사진</b> — 자동 입력을 위해 선택한 결과지 사진은 <b>기기 안에서만</b> 글자를 인식하고, 인식이 끝나면 사본을 즉시 삭제합니다. <b>이 사진은 서버로 전송되지도, 저장되지도 않습니다.</b></li>
+</ul>
+
+<h2 id="c2"><span class="num">제2조</span>개인정보의 처리 목적</h2>
+<p>센터는 다음 목적으로만 개인정보를 처리하며, 목적이 변경되는 경우 「개인정보 보호법」 제18조에 따라
+별도의 동의를 받는 등 필요한 조치를 이행합니다.</p>
+<div class="tablewrap">
+<table>
+<thead><tr><th>목적</th><th>처리하는 항목</th></tr></thead>
+<tbody>
+<tr><td>회원 식별·본인확인·계정 연결</td><td>휴대폰 번호, 이름, 인증 계정 식별자</td></tr>
+<tr><td>회원권 발급·잔여 횟수 관리·유효기간 관리·일시정지</td><td>회원권 정보, 이용내역, 일시정지 기간·사유</td></tr>
+<tr><td>수업 예약·정원 관리·출석 확인</td><td>예약 정보, 체크인 기록, 담당 코치</td></tr>
+<tr><td>대금 정산·중도해지 및 환불 처리</td><td>결제 기록, 회원권 결제금액, 이용내역</td></tr>
+<tr><td>계약 체결·이행 및 분쟁 대비 증적 확보</td><td>전자계약 정보, 서명 일시·IP 주소, 문서 해시</td></tr>
+<tr><td>트레이닝 지도, 운동 프로그램 구성, 과제 배정</td><td>운동 기록, 홈워크, 건강 상태 메모</td></tr>
+<tr><td>체성분·체형 변화의 기록과 비교를 통한 트레이닝 지도</td><td>체성분 수치, 체형사진</td></tr>
+<tr><td>고충 처리·민원 응대·공지사항 전달</td><td>휴대폰 번호, 이름</td></tr>
+<tr><td>부정 이용 방지, 서비스 안정성 확보, 장애 대응</td><td>서버 접속 로그, 인증 로그</td></tr>
+<tr><td>센터 운영 통계(회원 수·매출·재등록률·노쇼율 등)</td><td>회원권·예약·결제 기록 <b>(개별 회원을 특정하지 않는 집계 형태로 이용)</b></td></tr>
+</tbody>
+</table>
+</div>
+<div class="callout ok">
+  <span class="t">하지 않는 것 — 명시적 선언</span>
+  <p>센터는 회원의 <b>건강 관련 정보(체성분 수치·체형사진·건강 상태 메모)를 광고, 마케팅, 프로파일링,
+  이용 기반 데이터 마이닝, 인공지능 모델 학습</b>에 사용하지 않습니다. 어떤 인공지능 서비스에도
+  전달하지 않으며, 어떤 제3자에게도 제공하거나 판매하지 않습니다. 이 정보는 오직 <b>해당 회원 본인에게
+  트레이닝 지도라는 이익을 돌려주기 위한 목적</b>으로만 처리됩니다.</p>
+</div>
+
+<h2 id="c3"><span class="num">제3조</span>개인정보의 처리 및 보유 기간</h2>
+<p>센터는 법령에 따른 보유·이용 기간 또는 정보주체로부터 동의받은 보유·이용 기간 내에서 개인정보를
+처리·보유합니다.</p>
+<div class="tablewrap">
+<table>
+<thead><tr><th>항목</th><th>보유 기간</th><th>근거</th></tr></thead>
+<tbody>
+<tr><td>회원 계정·프로필, 동의 상태와 동의·철회 시각</td><td>이용계약 종료(탈퇴) 시까지</td><td>정보주체의 동의</td></tr>
+<tr><td>예약·체크인·운동 기록·홈워크</td><td>이용계약 종료(탈퇴) 시까지</td><td>정보주체의 동의</td></tr>
+<tr><td><b>체성분 수치·체형사진·건강 상태 메모</b></td><td>동의 철회, 삭제 요청 또는 탈퇴 시 <b>지체 없이 파기</b>. 그 전이라도 회원이 요청하면 개별 삭제</td><td>민감정보 별도 동의</td></tr>
+<tr><td>계약 또는 청약철회 등에 관한 기록<br><span style="color:var(--dim);font-size:.94em">(전자계약, 회원권 발급·해지·환불)</span></td><td class="num">5년</td><td>「전자상거래 등에서의 소비자보호에 관한 법률」 제6조·시행령 제6조</td></tr>
+<tr><td>대금결제 및 재화등의 공급에 관한 기록<br><span style="color:var(--dim);font-size:.94em">(결제 내역, 세션 이용내역)</span></td><td class="num">5년</td><td>동 법 제6조·시행령 제6조</td></tr>
+<tr><td>소비자의 불만 또는 분쟁처리에 관한 기록</td><td class="num">3년</td><td>동 법 제6조·시행령 제6조</td></tr>
+<tr><td>개인정보처리시스템 접속기록</td><td class="num">2년 이상</td><td>「개인정보의 안전성 확보조치 기준」 제8조<br><span style="color:var(--dim);font-size:.94em">(민감정보를 처리하는 시스템이므로 2년)</span></td></tr>
+<tr><td>서버 운영 로그</td><td class="num">30일</td><td>서비스 안정성 확보 목적, 기간 경과 후 자동 삭제</td></tr>
+<tr><td>인증 서비스가 기록하는 로그인 IP 주소</td><td>수 주(위탁받은 자의 정책)</td><td>본인확인·부정 이용 방지</td></tr>
+</tbody>
+</table>
+</div>
+<div class="callout warn">
+  <span class="t">백업본에 관한 안내</span>
+  <p>센터는 데이터 손실에 대비하여 데이터베이스의 <b>시점 복구 기능(7일)과 1일 1회 백업(보관 7일)</b>을
+  운영합니다. 따라서 회원의 요청으로 데이터를 삭제하더라도 <b>최대 7일 동안 백업본에 잔존</b>할 수 있으며,
+  이 기간이 지나면 백업본에서도 자동으로 사라집니다. 백업본은 복구 목적 외에는 이용하지 않습니다.</p>
+</div>
+
+<h2 id="c4"><span class="num">제4조</span>민감정보의 처리</h2>
+<p><b>체성분 수치, 체형사진, 건강 상태 메모</b>는 「개인정보 보호법」 제23조 제1항의 <b>“건강에 관한 정보”</b>로서
+민감정보에 해당합니다. 센터는 같은 항 제1호에 따라 <b>다른 개인정보의 처리에 대한 동의와 분리된
+별도의 동의</b>를 받은 경우에만 이를 처리합니다.</p>
+<ol class="legal">
+  <li>동의를 받을 때에는 「개인정보 보호법」 제15조 제2항에 따라 <b>처리 목적, 처리 항목, 보유·이용 기간,
+      동의를 거부할 권리가 있다는 사실과 거부에 따른 불이익</b>을 알립니다. 상세한 내용은
+      <a href="./sensitive-consent.html">민감정보(건강정보) 수집·이용 동의</a> 문서에 있습니다.</li>
+  <li><b>동의를 거부하더라도</b> 회원권 이용, 예약, 수업, 결제 등 <b>서비스의 나머지 기능은 그대로 이용할 수 있습니다.</b>
+      체성분 기록과 체형 분석 기능만 이용할 수 없습니다.</li>
+  <li>동의는 앱의 <b>마이 → 동의 관리</b>에서 언제든지 철회할 수 있습니다. 철회하면 시스템이 <b>즉시</b>
+      체성분 기록과 체형사진의 신규 저장을 차단하고, 스태프의 체형사진 열람도 차단됩니다.
+      건강 상태 메모는 센터가 철회 시점 이후 추가로 기록하지 않으며, 요청하시면 기존 메모를 삭제합니다.</li>
+  <li>센터는 민감정보에 대하여 「개인정보 보호법」 제29조에 따른 안전성 확보 조치를 이행합니다(<a href="#c12">제12조</a>).</li>
+</ol>
+<div class="callout ok">
+  <span class="t">민감정보의 공개 가능성 — 제23조 제3항</span>
+  <p>센터가 제공하는 서비스는 회원의 민감정보를 <b>다른 이용자에게 공개하는 기능이 없습니다.</b>
+  체성분 기록과 체형사진은 <a href="#c4-scope">아래에 정해진 사람</a> 외에는 접근할 수 없으며,
+  게시판·프로필·순위표 등 <b>공개 영역에 노출되는 경로가 존재하지 않습니다.</b> 따라서 별도로
+  비공개를 선택하실 필요가 없습니다.</p>
+</div>
+
+<h3 id="c4-scope">민감정보에 접근할 수 있는 사람</h3>
+<div class="tablewrap">
+<table>
+<thead><tr><th>기록</th><th>회원 본인</th><th>담당 코치</th><th>센터 대표</th><th>담당 아닌 코치</th><th>그 밖의 사람</th></tr></thead>
+<tbody>
+<tr><td>체성분(InBody) 기록</td><td>○</td><td>○</td><td>○</td><td>✕</td><td>✕</td></tr>
+<tr><td>건강 상태 메모</td><td>○</td><td>○</td><td>○</td><td>✕</td><td>✕</td></tr>
+<tr><td><b>체형사진</b></td><td>○</td><td>△</td><td>△</td><td>✕</td><td>✕</td></tr>
+</tbody>
+</table>
+</div>
+<p style="font-size:14.6px;color:var(--dim)">
+△ = <b>민감정보 동의가 유효한 동안에만</b> 열람할 수 있습니다. 동의를 철회하면 사진 파일에 대한
+접근 자체가 서버에서 차단됩니다. 회원 본인의 열람은 동의 상태와 무관하게 언제나 가능합니다.</p>
+<p>이 접근 범위는 안내 문구가 아니라 <b>서버와 저장소의 보안 규칙으로 강제</b>됩니다. 권한이 없는 요청은
+기술적으로 거부되며, 사진 파일은 <b>영구 공개 링크 없이</b> 매 요청마다 권한을 다시 확인한 뒤에만 전달됩니다.</p>
+
+<h2 id="c5"><span class="num">제5조</span>만 14세 미만 아동의 개인정보</h2>
+<ol class="legal">
+  <li>센터는 <b>만 14세 미만 아동의 회원 가입을 받지 않습니다.</b></li>
+  <li>부득이하게 만 14세 미만 아동을 회원으로 등록해야 하는 경우, 「개인정보 보호법」 제22조의2에 따라
+      <b>법정대리인의 동의</b>를 받고 법정대리인의 성명과 연락처를 확인한 뒤에만 처리하며, 이 경우
+      아동이 쉽게 이해할 수 있는 언어로 고지합니다.</li>
+  <li>만 14세 미만 아동의 개인정보가 법정대리인의 동의 없이 수집된 사실을 알게 된 경우 지체 없이 파기합니다.</li>
+</ol>
+
+<h2 id="c6"><span class="num">제6조</span>개인정보의 제3자 제공</h2>
+<div class="callout ok">
+  <span class="t">제3자에게 제공하지 않습니다</span>
+  <p>센터는 회원의 개인정보를 <b>제3자에게 제공하지 않습니다.</b> 판매·대여·교환하지 않으며,
+  광고 네트워크·데이터 브로커·보험사·고용주 등 어떤 곳에도 전달하지 않습니다.</p>
+</div>
+<p>다만 다음의 경우에는 법령에 따라 예외적으로 제공될 수 있으며, 이 경우에도 최소한의 범위로 한정합니다.</p>
+<ul>
+  <li>정보주체로부터 별도의 동의를 받은 경우</li>
+  <li>법률에 특별한 규정이 있거나 법령상 의무를 준수하기 위하여 불가피한 경우</li>
+  <li>수사기관이 법령에 정한 절차와 방법에 따라 <b>영장 등 적법한 요구</b>를 한 경우</li>
+</ul>
+<p>서비스 운영을 위해 외부 사업자가 개인정보를 <b>처리</b>하는 경우는 ‘제3자 제공’이 아니라
+<b>‘처리위탁’</b>에 해당하며, 그 내역은 <a href="#c7">제7조</a>에 공개합니다.</p>
+
+<h2 id="c7"><span class="num">제7조</span>개인정보 처리의 위탁</h2>
+<p>센터는 원활한 서비스 제공을 위하여 다음과 같이 개인정보 처리 업무를 위탁하고 있습니다.</p>
+<div class="tablewrap">
+<table>
+<thead><tr><th>수탁자</th><th>위탁 업무</th><th>위탁하는 항목</th><th>보유·이용 기간</th></tr></thead>
+<tbody>
+<tr>
+  <td><b>Google LLC</b><br><span style="color:var(--dim);font-size:.94em">Google Cloud Platform / Firebase</span></td>
+  <td>휴대폰 번호 인증(SMS 발송·검증) 및 계정 인증</td>
+  <td>휴대폰 번호, 인증 계정 식별자, 로그인 시각·IP 주소·기기 정보</td>
+  <td rowspan="4">위탁계약 종료 시 또는 센터의 삭제 요청 시까지<br><span style="color:var(--dim);font-size:.94em">(삭제 요청 후 백업 포함 180일 이내 제거)</span></td>
+</tr>
+<tr>
+  <td><b>Google LLC</b><br><span style="color:var(--dim);font-size:.94em">Cloud Firestore — 대한민국 서울(asia-northeast3) 리전에 보관</span></td>
+  <td>데이터베이스 운영·보관</td>
+  <td>제1조의 회원·스태프 정보 중 사진 파일을 제외한 전부</td>
+</tr>
+<tr>
+  <td><b>Google LLC</b><br><span style="color:var(--dim);font-size:.94em">Cloud Storage — 대한민국 서울(asia-northeast3) 리전에 보관</span></td>
+  <td>이미지 저장소 운영·보관</td>
+  <td><b>체형사진</b></td>
+</tr>
+<tr>
+  <td><b>Google LLC</b><br><span style="color:var(--dim);font-size:.94em">Cloud Run · Firebase Hosting — 대한민국 서울(asia-northeast3) 리전에서 실행</span></td>
+  <td>애플리케이션 서버 및 웹 호스팅 운영</td>
+  <td>서비스 이용 과정에서 전송되는 요청 데이터, 서버 접속 로그</td>
+</tr>
+</tbody>
+</table>
+</div>
+<ol class="legal">
+  <li>센터는 위탁계약을 체결할 때 「개인정보 보호법」 제26조에 따라 <b>위탁업무 수행 목적 외 개인정보 처리 금지,
+      기술적·관리적 보호조치, 재위탁 제한, 수탁자에 대한 관리·감독, 손해배상</b> 등 책임에 관한 사항을 계약서에
+      명시하고, 수탁자가 개인정보를 안전하게 처리하는지 감독합니다.</li>
+  <li><b>수탁자는 센터가 정한 목적 범위에서만 개인정보를 처리하며, 이 방침이 정한 것과 동등한 수준의 보호를
+      제공합니다.</b> Google은 Cloud 데이터 처리 부속서(Cloud Data Processing Addendum)에 따라 처리자의
+      지위에서 개인정보를 처리합니다.</li>
+  <li>위탁업무의 내용이나 수탁자가 변경되는 경우 이 방침을 통해 공개합니다.</li>
+</ol>
+<div class="callout">
+  <span class="t">광고·분석 사업자는 없습니다</span>
+  <p>앱과 어드민에는 <b>광고 네트워크, 사용자 분석(Analytics), 오류 수집(Crashlytics), 마케팅 자동화,
+  A/B 테스트, 세션 리플레이 도구가 하나도 포함되어 있지 않습니다.</b> 체성분 결과지의 글자 인식은
+  <b>기기 안에서만</b> 이루어지며 외부 서버를 사용하지 않습니다.</p>
+</div>
+<p><b>가명정보의 처리</b> — 센터는 통계작성·과학적 연구·공익적 기록보존 등을 위한
+<b>가명정보를 생성하거나 처리하지 않습니다.</b> 센터 운영 통계(<a href="#c2">제2조</a>)는 가명처리 없이
+개별 회원을 특정하지 않는 <b>집계 수치</b>로만 산출합니다.</p>
+
+<h2 id="c8"><span class="num">제8조</span>개인정보의 국외 이전</h2>
+<p>센터는 데이터베이스와 이미지 저장소, 애플리케이션 서버를 <b>대한민국(서울, asia-northeast3) 리전</b>에
+두고 있으므로, <b>체형사진을 포함한 대부분의 개인정보는 국내에 보관</b>됩니다.</p>
+<p>다만 <b>휴대폰 번호 인증(Firebase Authentication)</b>은 제공사 정책상 <b>미국 데이터센터에서만</b> 운영되므로,
+로그인에 필요한 범위에서 다음 정보가 국외로 이전됩니다. 이는 「개인정보 보호법」 제28조의8 제1항 제3호
+가목에 따라 <b>이용계약의 체결 및 이행을 위하여 필요한 처리위탁·보관</b>에 해당하며, 같은 조 제2항의 사항을
+아래와 같이 공개합니다.</p>
+<div class="tablewrap">
+<table>
+<thead><tr><th>고지 사항</th><th>내용</th></tr></thead>
+<tbody>
+<tr><td>이전되는 개인정보 항목</td><td>휴대폰 번호, 인증 계정 식별자(UID), 로그인 일시·IP 주소·기기 정보 등 인증 관련 기록<br><b>※ 체형사진·체성분 수치·건강 상태 메모는 이전되지 않습니다.</b></td></tr>
+<tr><td>이전되는 국가</td><td><b>미국(United States)</b></td></tr>
+<tr><td>이전 시기 및 방법</td><td>회원이 휴대폰 번호로 로그인·인증을 요청하는 시점에, 암호화된 통신 구간(TLS)을 통해 네트워크로 전송</td></tr>
+<tr><td>이전받는 자</td><td><b>Google LLC</b> — 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA<br>개인정보 보호 문의: <a href="https://support.google.com/policies/troubleshooter/7575787">support.google.com/policies/troubleshooter/7575787</a></td></tr>
+<tr><td>이전받는 자의 이용 목적</td><td>휴대폰 번호 인증(SMS 발송·검증), 계정 인증 및 세션 관리, 부정 이용 방지</td></tr>
+<tr><td>이전받는 자의 보유·이용 기간</td><td>센터가 계정 삭제를 요청할 때까지. 삭제 요청 시 운영 시스템과 백업 시스템에서 <b>180일 이내</b> 제거<br>(로그인 IP 주소는 수 주간 보관 후 삭제)</td></tr>
+<tr><td>이전을 거부하는 방법과 절차</td><td>회원은 <a href="#c15">제15조</a>의 연락처로 국외 이전 거부를 요청할 수 있습니다.</td></tr>
+<tr><td><b>거부의 효과</b></td><td>휴대폰 번호 인증이 로그인 수단의 전부이므로, <b>이전을 거부하면 앱에 로그인할 수 없습니다.</b> 이 경우 회원권·예약·수업 등 <b>센터에서의 서비스는 종전과 같이 이용</b>할 수 있으며, 회원은 센터 데스크를 통해 자신의 기록을 열람·요청할 수 있습니다.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="c9"><span class="num">제9조</span>개인정보의 파기 절차 및 방법</h2>
+<ol class="legal">
+  <li>센터는 개인정보의 보유기간이 지나거나 처리 목적이 달성된 경우 <b>지체 없이(정당한 사유가 없는 한 5일 이내)</b>
+      해당 개인정보를 파기합니다.</li>
+  <li>보유기간이 지났음에도 다른 법령에 따라 계속 보존하여야 하는 경우에는, 해당 개인정보를
+      <b>별도의 데이터베이스로 옮기거나 보관 장소를 달리하여</b> 보존합니다. 보존 근거와 보존 항목은
+      <a href="#c3">제3조</a>의 표에 기재된 바와 같습니다.</li>
+  <li>파기 방법
+    <ul>
+      <li><b>전자적 파일</b> — 복구·재생할 수 없도록 영구 삭제합니다. 이미지 파일은 저장소에서 객체를 삭제합니다.</li>
+      <li><b>종이 문서</b> — 분쇄하거나 소각합니다.</li>
+      <li><b>백업본</b> — 별도 삭제 절차 없이 <a href="#c3">제3조</a>에 기재된 보관 기간(7일)이 지나면 자동으로 소멸합니다.</li>
+    </ul>
+  </li>
+  <li>파기는 개인정보 보호책임자의 책임 아래 수행하며, 파기 사실과 시점을 기록으로 남깁니다.</li>
+</ol>
+<div class="callout warn">
+  <span class="t">체형사진 파기 절차 안내</span>
+  <p>체형사진은 <b>앱에서 회원이 직접 삭제할 수 있습니다</b>(기록 → 체형 → 사진을 눌러 크게 본 뒤 삭제).
+  회원이 삭제하면 <b>사진 파일과 그 기록을 지체 없이 함께 파기</b>하며, 유예 기간 없이 즉시 처리되므로
+  <b>되돌릴 수 없습니다.</b> 센터 직원이 삭제한 경우에는 오조작을 되돌릴 수 있도록 <b>30일간</b> 복원 가능한
+  상태로 두었다가 그 기간이 지나면 자동으로 완전히 파기합니다(이 기간에도 회원 화면에는 보이지 않습니다).
+  앱에서 삭제하기 어려운 경우 <a href="#c15">제15조</a>의 연락처 또는 센터 데스크로 요청해 주세요.<br>
+  체성분 기록은 <b>회원이 앱에서 직접 입력한 기록에 한하여 앱에서 바로 삭제</b>할 수 있고,
+  센터가 입력한 기록은 담당 코치 또는 위 연락처로 요청해 주세요.</p>
+</div>
+
+<h2 id="c10"><span class="num">제10조</span>정보주체와 법정대리인의 권리·의무 및 행사방법</h2>
+<p>회원은 언제든지 다음의 권리를 행사할 수 있습니다(「개인정보 보호법」 제35조~제37조, 제39조의7).</p>
+<div class="tablewrap">
+<table>
+<thead><tr><th>권리</th><th>내용</th><th>행사 방법</th></tr></thead>
+<tbody>
+<tr><td>열람 요구</td><td>센터가 처리하는 자신의 개인정보를 확인</td><td>앱의 마이·기록 화면에서 직접 확인. 그 밖의 항목은 <a href="#c15">제15조</a> 연락처로 요구</td></tr>
+<tr><td>정정·삭제 요구</td><td>사실과 다른 정보의 정정, 불필요한 정보의 삭제</td><td>앱에서 직접 수정 가능한 항목은 앱에서. 그 밖에는 <a href="#c15">제15조</a> 연락처로 요구</td></tr>
+<tr><td>처리정지 요구</td><td>개인정보 처리의 정지</td><td><a href="#c15">제15조</a> 연락처로 요구</td></tr>
+<tr><td>동의 철회</td><td>민감정보 동의 등 동의에 근거한 처리의 중단</td><td>앱의 <b>마이 → 동의 관리</b>에서 즉시 철회</td></tr>
+<tr><td>자동화 결정에 대한 권리</td><td>완전히 자동화된 시스템에 의한 결정에 대한 거부·설명 요구</td><td>센터는 회원에게 <b>법적 효력이나 권리·의무에 영향을 미치는 자동화된 결정을 하지 않습니다.</b></td></tr>
+</tbody>
+</table>
+</div>
+<ol class="legal">
+  <li>권리 행사는 서면, 전자우편, 전화 등을 통하여 하실 수 있으며, 센터는 이에 대해 <b>지체 없이</b> 조치합니다.</li>
+  <li>정보주체가 개인정보의 오류에 대한 정정 또는 삭제를 요구한 경우, 센터는 <b>정정·삭제를 완료할 때까지
+      해당 개인정보를 이용하거나 제공하지 않습니다.</b></li>
+  <li>권리 행사는 <b>법정대리인이나 위임을 받은 자</b> 등 대리인을 통하여도 할 수 있으며, 이 경우
+      「개인정보 처리 방법에 관한 고시」 별지 제11호 서식에 따른 위임장을 제출하셔야 합니다.</li>
+  <li>열람·정정·삭제·처리정지 요구는 「개인정보 보호법」 제35조 제4항, 제36조 제1항 단서, 제37조 제2항에 의하여
+      <b>제한될 수 있으며</b>, 제한하는 경우 그 사유를 알려드립니다.</li>
+  <li>센터는 정보주체 권리에 따른 열람 등의 요구에 대하여 <b>수수료나 우송료를 청구하지 않습니다.</b></li>
+</ol>
+
+<h2 id="c11"><span class="num">제11조</span>계정·데이터 삭제 요청</h2>
+<div class="callout danger">
+  <span class="t">계정 삭제 요청 방법</span>
+  <p>회원 계정과 그에 연결된 개인정보(체형사진·체성분 기록 포함)의 삭제를 원하시면 아래 중
+  어느 방법으로든 요청해 주세요. 별도의 사유를 밝히실 필요는 없습니다.</p>
+  <ul style="margin-bottom:0">
+    <li><b>이메일</b> — <span class="ph" data-biz="privacy_officer_email">(보호책임자 이메일 미정)</span> (제목에 “계정 삭제 요청” 기재)</li>
+    <li><b>전화</b> — <span class="ph" data-biz="phone">(대표 전화 미정)</span></li>
+    <li><b>방문</b> — 센터 데스크에서 직접 요청</li>
+  </ul>
+</div>
+<ol class="legal">
+  <li>센터는 요청을 접수한 뒤 <b>본인 확인</b>을 거쳐 <b>지체 없이(정당한 사유가 없는 한 10일 이내)</b>
+      계정과 관련 개인정보를 파기하고, 처리 결과를 요청하신 연락처로 회신합니다.</li>
+  <li>삭제되는 것 — 계정 정보(이름·휴대폰 번호·인증 계정), <b>체형사진 파일 전부</b>, 체성분 기록,
+      건강 상태 메모, 운동 기록, 홈워크, 예약·체크인 기록.
+      <b>계정을 일시적으로 비활성화하거나 잠그는 것이 아니라 실제로 삭제</b>합니다.</li>
+  <li><b>삭제 후에도 남는 것</b> — 아래 정보는 법령이 보존을 의무화하므로, 삭제 요청 후에도 별도로 분리하여
+      보관한 뒤 해당 기간이 지나면 파기합니다. 이 기간 동안에는 <b>서비스 제공에 이용하지 않고 보존 목적으로만</b> 둡니다.
+    <ul>
+      <li>계약 또는 청약철회 등에 관한 기록 — <b>5년</b></li>
+      <li>대금결제 및 재화등의 공급에 관한 기록 — <b>5년</b></li>
+      <li>소비자의 불만 또는 분쟁처리에 관한 기록 — <b>3년</b></li>
+      <li>개인정보처리시스템 접속기록 — <b>2년</b></li>
+    </ul>
+  </li>
+  <li>백업본에 남은 데이터는 <a href="#c3">제3조</a>에 안내한 대로 <b>7일 이내</b> 자동으로 소멸합니다.</li>
+  <li>계정 삭제는 회원권 계약의 해지와 별개입니다. 잔여 세션의 환불은
+      <a href="./terms.html#a11">이용약관 제11조</a>에 따릅니다.</li>
+</ol>
+
+<h2 id="c12"><span class="num">제12조</span>개인정보의 안전성 확보 조치</h2>
+<p>센터는 「개인정보 보호법」 제29조와 「개인정보의 안전성 확보조치 기준」에 따라 다음의 조치를 취하고 있습니다.</p>
+<details open>
+  <summary>관리적 조치</summary>
+  <div class="dbody">
+    <ul>
+      <li>개인정보 보호책임자를 지정하고 개인정보취급자를 최소한으로 한정합니다.</li>
+      <li>개인정보취급자에게 정기적으로 교육을 실시하고, 퇴사·직무 변경 시 지체 없이 접근 권한을 회수합니다.</li>
+      <li>내부관리계획을 수립하고 시행합니다.</li>
+    </ul>
+  </div>
+</details>
+<details>
+  <summary>기술적 조치</summary>
+  <div class="dbody">
+    <ul>
+      <li><b>접근 권한의 최소화와 서버 강제</b> — 회원은 자기 기록만, 트레이너는 담당 회원만, 대표는 센터 전체를 봅니다.
+          이 범위는 안내가 아니라 <b>서버 코드와 저장소 보안 규칙 양쪽에서 강제</b>되며, 권한 밖의 요청은 거부됩니다.</li>
+      <li><b>체형사진의 이중 잠금</b> — 사진 파일은 <b>영구 공개 링크를 만들지 않고</b>, 요청마다 로그인 여부·회원 본인
+          여부·담당 관계·<b>민감정보 동의 유효 여부</b>를 다시 확인한 뒤에만 전달합니다.</li>
+      <li><b>클라이언트의 데이터베이스 직접 접근 전면 차단</b> — 앱과 어드민은 데이터베이스에 직접 접근할 수 없고,
+          반드시 인증된 서버 API를 거칩니다.</li>
+      <li><b>전송 구간 암호화</b> — 앱·어드민과 서버 사이의 모든 통신은 <b>TLS(HTTPS)</b>로 암호화됩니다.</li>
+      <li><b>저장 시 암호화</b> — 데이터베이스와 이미지 저장소는 클라우드 사업자가 제공하는 <b>저장 데이터 암호화</b>가
+          기본 적용됩니다.</li>
+      <li><b>비밀번호 비보관</b> — 스태프 비밀번호는 인증 서비스가 단방향 암호화하여 보관하며 센터는 알 수 없습니다.</li>
+      <li><b>접속기록의 보관과 점검</b> — 개인정보처리시스템의 접속기록을 보관하고 위·변조를 방지합니다.</li>
+      <li><b>백업과 복구</b> — 데이터베이스 삭제 방지, 시점 복구, 일 1회 자동 백업을 운영합니다.</li>
+    </ul>
+  </div>
+</details>
+<details>
+  <summary>물리적 조치</summary>
+  <div class="dbody">
+    <ul>
+      <li>개인정보가 저장·처리되는 서버와 저장소는 클라우드 사업자의 <b>국내 데이터센터</b>에 있으며,
+          해당 사업자의 물리적 접근통제를 따릅니다.</li>
+      <li>센터 내 서류·기기는 잠금장치가 있는 장소에 보관합니다.</li>
+    </ul>
+  </div>
+</details>
+
+<h2 id="c13"><span class="num">제13조</span>개인정보 자동 수집 장치의 설치·운영 및 거부</h2>
+<ol class="legal">
+  <li><b>회원 앱은 쿠키(cookie)를 사용하지 않으며, 광고 식별자(IDFA·AAID)를 수집하지 않고,
+      이용자를 추적하지 않습니다.</b> 앱 추적 권한(App Tracking Transparency)을 요청하지 않습니다.</li>
+  <li>센터 운영 도구(어드민 웹)는 <b>로그인 상태를 유지하기 위한 목적으로만</b> 브라우저의 저장소를 사용합니다.
+      이는 광고나 분석 목적이 아니며, 브라우저 설정에서 사이트 데이터를 삭제하면 제거됩니다(로그아웃됩니다).</li>
+  <li>서비스 이용 과정에서 접속 일시·IP 주소·요청 경로 등 <b>서버 접속 기록이 자동으로 생성</b>되며,
+      이는 서비스 안정성 확보와 부정 이용 방지 목적으로만 이용됩니다.</li>
+</ol>
+
+<h2 id="c14"><span class="num">제14조</span>센터가 수집하지 않는 정보</h2>
+<p>오해를 막기 위해, 이 서비스가 <b>수집하지 않는</b> 항목을 명시합니다.</p>
+<div class="tablewrap">
+<table>
+<thead><tr><th>수집하지 않는 것</th><th>확인</th></tr></thead>
+<tbody>
+<tr><td>위치정보(GPS)</td><td>앱이 위치 권한 자체를 요청하지 않습니다.</td></tr>
+<tr><td>주소록·연락처</td><td>권한을 요청하지 않습니다.</td></tr>
+<tr><td>마이크·음성</td><td>권한을 요청하지 않으며, 카메라는 <b>소리 녹음을 끈 상태</b>로만 사용합니다.</td></tr>
+<tr><td>광고 식별자, 이용자 추적</td><td>광고·분석 SDK가 없습니다.</td></tr>
+<tr><td>회원의 이메일·생년월일·성별·주소·주민등록번호</td><td>수집 항목에 없습니다.</td></tr>
+<tr><td>신용카드 번호 등 결제수단 정보</td><td>앱에서 결제하지 않습니다. 결제는 센터에서 직접 이루어집니다.</td></tr>
+<tr><td>기기 사진첩 전체에 대한 접근</td><td>사진 선택은 운영체제가 제공하는 <b>사진 선택 도구</b>를 사용하며, 선택한 사진 외에는 접근하지 않습니다.</td></tr>
+<tr><td>체성분 결과지 사진</td><td>기기 안에서 글자만 읽고 <b>즉시 삭제</b>합니다. 서버로 보내지 않습니다.</td></tr>
+<tr><td>푸시 알림 토큰</td><td>푸시 알림 기능이 없습니다.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="c15"><span class="num">제15조</span>개인정보 보호책임자 및 열람청구 접수·처리 부서</h2>
+<p>센터는 개인정보 처리에 관한 업무를 총괄해서 책임지고, 개인정보 처리와 관련한 정보주체의 불만 처리와
+피해 구제 등을 위하여 다음과 같이 개인정보 보호책임자를 지정하고 있습니다.</p>
+<div class="tablewrap">
+<table>
+<thead><tr><th></th><th>개인정보 보호책임자</th><th>열람청구 접수·처리 부서</th></tr></thead>
+<tbody>
+<tr><td>성명 / 부서</td><td><span class="ph" data-biz="privacy_officer_name">(보호책임자 성명 미정)</span></td><td><span class="ph" data-biz="privacy_dept">(접수 부서명 미정)</span></td></tr>
+<tr><td>직책</td><td><span class="ph" data-biz="privacy_officer_title">(보호책임자 직책 미정)</span></td><td><span class="ph" data-biz="privacy_manager">(담당자 성명 미정)</span></td></tr>
+<tr><td>전화</td><td><span class="ph" data-biz="phone">(대표 전화 미정)</span></td><td><span class="ph" data-biz="phone">(대표 전화 미정)</span></td></tr>
+<tr><td>이메일</td><td><span class="ph" data-biz="privacy_officer_email">(보호책임자 이메일 미정)</span></td><td><span class="ph" data-biz="privacy_officer_email">(보호책임자 이메일 미정)</span></td></tr>
+</tbody>
+</table>
+</div>
+<p>회원은 서비스를 이용하면서 발생한 모든 개인정보 보호 관련 문의, 불만처리, 피해구제 등에 관한 사항을
+개인정보 보호책임자에게 문의할 수 있습니다. 센터는 <b>지체 없이 답변하고 처리</b>합니다.</p>
+<div class="callout">
+  <span class="t">소상공인인 경우</span>
+  <p>센터가 「소상공인기본법」 제2조 제1항의 소상공인에 해당하여 별도의 개인정보 보호책임자를
+  지정하지 않는 경우, 「개인정보 보호법」 제31조 제2항에 따라 <b>사업주 또는 대표자가
+  개인정보 보호책임자가 됩니다.</b></p>
+</div>
+
+<h2 id="c16"><span class="num">제16조</span>권익침해 구제방법</h2>
+<p>개인정보 침해로 인한 구제를 받기 위하여 다음 기관에 분쟁해결이나 상담을 신청할 수 있습니다.
+아래 기관은 센터와 별개의 기관으로, 센터의 처리 결과에 만족하지 못하시거나 더 자세한 도움이 필요하시면
+직접 문의하시기 바랍니다.</p>
+<div class="tablewrap">
+<table>
+<thead><tr><th>기관</th><th>업무</th><th>연락처</th></tr></thead>
+<tbody>
+<tr><td>개인정보분쟁조정위원회</td><td>개인정보 분쟁조정 신청, 집단분쟁조정</td><td>(국번없이) 1833-6972<br><a href="https://www.kopico.go.kr">www.kopico.go.kr</a></td></tr>
+<tr><td>개인정보침해신고센터</td><td>개인정보 침해사실 신고, 상담</td><td>(국번없이) 118<br><a href="https://privacy.kisa.or.kr">privacy.kisa.or.kr</a></td></tr>
+<tr><td>대검찰청 사이버수사과</td><td>개인정보 침해 수사 의뢰</td><td>(국번없이) 1301<br><a href="https://www.spo.go.kr">www.spo.go.kr</a></td></tr>
+<tr><td>경찰청 사이버수사국</td><td>개인정보 침해 수사 의뢰</td><td>(국번없이) 182<br><a href="https://ecrm.police.go.kr">ecrm.police.go.kr</a></td></tr>
+<tr><td>한국소비자원</td><td>회원권 계약·환불 등 소비자 피해구제·분쟁조정</td><td>(국번없이) 1372<br><a href="https://www.kca.go.kr">www.kca.go.kr</a></td></tr>
+</tbody>
+</table>
+</div>
+<p>「개인정보 보호법」 제35조(열람), 제36조(정정·삭제), 제37조(처리정지)에 대한 센터의 처분 또는 부작위로
+권리나 이익을 침해받은 자는 <b>행정심판법</b>이 정하는 바에 따라 <b>행정심판</b>을 청구할 수 있습니다
+(중앙행정심판위원회 국번없이 110, <a href="https://www.simpan.go.kr">www.simpan.go.kr</a>).</p>
+
+<h2 id="c17"><span class="num">제17조</span>개인정보처리방침의 변경</h2>
+<ol class="legal">
+  <li>이 개인정보처리방침은 <span class="ph" data-biz="effective_date">(시행일 미정)</span>부터 적용됩니다.</li>
+  <li>법령·정책 또는 서비스의 변경에 따라 내용의 추가·삭제·수정이 있을 경우, 변경사항의 시행
+      <b>7일 전</b>부터 서비스 화면과 이 페이지를 통해 공지합니다. 다만 <b>정보주체의 권리에 중대한 변경</b>이
+      있는 경우에는 <b>30일 전</b>에 공지합니다.</li>
+  <li>방침을 변경할 때에는 <b>변경 전과 변경 후의 내용을 비교하여</b> 함께 공개하고, 이전 버전을
+      아래 개정 이력에 보존합니다.</li>
+  <li>이 방침의 내용이 회원과 체결한 계약의 내용과 다른 경우에는, 「개인정보 보호법」 제30조 제3항에 따라
+      <b>회원에게 유리한 것을 적용</b>합니다.</li>
+</ol>
+<details>
+  <summary>개정 이력</summary>
+  <div class="dbody">
+    <div class="tablewrap"><table>
+      <thead><tr><th>버전</th><th>시행일</th><th>주요 변경 내용</th></tr></thead>
+      <tbody>
+        <tr><td>v1.0</td><td><span class="ph" data-biz="effective_date">(시행일 미정)</span></td><td>최초 수립·공개</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</details>
+
+<footer class="doc">
+  <p><b><span class="ph" data-biz="biz_name">(사업자명 미정)</span></b> · 대표 <span class="ph" data-biz="ceo_name">(대표자명 미정)</span></p>
+  <p>사업자등록번호 <span class="ph" data-biz="biz_reg_no">(사업자등록번호 미정)</span> · 주소 <span class="ph" data-biz="address">(사업장 주소 미정)</span></p>
+  <p>개인정보 보호 문의 <span class="ph" data-biz="privacy_officer_email">(보호책임자 이메일 미정)</span> · <span class="ph" data-biz="phone">(대표 전화 미정)</span></p>
+  <p style="margin-top:14px">
+    <a href="./terms.html">이용약관</a> ·
+    <a href="./sensitive-consent.html">민감정보(건강정보) 수집·이용 동의</a> ·
+    <a href="./account-deletion.html">계정·데이터 삭제 요청</a>
+  </p>
+</footer>
+
+</div>
+<button class="totop" id="totop" type="button" aria-label="맨 위로">↑</button>
+<script>
+/* 사업자 정보 채우기 — GET /api/v1/public/business (계약 v2.13, 무인증 · 동일 오리진).
+ *
+ * 왜 서버에서 받아오나: 상호·대표자·등록번호·보호책임자는 문서가 아니라 **센터가 등록하는 값**이다.
+ * HTML 5장에 손으로 박아 두면 상호 한 번 바뀔 때 5장을 고쳐야 하고, 한 장을 빠뜨린 채로
+ * 법정 고지가 서로 다른 사업자를 가리키게 된다.
+ *
+ * 왜 상대 경로인가: firebase.json이 /api/** 를 Cloud Run으로 리라이트한다 — 이 문서와
+ * 같은 오리진이라 CORS 설정도, 외부 호스트도 필요 없다. 이 페이지가 하는 네트워크 요청은
+ * 이것 하나뿐이다(외부 폰트·CDN·분석 도구 없음).
+ *
+ * **중괄호는 애초에 파일에 없다.** 각 자리는 `(항목명 미정)`으로 미리 렌더돼 있고 이 스크립트는
+ * 그 위에 값을 덮어쓸 뿐이다 — 요청이 실패하든 JS가 꺼져 있든 원시 플레이스홀더가 보일 수
+ * 없는 구조다. 실패는 조용히 넘긴다(폴백이 이미 화면에 있다).
+ *
+ * 초안 배너는 **채울 게 하나도 남지 않았을 때만** 사라진다: 서버가 계산한 complete + 시행일
+ * 존재 + 화면에 남은 미기재 0개. 셋 다여야 한다 — 배너를 무조건 지우면 반쪽짜리 문서가
+ * "시행 중"인 척하게 되고, 그건 고지 누락이다.
+ */
+(function () {
+  var slots = document.querySelectorAll("[data-biz]");
+  if (!slots.length) return;
+
+  var ctl = typeof AbortController === "function" ? new AbortController() : null;
+  var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 6000);
+
+  fetch("/api/v1/public/business", ctl ? { signal: ctl.signal } : undefined)
+    .then(function (res) { return res.ok ? res.json() : null; })
+    .then(function (data) {
+      if (!data || typeof data !== "object") return;
+      var unfilled = 0;
+      for (var i = 0; i < slots.length; i++) {
+        var el = slots[i];
+        var v = data[el.getAttribute("data-biz")];
+        if (typeof v === "string" && v.trim() !== "") {
+          el.textContent = v.trim();
+          el.classList.remove("ph"); /* 채워진 자리는 일반 본문으로 — 경고 칩을 벗긴다 */
+        } else {
+          unfilled++;
+        }
+      }
+      var effective = typeof data.effective_date === "string" ? data.effective_date.trim() : "";
+      if (data.complete === true && effective !== "" && unfilled === 0) {
+        var notice = document.getElementById("draft-notice");
+        if (notice && notice.parentNode) notice.parentNode.removeChild(notice);
+      }
+    })
+    .catch(function () { /* 폴백이 이미 렌더돼 있다 — 배너도 그대로 둔다(fail-closed) */ })
+    .then(function () { clearTimeout(timer); });
+})();
+</script>
+<script>
+(function(){
+  var b=document.getElementById('totop');
+  addEventListener('scroll',function(){b.classList.toggle('on',scrollY>600)},{passive:true});
+  b.addEventListener('click',function(){scrollTo({top:0,behavior:'smooth'})});
+})();
+</script>
+</body>
+</html>

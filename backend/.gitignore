@@ -1,0 +1,15 @@
+# Go 백엔드.
+#
+# .env는 README가 안내하는 `.env.example` 복사본이고 운영 체크인 토큰이 들어간다 — 절대 커밋 금지.
+.env
+.env.*
+!.env.example
+
+# 빌드 산출물
+/server
+/bin/
+*.test
+
+# Firestore 에뮬레이터(-tags firestore_emulator 테스트)가 호출 디렉터리에 남기는 로그
+firestore-debug.log
+ui-debug.log

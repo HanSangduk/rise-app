@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="index,follow">
+<meta name="description" content="라이즈 컨디셔닝 민감정보(건강정보) 수집·이용 동의 — 체성분 기록·체형사진·건강 상태 메모">
+<title>민감정보 수집·이용 동의 — 라이즈 컨디셔닝</title>
+<style>
+:root{
+  --bg:#14181f; --bg-soft:#181d25; --panel:#1c222c; --panel-2:#222a36;
+  --line:#2b3441; --line-soft:#232b37;
+  --text:#d7dde6; --dim:#a6b2c2; --faint:#7d8a9c;
+  --accent:#7db3f0; --ok:#86c48f; --warn:#e0af68; --danger:#e2726e;
+  --measure:76ch;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,
+    "Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+  font-size:16px; line-height:1.78; word-break:keep-all; overflow-wrap:anywhere;
+  letter-spacing:-.003em;
+}
+.wrap{max-width:var(--measure); margin:0 auto; padding:0 20px 96px}
+header.doc{padding:56px 0 28px; border-bottom:1px solid var(--line)}
+.eyebrow{font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--warn); font-weight:700; margin:0 0 10px}
+h1{font-size:clamp(25px,4.4vw,33px); line-height:1.32; margin:0 0 14px; font-weight:800; letter-spacing:-.02em}
+.meta{margin:0; color:var(--dim); font-size:14.5px; line-height:1.7}
+.meta b{color:var(--text); font-weight:600}
+h2{font-size:20.5px; line-height:1.45; margin:52px 0 12px; font-weight:750; letter-spacing:-.012em; scroll-margin-top:20px}
+h2 .num{color:var(--accent); font-weight:700; margin-right:.4em; font-variant-numeric:tabular-nums}
+h3{font-size:16.5px; margin:28px 0 8px; font-weight:700; color:#e6ebf2}
+p{margin:0 0 14px}
+ul,ol{margin:0 0 14px; padding-left:1.35em}
+li{margin:0 0 7px}
+li::marker{color:var(--faint)}
+ol.legal{list-style:none; padding-left:0; counter-reset:cl}
+ol.legal>li{counter-increment:cl; position:relative; padding-left:2.1em; margin-bottom:11px}
+ol.legal>li::before{content:"(" counter(cl) ")"; position:absolute; left:0; top:0; color:var(--faint); font-variant-numeric:tabular-nums; font-size:14.5px}
+a{color:var(--accent); text-decoration:none; border-bottom:1px solid rgba(125,179,240,.35)}
+a:hover{border-bottom-color:var(--accent)}
+strong{color:#eaeff5; font-weight:700}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.9em; background:var(--panel-2); border:1px solid var(--line-soft); border-radius:5px; padding:.1em .38em; color:#c9d6e6}
+hr{border:0; border-top:1px solid var(--line); margin:44px 0}
+.callout{margin:20px 0; padding:15px 18px; border-radius:10px; background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--accent); font-size:15.3px; line-height:1.72}
+.callout>:last-child{margin-bottom:0}
+.callout .t{display:block; font-weight:750; margin-bottom:6px; color:var(--accent); font-size:14.5px; letter-spacing:.01em}
+.callout.warn{border-left-color:var(--warn)} .callout.warn .t{color:var(--warn)}
+.callout.danger{border-left-color:var(--danger)} .callout.danger .t{color:var(--danger)}
+.callout.ok{border-left-color:var(--ok)} .callout.ok .t{color:var(--ok)}
+.callout.big{padding:20px 22px; font-size:16px}
+.tablewrap{overflow-x:auto; margin:20px 0; border:1px solid var(--line); border-radius:10px; background:var(--panel)}
+table{border-collapse:collapse; width:100%; min-width:520px; font-size:14.8px; line-height:1.62}
+th,td{padding:11px 14px; text-align:left; vertical-align:top; border-bottom:1px solid var(--line-soft)}
+thead th{background:var(--panel-2); color:#e6ebf2; font-weight:700; font-size:13.8px; letter-spacing:.01em; white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+td.num{font-variant-numeric:tabular-nums; white-space:nowrap}
+details{margin:16px 0; border:1px solid var(--line); border-radius:10px; background:var(--panel); overflow:hidden}
+details>summary{cursor:pointer; padding:13px 16px; font-weight:700; font-size:15.2px; color:#e6ebf2; list-style:none; display:flex; align-items:center; gap:9px}
+details>summary::-webkit-details-marker{display:none}
+details>summary::before{content:"▸"; color:var(--accent); font-size:13px; transition:transform .16s ease; flex:none}
+details[open]>summary::before{transform:rotate(90deg)}
+details>summary:hover{background:var(--panel-2)}
+.dbody{padding:2px 16px 16px; border-top:1px solid var(--line-soft)}
+.dbody>:first-child{margin-top:12px}
+.dbody>:last-child{margin-bottom:0}
+nav.toc{margin:32px 0 8px; padding:18px 20px; background:var(--bg-soft); border:1px solid var(--line); border-radius:12px}
+nav.toc .th{font-size:13px; font-weight:750; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); margin:0 0 10px}
+nav.toc ol{list-style:none; margin:0; padding:0; columns:2; column-gap:26px}
+nav.toc li{margin:0 0 5px; break-inside:avoid; font-size:14.6px}
+nav.toc a{border-bottom:0; color:var(--dim)}
+nav.toc a:hover{color:var(--accent)}
+nav.toc a .n{color:var(--faint); font-variant-numeric:tabular-nums; margin-right:.35em}
+@media (max-width:560px){nav.toc ol{columns:1}}
+.docnav{display:flex; flex-wrap:wrap; gap:9px; margin:26px 0 0}
+.docnav a{border:1px solid var(--line); border-radius:999px; padding:7px 15px; font-size:14px; color:var(--dim); background:var(--panel); border-bottom:1px solid var(--line)}
+.docnav a:hover{border-color:var(--accent); color:var(--accent)}
+.docnav a[aria-current="page"]{border-color:var(--warn); color:var(--warn); background:var(--panel-2)}
+.ph{color:var(--warn); background:rgba(224,175,104,.1); border:1px dashed rgba(224,175,104,.45); border-radius:5px; padding:.05em .4em; font-size:.95em; font-weight:600; white-space:nowrap}
+/* 서면 동의란 */
+.signblock{margin:28px 0 0; padding:22px 24px; border:1px solid var(--line); border-radius:12px; background:var(--bg-soft)}
+.signblock h3{margin-top:0}
+.check{display:flex; gap:12px; align-items:flex-start; padding:13px 0; border-bottom:1px dashed var(--line)}
+.check:last-of-type{border-bottom:0}
+.box{flex:none; width:19px; height:19px; margin-top:5px; border:1.5px solid var(--faint); border-radius:4px}
+.check .lbl{font-size:15.2px; line-height:1.7}
+.check .lbl b{color:#eaeff5}
+.sigrow{display:flex; flex-wrap:wrap; gap:26px; margin-top:22px; padding-top:18px; border-top:1px solid var(--line); font-size:14.6px; color:var(--dim)}
+.sigrow div{flex:1 1 190px}
+.rule{display:block; margin-top:26px; border-bottom:1px solid var(--faint)}
+footer.doc{margin-top:60px; padding-top:26px; border-top:1px solid var(--line); color:var(--faint); font-size:14px}
+footer.doc p{margin:0 0 8px}
+.totop{position:fixed; right:18px; bottom:18px; width:42px; height:42px; border-radius:999px; display:none; place-items:center; background:var(--panel-2); border:1px solid var(--line); color:var(--dim); font-size:16px; cursor:pointer; z-index:9}
+.totop.on{display:grid}
+.totop:hover{color:var(--accent); border-color:var(--accent)}
+@media print{
+  :root{--bg:#fff;--panel:#fff;--panel-2:#fff;--bg-soft:#fff;--text:#111;--dim:#333;--faint:#555;--line:#bbb;--line-soft:#e2e2e2}
+  body{font-size:11pt} nav.toc,.totop,.docnav{display:none}
+  details{border:0} details>summary{padding-left:0} .dbody{padding-left:0}
+  details:not([open])>.dbody{display:block}
+  .signblock{break-inside:avoid; page-break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <p class="eyebrow">라이즈 컨디셔닝 · 별도 동의</p>
+  <h1>민감정보(건강정보)<br>수집·이용 동의</h1>
+  <p class="meta">
+    <b>시행일</b> <span class="ph" data-biz="effective_date">(시행일 미정)</span> · <b>버전</b> v1.0<br>
+    <b>근거</b> 「개인정보 보호법」 제23조 제1항 제1호 · 제15조 제2항
+  </p>
+  <div class="docnav">
+    <a href="./terms.html">이용약관</a>
+    <a href="./privacy.html">개인정보처리방침</a>
+    <a href="./sensitive-consent.html" aria-current="page">민감정보 동의</a>
+    <a href="./account-deletion.html">계정 삭제</a>
+  </div>
+</header>
+
+<div class="callout danger" id="draft-notice">
+  <span class="t">아직 시행 전 초안입니다</span>
+  <p>본문에 <b>(항목명 미정)</b>으로 표시된 자리가 남아 있습니다 — 사업자 정보와 개인정보
+  보호책임자가 아직 등록되지 않아 채우지 못한 항목이에요. 어드민 <b>설정 → 사업자 정보</b>에서
+  12개 항목을 모두 등록하고 약관 시행일을 지정하면 이 안내는 자동으로 사라집니다.
+  <b>그 전까지 이 문서는 효력이 없고, 앱 스토어 제출·회원 고지에 그대로 쓰면 안 됩니다.</b>
+  지금은 내용 검토용으로만 봐주세요.</p>
+</div>
+
+
+<div class="callout warn big">
+  <span class="t">이 동의는 왜 따로 받나요?</span>
+  <p>체성분 수치, 체형사진, 부상·통증 메모는 <b>“건강에 관한 정보”</b>로서 「개인정보 보호법」 제23조의
+  <b>민감정보</b>에 해당합니다. 법은 민감정보를 처리하려면 <b>다른 개인정보의 처리에 대한 동의와
+  분리하여 별도로 동의</b>를 받도록 정하고 있습니다.</p>
+  <p style="margin-bottom:0">그래서 이 동의는 이용약관·개인정보처리방침 동의와 <b>따로</b> 받으며,
+  <b>동의하지 않아도 라이즈 컨디셔닝의 회원권·예약·수업·결제는 그대로 이용하실 수 있습니다.</b></p>
+</div>
+
+<nav class="toc" aria-label="목차">
+  <p class="th">목차</p>
+  <ol>
+    <li><a href="#s1"><span class="n">1</span>수집·이용 목적</a></li>
+    <li><a href="#s2"><span class="n">2</span>수집·이용 항목</a></li>
+    <li><a href="#s3"><span class="n">3</span>보유 및 이용 기간</a></li>
+    <li><a href="#s4"><span class="n">4</span>동의 거부 권리와 불이익</a></li>
+    <li><a href="#s5"><span class="n">5</span>누가 볼 수 있나</a></li>
+    <li><a href="#s6"><span class="n">6</span>동의 철회 방법과 효과</a></li>
+    <li><a href="#s7"><span class="n">7</span>삭제 요청 방법</a></li>
+    <li><a href="#s8"><span class="n">8</span>안전조치</a></li>
+    <li><a href="#s9"><span class="n">9</span>하지 않는 것</a></li>
+    <li><a href="#s10"><span class="n">10</span>촬영 전 확인사항</a></li>
+    <li><a href="#s11"><span class="n">11</span>만 14세 미만 아동</a></li>
+    <li><a href="#s12"><span class="n">12</span>문의처</a></li>
+    <li><a href="#sign"><span class="n">✓</span>동의 확인란</a></li>
+  </ol>
+</nav>
+
+<h2 id="s1"><span class="num">1</span>수집·이용 목적</h2>
+<p><span class="ph" data-biz="biz_name">(사업자명 미정)</span>(이하 “센터”)은 다음 목적으로만 민감정보를 수집·이용합니다.</p>
+<div class="tablewrap">
+<table>
+<thead><tr><th>목적</th><th>구체적으로 하는 일</th></tr></thead>
+<tbody>
+<tr><td>회원의 체성분 변화 기록과 비교</td><td>측정 시점별 수치를 저장하고, 직전 측정 대비 증감과 추이선을 회원과 담당 코치에게 보여 줍니다.</td></tr>
+<tr><td>체형 변화의 시각적 기록과 비교</td><td>같은 포즈·같은 방향으로 촬영한 사진을 시점별로 나란히 보여 주어 변화를 확인합니다.</td></tr>
+<tr><td>운동 프로그램의 구성과 조정</td><td>체성분·체형의 변화를 근거로 담당 코치가 운동 종목·강도·과제를 조정합니다.</td></tr>
+<tr><td>부상·통증을 고려한 안전한 지도</td><td>부상 부위가 있는 회원에게 위험한 동작이 배정되지 않도록 자동으로 제외하고, 코치가 대체 동작을 안내합니다.</td></tr>
+<tr><td>상담과 목표 설정</td><td>회원과 코치가 같은 기록을 보며 목표와 진행 상황을 상담합니다.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="s2"><span class="num">2</span>수집·이용 항목</h2>
+<p>센터가 수집하는 민감정보는 <b>다음 세 가지가 전부</b>입니다. 이 목록에 없는 건강 정보(예: 병력, 복용 약,
+유전정보, 진료기록)는 수집하지 않습니다.</p>
+
+<h3>① 체성분(InBody) 측정 기록</h3>
+<div class="tablewrap">
+<table>
+<thead><tr><th>항목</th><th>단위</th><th>수집 방법</th></tr></thead>
+<tbody>
+<tr><td>측정일</td><td>날짜</td><td rowspan="7">회원이 체성분 분석기 결과지를 보고 <b>앱에 직접 입력</b>하거나(결과지 사진으로 자동 입력 보조 가능), 센터가 데스크에서 입력합니다.</td></tr>
+<tr><td>체중</td><td class="num">kg</td></tr>
+<tr><td>골격근량(SMM)</td><td class="num">kg</td></tr>
+<tr><td>체지방량(BFM)</td><td class="num">kg</td></tr>
+<tr><td>체지방률(PBF)</td><td class="num">%</td></tr>
+<tr><td>내장지방레벨(VFL)</td><td class="num">레벨</td></tr>
+<tr><td>기초대사량(BMR)</td><td class="num">kcal</td></tr>
+</tbody>
+</table>
+</div>
+<div class="callout ok">
+  <span class="t">결과지 사진은 저장하지 않습니다</span>
+  <p>결과지에는 이름·나이·성별·신장이 수치와 함께 인쇄되어 있습니다. 그래서 앱은 결과지 사진에서
+  <b>기기 안에서만</b> 글자를 읽어 위 7개 칸을 채운 뒤 <b>사진 사본을 즉시 삭제</b>합니다.
+  <b>결과지 사진은 서버로 전송되지도, 저장되지도 않습니다.</b> 저장되는 것은 회원이 확인하고 저장 버튼을
+  누른 <b>숫자 7개</b>뿐입니다.</p>
+</div>
+
+<h3>② 체형 분석 사진</h3>
+<div class="tablewrap">
+<table>
+<thead><tr><th>항목</th><th>내용</th></tr></thead>
+<tbody>
+<tr><td>이미지 파일</td><td>회원이 앱 카메라로 직접 촬영한 전신 사진(JPEG)</td></tr>
+<tr><td>촬영일</td><td>촬영한 날짜</td></tr>
+<tr><td>포즈</td><td>차렷 · T자 · 전굴 · OH스쿼트 등 센터가 정한 자세(회원별로 다르게 설정될 수 있습니다)</td></tr>
+<tr><td>촬영 방향</td><td>정면 · 측면 · 후면</td></tr>
+<tr><td>촬영 정보(EXIF)</td><td>이미지 파일에 함께 담기는 촬영 시각·기기 모델·이미지 방향. 별도로 제거하지 않습니다.<br><b>앱은 위치 권한을 요청하지 않으므로 위치(GPS) 정보는 기록되지 않습니다.</b></td></tr>
+</tbody>
+</table>
+</div>
+<p><b>사진은 회원 본인만 촬영·업로드할 수 있습니다.</b> 스태프가 회원을 대신하여 사진을 올리는 것은
+시스템에서 차단됩니다.</p>
+
+<h3>③ 건강 상태 메모</h3>
+<p>부상·통증 등 트레이닝에 영향을 주는 신체 상태에 관한 메모입니다(예: “어깨 회전근개 — 오버헤드 동작 주의”).
+회원이 상담에서 알린 내용을 <b>센터가 대신 입력</b>하며, 회원도 앱에서 확인할 수 있습니다.
+이 메모가 등록되어 있으면 <b>위험할 수 있는 과제가 자동으로 제외</b>됩니다.</p>
+
+<h2 id="s3"><span class="num">3</span>보유 및 이용 기간</h2>
+<div class="tablewrap">
+<table>
+<thead><tr><th>구분</th><th>기간</th></tr></thead>
+<tbody>
+<tr><td>원칙</td><td><b>회원이 동의를 철회하거나, 삭제를 요청하거나, 탈퇴할 때까지</b></td></tr>
+<tr><td>철회·삭제 요청 시</td><td>본인 확인 후 <b>지체 없이(정당한 사유가 없는 한 10일 이내)</b> 파기</td></tr>
+<tr><td>탈퇴 시</td><td>계정 파기와 함께 <b>지체 없이</b> 파기</td></tr>
+<tr><td>백업본</td><td>복구용 백업에 <b>최대 7일</b> 잔존한 뒤 자동 소멸(복구 목적 외 이용하지 않음)</td></tr>
+</tbody>
+</table>
+</div>
+<div class="callout ok">
+  <span class="t">법정 보존 대상이 아닙니다</span>
+  <p>거래 기록(계약·결제)은 법령에 따라 5년간 보존해야 하지만, <b>민감정보는 그 대상이 아닙니다.</b>
+  회원이 삭제를 요청하면 <b>보존 의무를 이유로 남겨 두지 않고 파기</b>합니다.</p>
+</div>
+
+<h2 id="s4"><span class="num">4</span>동의를 거부할 권리와 거부 시 불이익</h2>
+<div class="callout danger big">
+  <span class="t">동의는 자유이며, 거부하셔도 됩니다</span>
+  <p>회원은 이 동의를 <b>거부할 권리가 있습니다.</b> 동의를 거부하시더라도 센터는 어떠한 불이익도 주지 않으며,
+  회원권 가격·수업의 질·예약 우선순위·코치 배정에 <b>일절 영향을 주지 않습니다.</b></p>
+  <p style="margin-bottom:0">다만, 동의하지 않으시면 <b>그 정보 자체가 없기 때문에</b> 아래 기능만 이용하실 수 없습니다.</p>
+</div>
+<div class="tablewrap">
+<table>
+<thead><tr><th></th><th>동의한 경우</th><th>동의하지 않은 경우</th></tr></thead>
+<tbody>
+<tr><td>회원권 구매·이용</td><td>○</td><td><b>○ 동일</b></td></tr>
+<tr><td>수업 예약·취소·체크인</td><td>○</td><td><b>○ 동일</b></td></tr>
+<tr><td>수업 기록·홈워크 확인</td><td>○</td><td><b>○ 동일</b></td></tr>
+<tr><td>회원권 일시정지·전자계약 서명</td><td>○</td><td><b>○ 동일</b></td></tr>
+<tr><td>체성분 기록 저장·추이 확인</td><td>○</td><td><b>✕ 이용 불가</b></td></tr>
+<tr><td>체형 분석 촬영·비교</td><td>○</td><td><b>✕ 이용 불가</b></td></tr>
+<tr><td>부상 부위를 고려한 과제 자동 제외</td><td>○</td><td><b>✕ 코치에게 직접 말씀해 주셔야 합니다</b></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="s5"><span class="num">5</span>누가 볼 수 있나</h2>
+<div class="tablewrap">
+<table>
+<thead><tr><th>기록</th><th>회원 본인</th><th>담당 코치</th><th>센터 대표</th><th>담당 아닌 코치</th><th>다른 회원</th><th>외부</th></tr></thead>
+<tbody>
+<tr><td>체성분 기록</td><td>○</td><td>○</td><td>○</td><td>✕</td><td>✕</td><td>✕</td></tr>
+<tr><td>건강 상태 메모</td><td>○</td><td>○</td><td>○</td><td>✕</td><td>✕</td><td>✕</td></tr>
+<tr><td><b>체형사진</b></td><td>○</td><td>△</td><td>△</td><td>✕</td><td>✕</td><td>✕</td></tr>
+</tbody>
+</table>
+</div>
+<p style="font-size:14.6px;color:var(--dim)">
+△ = <b>동의가 유효한 동안에만</b> 열람할 수 있습니다. 동의를 철회하면 그 즉시 차단됩니다.</p>
+<ol class="legal">
+  <li>이 범위는 안내 문구가 아니라 <b>서버와 저장소의 보안 규칙으로 강제</b>됩니다. 권한이 없는 요청은
+      기술적으로 거부됩니다.</li>
+  <li>체형사진에는 <b>영구 공개 링크가 만들어지지 않습니다.</b> 사진을 볼 때마다 로그인 여부·본인 여부·
+      담당 관계·동의 유효 여부를 다시 확인한 뒤에만 전달됩니다. <b>URL을 알아도 열리지 않습니다.</b></li>
+  <li>센터의 서비스에는 민감정보를 <b>다른 회원에게 보여 주는 기능이 없습니다.</b> 게시판·순위표·프로필 등
+      공개되는 자리에 노출되는 경로가 존재하지 않습니다.</li>
+</ol>
+
+<h2 id="s6"><span class="num">6</span>동의 철회 방법과 효과</h2>
+<p>회원은 <b>언제든지, 이유를 밝히지 않고</b> 이 동의를 철회할 수 있습니다.</p>
+<h3>철회 방법</h3>
+<ul>
+  <li><b>앱</b> — 마이 → <b>동의 관리</b> → “민감정보(인바디·체형사진) 동의” 스위치를 끄고 저장</li>
+  <li><b>센터 데스크</b> 또는 <a href="#s12">아래 연락처</a>로 요청</li>
+</ul>
+<h3>철회하면 일어나는 일</h3>
+<div class="tablewrap">
+<table>
+<thead><tr><th>즉시 일어나는 일</th><th>일어나지 않는 일</th></tr></thead>
+<tbody>
+<tr>
+  <td>
+    <ul style="margin:0;padding-left:1.2em">
+      <li>체성분·체형사진의 <b>신규 저장이 차단</b>됩니다.</li>
+      <li>담당 코치와 센터 대표의 <b>체형사진 열람이 차단</b>됩니다.</li>
+      <li>센터는 철회 시점 이후 <b>건강 상태 메모를 추가로 기록하지 않습니다.</b></li>
+      <li>철회한 <b>시각이 기록</b>됩니다(동의 이력 관리 목적).</li>
+    </ul>
+  </td>
+  <td>
+    <ul style="margin:0;padding-left:1.2em">
+      <li><b>이미 저장된 기록이 자동으로 지워지지는 않습니다.</b> 회원 본인은 계속 열람할 수 있습니다.</li>
+      <li>회원권·예약·수업 등 다른 기능은 <b>영향을 받지 않습니다.</b></li>
+    </ul>
+  </td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="callout warn">
+  <span class="t">기록까지 지우고 싶다면</span>
+  <p>철회는 “앞으로 더 모으지 않는다”는 뜻이고, <b>이미 있는 기록의 삭제는 별도 요청</b>이 필요합니다.
+  아래 <a href="#s7">제7항</a>의 방법으로 요청하시면 파기해 드립니다. 다시 동의하시면 그 즉시 기능이
+  다시 열립니다.</p>
+</div>
+
+<h2 id="s7"><span class="num">7</span>기록의 삭제 요청 방법</h2>
+<div class="tablewrap">
+<table>
+<thead><tr><th>기록</th><th>삭제 방법</th></tr></thead>
+<tbody>
+<tr><td><b>체성분 기록</b> — 회원이 앱에서 직접 입력한 것</td><td><b>앱에서 바로 삭제</b>(기록 → 인바디 → 해당 기록 삭제)</td></tr>
+<tr><td><b>체성분 기록</b> — 센터가 입력한 것</td><td>담당 코치 또는 <a href="#s12">아래 연락처</a>로 요청</td></tr>
+<tr><td><b>체형사진</b></td><td><b>앱에서 바로 삭제</b>(기록 → 체형 → 사진을 눌러 크게 본 뒤 삭제)<br><span style="color:var(--dim)">회원이 삭제하면 즉시 완전 파기되며 되돌릴 수 없습니다</span></td></tr>
+<tr><td><b>건강 상태 메모</b></td><td>담당 코치 또는 <a href="#s12">아래 연락처</a>로 요청</td></tr>
+<tr><td><b>전부 삭제(탈퇴)</b></td><td><a href="./privacy.html#c11">개인정보처리방침 제11조</a>의 계정 삭제 요청 절차</td></tr>
+</tbody>
+</table>
+</div>
+<p>센터는 요청을 받으면 본인 확인 후 <b>지체 없이(정당한 사유가 없는 한 10일 이내)</b> 파기하고,
+결과를 요청하신 연락처로 회신합니다.</p>
+
+<h2 id="s8"><span class="num">8</span>안전조치</h2>
+<p>센터는 「개인정보 보호법」 제23조 제2항·제29조에 따라 민감정보에 대해 다음 조치를 취합니다.</p>
+<details open>
+  <summary>민감정보에 특별히 적용되는 조치</summary>
+  <div class="dbody">
+    <ul>
+      <li><b>동의가 없으면 저장 자체가 거부됩니다.</b> 앱 화면의 안내가 아니라 <b>서버와 저장소 양쪽</b>에서
+          동의 상태를 확인하며, 동의가 없거나 철회된 상태의 업로드·저장 요청은 거부됩니다.</li>
+      <li><b>체형사진은 회원 본인 계정으로만 올릴 수 있습니다.</b> 저장 경로에 회원 식별자가 포함되고,
+          로그인한 계정과 일치하지 않으면 업로드가 거부됩니다.</li>
+      <li><b>영구 공개 링크를 만들지 않습니다.</b> 사진 조회는 매번 권한을 다시 확인하는 경로로만 이루어집니다.</li>
+      <li><b>업로드 크기와 형식을 제한</b>합니다(이미지 형식, 10MB 미만).</li>
+      <li><b>사진을 기기에 남기지 않습니다.</b> 촬영 임시 파일은 업로드 직후 삭제되고, 조회한 사진은
+          앱 메모리에만 두어 앱을 종료하면 사라집니다. 기기 앨범에 저장하지 않습니다.</li>
+    </ul>
+  </div>
+</details>
+<details>
+  <summary>공통 조치</summary>
+  <div class="dbody">
+    <ul>
+      <li>전송 구간 전체 <b>TLS(HTTPS) 암호화</b>, 저장 데이터 암호화</li>
+      <li>클라이언트(앱·어드민)의 데이터베이스 <b>직접 접근 전면 차단</b> — 반드시 인증된 서버를 거칩니다.</li>
+      <li>개인정보취급자 최소화, 접근 권한의 부여·변경·말소 기록 관리</li>
+      <li>접속기록 보관과 위·변조 방지</li>
+      <li>데이터 삭제 방지·시점 복구·자동 백업</li>
+    </ul>
+  </div>
+</details>
+
+<h2 id="s9"><span class="num">9</span>센터가 하지 않는 것</h2>
+<div class="callout ok big">
+  <ul style="margin:0">
+    <li><b>제3자 제공·판매를 하지 않습니다.</b> 보험사·고용주·광고회사·데이터 브로커 등 어떤 곳에도 넘기지 않습니다.</li>
+    <li><b>광고·마케팅에 사용하지 않습니다.</b> 프로파일링, 이용 기반 데이터 마이닝에 쓰지 않습니다.</li>
+    <li><b>인공지능 학습에 사용하지 않습니다.</b> 외부 인공지능 서비스에 전송하지 않습니다.</li>
+    <li><b>홍보·전시에 사용하지 않습니다.</b> 비포·애프터 사진을 센터 홍보물이나 SNS에 쓰려면
+        그때마다 <b>별도로 다시 동의</b>를 받습니다. 이 동의서는 그 근거가 되지 않습니다.</li>
+    <li><b>국외로 이전하지 않습니다.</b> 체성분·체형사진·건강 메모는 <b>대한민국(서울) 리전</b>에만 보관됩니다.</li>
+    <li><b>다른 회원에게 공개하지 않습니다.</b> 공개되는 자리에 노출되는 기능 자체가 없습니다.</li>
+  </ul>
+</div>
+
+<h2 id="s10"><span class="num">10</span>촬영 전 확인해 주세요</h2>
+<div class="callout warn">
+  <span class="t">배경에 다른 사람이 찍히지 않도록</span>
+  <p>앱은 배경에 다른 사람이 함께 찍히는 것을 <b>자동으로 흐리게 처리하지 않습니다.</b>
+  촬영 전에 주위를 확인해 주세요. 다른 사람이 찍힌 사진을 올리면 <b>그 사람의 개인정보를 동의 없이
+  처리</b>하는 것이 될 수 있습니다.</p>
+</div>
+<ul>
+  <li>탈의 정도는 회원이 스스로 정하시면 됩니다. 센터는 특정 복장을 요구하지 않습니다.</li>
+  <li>촬영은 <b>회원이 원할 때만</b> 하시면 되고, 촬영하지 않아도 수업에 영향이 없습니다.</li>
+  <li>같은 옷·같은 위치·같은 조명에서 찍으면 비교가 정확해집니다(앱이 이전 사진을 반투명으로 겹쳐 보여 줍니다).</li>
+</ul>
+
+<h2 id="s11"><span class="num">11</span>만 14세 미만 아동</h2>
+<p>만 14세 미만 아동의 민감정보는 <b>법정대리인의 동의</b> 없이는 수집·이용하지 않습니다
+(「개인정보 보호법」 제22조의2). 법정대리인이 동의하는 경우, 센터는 법정대리인의 성명과 연락처를
+확인한 뒤에만 처리하며 아동이 이해할 수 있는 언어로 고지합니다.</p>
+
+<h2 id="s12"><span class="num">12</span>문의처</h2>
+<div class="tablewrap">
+<table>
+<thead><tr><th></th><th>연락처</th></tr></thead>
+<tbody>
+<tr><td>개인정보 보호책임자</td><td><span class="ph" data-biz="privacy_officer_name">(보호책임자 성명 미정)</span> · <span class="ph" data-biz="privacy_officer_title">(보호책임자 직책 미정)</span></td></tr>
+<tr><td>이메일</td><td><span class="ph" data-biz="privacy_officer_email">(보호책임자 이메일 미정)</span></td></tr>
+<tr><td>전화</td><td><span class="ph" data-biz="phone">(대표 전화 미정)</span></td></tr>
+<tr><td>주소</td><td><span class="ph" data-biz="address">(사업장 주소 미정)</span></td></tr>
+</tbody>
+</table>
+</div>
+<p>동의·철회·열람·삭제에 관한 모든 문의를 받습니다. 처리 결과에 만족하지 못하시면
+<a href="./privacy.html#c16">개인정보처리방침 제16조</a>의 분쟁조정·신고 기관에 도움을 요청하실 수 있습니다.</p>
+
+<hr>
+
+<div class="signblock" id="sign">
+  <h3>동의 확인란</h3>
+  <p style="color:var(--dim);font-size:14.8px">
+    앱에서는 <b>마이 → 동의 관리</b>의 스위치가 이 확인란을 대신합니다.
+    아래는 센터 데스크에서 서면으로 동의를 받을 때 사용하는 양식입니다.</p>
+
+  <div class="check">
+    <span class="box" aria-hidden="true"></span>
+    <span class="lbl">
+      본인은 위 <b>제1항~제3항</b>의 <b>수집·이용 목적, 수집 항목, 보유 및 이용 기간</b>을 확인하였고,
+      <b>제4항</b>에 따라 <b>동의를 거부할 권리가 있으며 거부하더라도 회원권·예약·수업 이용에
+      불이익이 없음</b>을 안내받았습니다.
+    </span>
+  </div>
+
+  <div class="check">
+    <span class="box" aria-hidden="true"></span>
+    <span class="lbl">
+      <b>① 체성분(InBody) 측정 기록</b>의 수집·이용에 동의합니다.
+      <span style="color:var(--dim)">(측정일, 체중, 골격근량, 체지방량, 체지방률, 내장지방레벨, 기초대사량)</span>
+    </span>
+  </div>
+
+  <div class="check">
+    <span class="box" aria-hidden="true"></span>
+    <span class="lbl">
+      <b>② 체형 분석 사진</b>의 수집·이용에 동의합니다.
+      <span style="color:var(--dim)">(이미지 파일, 촬영일, 포즈, 촬영 방향)</span>
+    </span>
+  </div>
+
+  <div class="check">
+    <span class="box" aria-hidden="true"></span>
+    <span class="lbl">
+      <b>③ 부상·통증 등 건강 상태 메모</b>의 수집·이용에 동의합니다.
+    </span>
+  </div>
+
+  <div class="sigrow">
+    <div>동의 일자<span class="rule"></span></div>
+    <div>회원 성명<span class="rule"></span></div>
+    <div>서명 또는 인<span class="rule"></span></div>
+  </div>
+  <div class="sigrow" style="border-top:0;padding-top:6px">
+    <div style="flex:1 1 100%">
+      <span style="font-size:13.8px">만 14세 미만인 경우 — 법정대리인 성명·관계·연락처·서명</span>
+      <span class="rule" style="margin-top:22px"></span>
+    </div>
+  </div>
+</div>
+
+<footer class="doc">
+  <p><b><span class="ph" data-biz="biz_name">(사업자명 미정)</span></b> · 대표 <span class="ph" data-biz="ceo_name">(대표자명 미정)</span></p>
+  <p>사업자등록번호 <span class="ph" data-biz="biz_reg_no">(사업자등록번호 미정)</span> · 주소 <span class="ph" data-biz="address">(사업장 주소 미정)</span></p>
+  <p>개인정보 보호 문의 <span class="ph" data-biz="privacy_officer_email">(보호책임자 이메일 미정)</span> · <span class="ph" data-biz="phone">(대표 전화 미정)</span></p>
+  <p style="margin-top:14px">
+    <a href="./terms.html">이용약관</a> ·
+    <a href="./privacy.html">개인정보처리방침</a> ·
+    <a href="./account-deletion.html">계정·데이터 삭제 요청</a>
+  </p>
+</footer>
+
+</div>
+<button class="totop" id="totop" type="button" aria-label="맨 위로">↑</button>
+<script>
+/* 사업자 정보 채우기 — GET /api/v1/public/business (계약 v2.13, 무인증 · 동일 오리진).
+ *
+ * 왜 서버에서 받아오나: 상호·대표자·등록번호·보호책임자는 문서가 아니라 **센터가 등록하는 값**이다.
+ * HTML 5장에 손으로 박아 두면 상호 한 번 바뀔 때 5장을 고쳐야 하고, 한 장을 빠뜨린 채로
+ * 법정 고지가 서로 다른 사업자를 가리키게 된다.
+ *
+ * 왜 상대 경로인가: firebase.json이 /api/** 를 Cloud Run으로 리라이트한다 — 이 문서와
+ * 같은 오리진이라 CORS 설정도, 외부 호스트도 필요 없다. 이 페이지가 하는 네트워크 요청은
+ * 이것 하나뿐이다(외부 폰트·CDN·분석 도구 없음).
+ *
+ * **중괄호는 애초에 파일에 없다.** 각 자리는 `(항목명 미정)`으로 미리 렌더돼 있고 이 스크립트는
+ * 그 위에 값을 덮어쓸 뿐이다 — 요청이 실패하든 JS가 꺼져 있든 원시 플레이스홀더가 보일 수
+ * 없는 구조다. 실패는 조용히 넘긴다(폴백이 이미 화면에 있다).
+ *
+ * 초안 배너는 **채울 게 하나도 남지 않았을 때만** 사라진다: 서버가 계산한 complete + 시행일
+ * 존재 + 화면에 남은 미기재 0개. 셋 다여야 한다 — 배너를 무조건 지우면 반쪽짜리 문서가
+ * "시행 중"인 척하게 되고, 그건 고지 누락이다.
+ */
+(function () {
+  var slots = document.querySelectorAll("[data-biz]");
+  if (!slots.length) return;
+
+  var ctl = typeof AbortController === "function" ? new AbortController() : null;
+  var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 6000);
+
+  fetch("/api/v1/public/business", ctl ? { signal: ctl.signal } : undefined)
+    .then(function (res) { return res.ok ? res.json() : null; })
+    .then(function (data) {
+      if (!data || typeof data !== "object") return;
+      var unfilled = 0;
+      for (var i = 0; i < slots.length; i++) {
+        var el = slots[i];
+        var v = data[el.getAttribute("data-biz")];
+        if (typeof v === "string" && v.trim() !== "") {
+          el.textContent = v.trim();
+          el.classList.remove("ph"); /* 채워진 자리는 일반 본문으로 — 경고 칩을 벗긴다 */
+        } else {
+          unfilled++;
+        }
+      }
+      var effective = typeof data.effective_date === "string" ? data.effective_date.trim() : "";
+      if (data.complete === true && effective !== "" && unfilled === 0) {
+        var notice = document.getElementById("draft-notice");
+        if (notice && notice.parentNode) notice.parentNode.removeChild(notice);
+      }
+    })
+    .catch(function () { /* 폴백이 이미 렌더돼 있다 — 배너도 그대로 둔다(fail-closed) */ })
+    .then(function () { clearTimeout(timer); });
+})();
+</script>
+<script>
+(function(){
+  var b=document.getElementById('totop');
+  addEventListener('scroll',function(){b.classList.toggle('on',scrollY>600)},{passive:true});
+  b.addEventListener('click',function(){scrollTo({top:0,behavior:'smooth'})});
+})();
+</script>
+</body>
+</html>

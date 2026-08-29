@@ -1,0 +1,84 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- 백엔드 API + Firebase Auth — 모든 빌드 타입에서 네트워크 필요
+         (템플릿은 debug/profile 매니페스트에만 INTERNET을 넣는다). -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- 카메라(P11): 셀프 체크인 QR 스캔 + 체형 촬영.
+         camera_android_camerax·mobile_scanner의 매니페스트에도 있어 병합되지만,
+         "이 앱이 왜 카메라를 쓰는가"가 플러그인 목록이 아니라 여기에 적혀 있어야
+         나중에 권한을 감사할 수 있다. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+
+    <!-- camera_android_camerax가 동영상 녹화용으로 RECORD_AUDIO를 병합해 넣는다.
+         이 앱은 사진만 찍고(CameraController(enableAudio: false)) 마이크를 쓰지
+         않는다 — 남겨 두면 스토어 권한 목록에 "오디오 녹음"이 뜨고, 체형 사진을
+         찍는 앱이 마이크를 요구하는 모양이 된다. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>
+
+    <!-- camerax는 카메라를 required=true로 병합한다 — 카메라 없는 기기에서 스토어
+         설치가 막힌다. QR·체형촬영을 못 쓸 뿐 예약·회원권은 정상 동작하므로
+         선택 기능으로 낮춘다(mobile_scanner도 required="false"로 선언한다). -->
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature
+        android:name="android.hardware.camera.any"
+        android:required="false"
+        tools:replace="android:required"/>
+
+    <!-- 런처 라벨(P19): 길면 잘리므로 "라이즈 컨디셔닝"이 아니라 "라이즈". -->
+    <!--
+        **백업을 끈다.** 선언이 없으면 기본값이 true라 앱의 SharedPreferences가
+        구글 자동 백업으로 **기기 밖으로 나간다.** 지금 거기 담기는 값이
+        `auth.join_request`(E.164 전화번호)와 세션 캐시(회원 식별자)다 —
+        민감정보를 다루는 앱이 계정 백업으로 그걸 흘릴 이유가 없다.
+
+        잃는 것: 기기 교체 시 이 값들이 따라가지 않는다. 그런데 로그인은 Firebase
+        Auth가 자기 저장소로 복구하고, 세션 캐시는 캐시라 없으면 네트워크로
+        복원한다 — 회원이 잃는 건 없다.
+    -->
+    <application
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:label="라이즈"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <!-- Specifies an Android theme to apply to this Activity as soon as
+                 the Android process has started. This theme is visible to the user
+                 while the Flutter UI initializes. After that, this theme continues
+                 to determine the Window background behind the Flutter UI. -->
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <!-- Don't delete the meta-data below.
+             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+    </queries>
+</manifest>

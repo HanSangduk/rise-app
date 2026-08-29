@@ -1,0 +1,91 @@
+rules_version = '2';
+
+// 라이즈 컨디셔닝 — Cloud Storage 보안 규칙 (P11).
+//
+// 이 파일이 소스 오브 트루스다 — 콘솔에서 고치지 말 것(배포가 덮어쓴다).
+//
+// 배경: 버킷은 P09에 만들었고, 트레이너 사진 하나를 앱에 띄우려고 **버킷 전체에 익명 공개
+// 읽기**를 걸어뒀었다. 체형사진(계약 P8 민감정보)이 같은 버킷에 올라오는 순간 URL만 알면
+// 남의 사진이 열리는 상태가 되므로, P11에서 공개 IAM을 걷어내고 이 규칙으로 대체했다.
+//
+// 신원 매핑: Storage 규칙은 `request.auth.uid`만 안다. 우리 도메인의 회원 식별자(member_id)와
+// 역할은 Firestore `users/{uid}`(UserIndex)에 있으므로 firestore.get으로 건너가 확인한다.
+// 접근마다 Firestore 읽기가 1~2회 붙지만, 단일 센터 규모에선 정확성이 우선이다.
+//
+// ⚠⚠ 교차 서비스 규칙의 두 가지 함정 — 둘 다 증상이 "원인 표시 없는 403"이다.
+//
+// 1) **IAM 권한이 따로 필요하다.** firestore.get을 쓰려면 Cloud Storage 서비스 에이전트
+//    (service-{PROJECT_NUMBER}@gcp-sa-firebasestorage.iam.gserviceaccount.com)에
+//    `roles/firebaserules.firestoreServiceAgent`가 있어야 한다.
+//    Firebase 콘솔이나 CLI로 배포하면 그때 권한 부여를 **물어보는데**, 우리는 ADC가 다른 계정에
+//    묶여 있어 firebaserules REST로 직접 배포했고 그 단계를 통째로 건너뛰었다.
+//    결과: 규칙 로직은 완벽한데(TestRuleset은 firestore.get을 모킹하므로 ALLOW로 통과한다)
+//    실제 회원 업로드만 전부 403. 2026-08-23에 부여해 해결.
+//    → **TestRuleset 통과는 이 결함을 절대 못 잡는다.** 규칙을 바꾸면 실제 토큰으로 한 번 올려봐라.
+//
+// 2) **평가당 고유 Firestore 문서 2개가 상한이다.** 넘으면 조용히 전부 거부된다.
+//    지금 경로들은 users/{uid} 와 centers/rise/members/{id} 정확히 2개를 쓴다 — **여유가 없다.**
+//    조건을 하나라도 더 얹으려면 기존 두 문서 안에서 해결하거나, 커스텀 클레임으로 옮겨야 한다.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function idx() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+    function isSignedIn() { return request.auth != null; }
+    function isStaff() {
+      return isSignedIn() && idx().role in ['owner', 'trainer'];
+    }
+    function myMemberId() {
+      return isSignedIn() ? idx().get('member_id', '') : '';
+    }
+    // 트레이너는 담당 회원만(계약 P37 — 읽기 스코프가 백엔드와 같아야 한다).
+    function isMyTrainee(memberId) {
+      return firestore.get(
+        /databases/(default)/documents/centers/rise/members/$(memberId)
+      ).data.trainer_id == request.auth.uid;
+    }
+    // 민감정보 동의(P8) — 백엔드 checkBodyPhotoAccess와 같은 조건을 건다.
+    function hasSensitiveConsent(memberId) {
+      return firestore.get(
+        /databases/(default)/documents/centers/rise/members/$(memberId)
+      ).data.consent.sensitive == true;
+    }
+    function isImageUnder10MB() {
+      return request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // ── 체형사진(P8 민감정보) ─────────────────────────────────────────────
+    // 본인은 자기 것만 읽고 쓴다. 스태프는 읽기만 — 사진을 만드는 주체는 회원이고,
+    // 스태프가 남의 사진을 올릴 수 있으면 "본인이 찍었다"는 전제가 깨진다.
+    match /members/{memberId}/body/{fileName} {
+      allow read: if isSignedIn() && (
+        myMemberId() == memberId
+        || (isStaff() && hasSensitiveConsent(memberId) && (
+             idx().role == 'owner' || isMyTrainee(memberId)
+           ))
+      );
+      allow create, update: if isSignedIn()
+        && myMemberId() == memberId
+        && hasSensitiveConsent(memberId)
+        && isImageUnder10MB();
+      // 삭제는 막는다 — 기록은 서버 원장·목록과 짝을 이뤄야 하고, 파일만 사라지면
+      // 메타데이터가 가리키는 곳이 비는 고아 상태가 된다(정리는 서버 몫).
+      allow delete: if false;
+    }
+
+    // ── 트레이너 프로필 사진 ──────────────────────────────────────────────
+    // 서버(Admin SDK)가 올리고, 클라이언트는 **다운로드 토큰 URL**로 읽는다.
+    // 토큰 URL은 규칙을 거치지 않으므로 여기서는 전면 차단이 맞다(SDK 직접 접근 차단).
+    match /staff/photos/{fileName} {
+      allow read, write: if false;
+    }
+
+    // 그 밖은 전부 차단 — 새 용도가 생기면 규칙을 먼저 추가한다.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

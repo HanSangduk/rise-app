@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    라이즈 컨디셔닝 R 마크 — 네이티브 스플래시용 (P32).
+
+    출처: design/brand/rise-mark.svg. 획 좌표·굵기·색을 그대로 옮겼다.
+
+    ⚠ **베이지 점(#CEBBAA)이 일부러 빠져 있다.**
+    네이티브 스플래시는 "점이 아직 도착하지 않은 마크"를 보여주고, Flutter의 첫
+    프레임이 그 그림과 픽셀로 맞은 뒤 점이 도착한다(SplashGate). 여기에 점을 그리면
+    Flutter 쪽에서 점을 **지웠다가 다시 그려야** 해서 깜빡임이 된다.
+
+    ⚠ SVG의 viewBox는 "112 106 196 202"라 원점이 (0,0)이 아니다. 벡터 드로어블의
+    viewport는 항상 (0,0)에서 시작하므로 group translate로 그 오프셋을 상쇄한다.
+    좌표를 미리 빼서 적지 않는 이유는 원본과 한 줄씩 대조할 수 있어야 하기 때문이다.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="132dp"
+    android:height="136dp"
+    android:viewportWidth="196"
+    android:viewportHeight="202">
+    <group
+        android:translateX="-112"
+        android:translateY="-106">
+        <path
+            android:pathData="M 127,164 C 137,143 158,124 182,121 C 190,120 202,120 210,122 C 232,127 249,138 257,155 C 263,167 265,180 262,196 C 259,214 251,228 240,238 C 231,245 221,249 206,249"
+            android:strokeWidth="21.5"
+            android:strokeColor="#3B4C60"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M 208,252 C 217,263 224,272 232,280 C 240,288 245,291 250,293"
+            android:strokeWidth="21.5"
+            android:strokeColor="#3B4C60"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M 159.5,290 L 159.5,214 Q 159.5,195.5 178,195.5 L 190,195.5 Q 197,196 201,198.5"
+            android:strokeWidth="21.5"
+            android:strokeColor="#3B4C60"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>

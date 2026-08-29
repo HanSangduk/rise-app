@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="index,follow">
+<meta name="description" content="라이즈 컨디셔닝 회원 앱 계정 및 개인정보 삭제 요청 방법 — Account and data deletion request">
+<title>계정·데이터 삭제 요청 — 라이즈 컨디셔닝</title>
+<style>
+:root{
+  --bg:#14181f; --bg-soft:#181d25; --panel:#1c222c; --panel-2:#222a36;
+  --line:#2b3441; --line-soft:#232b37;
+  --text:#d7dde6; --dim:#a6b2c2; --faint:#7d8a9c;
+  --accent:#7db3f0; --ok:#86c48f; --warn:#e0af68; --danger:#e2726e;
+  --measure:76ch;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,
+    "Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+  font-size:16px; line-height:1.78; word-break:keep-all; overflow-wrap:anywhere;
+  letter-spacing:-.003em;
+}
+.wrap{max-width:var(--measure); margin:0 auto; padding:0 20px 96px}
+header.doc{padding:56px 0 28px; border-bottom:1px solid var(--line)}
+.eyebrow{font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--danger); font-weight:700; margin:0 0 10px}
+h1{font-size:clamp(26px,4.6vw,34px); line-height:1.32; margin:0 0 14px; font-weight:800; letter-spacing:-.02em}
+.meta{margin:0; color:var(--dim); font-size:14.5px; line-height:1.7}
+.meta b{color:var(--text); font-weight:600}
+h2{font-size:20.5px; line-height:1.45; margin:48px 0 12px; font-weight:750; letter-spacing:-.012em; scroll-margin-top:20px}
+h2 .num{color:var(--accent); font-weight:700; margin-right:.4em; font-variant-numeric:tabular-nums}
+h3{font-size:16.5px; margin:26px 0 8px; font-weight:700; color:#e6ebf2}
+p{margin:0 0 14px}
+ul,ol{margin:0 0 14px; padding-left:1.35em}
+li{margin:0 0 7px}
+li::marker{color:var(--faint)}
+ol.legal{list-style:none; padding-left:0; counter-reset:cl}
+ol.legal>li{counter-increment:cl; position:relative; padding-left:2.1em; margin-bottom:11px}
+ol.legal>li::before{content:"(" counter(cl) ")"; position:absolute; left:0; top:0; color:var(--faint); font-variant-numeric:tabular-nums; font-size:14.5px}
+a{color:var(--accent); text-decoration:none; border-bottom:1px solid rgba(125,179,240,.35)}
+a:hover{border-bottom-color:var(--accent)}
+strong{color:#eaeff5; font-weight:700}
+.callout{margin:20px 0; padding:15px 18px; border-radius:10px; background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--accent); font-size:15.3px; line-height:1.72}
+.callout>:last-child{margin-bottom:0}
+.callout .t{display:block; font-weight:750; margin-bottom:6px; color:var(--accent); font-size:14.5px}
+.callout.warn{border-left-color:var(--warn)} .callout.warn .t{color:var(--warn)}
+.callout.danger{border-left-color:var(--danger)} .callout.danger .t{color:var(--danger)}
+.callout.ok{border-left-color:var(--ok)} .callout.ok .t{color:var(--ok)}
+.callout.big{padding:20px 22px; font-size:16px}
+.tablewrap{overflow-x:auto; margin:20px 0; border:1px solid var(--line); border-radius:10px; background:var(--panel)}
+table{border-collapse:collapse; width:100%; min-width:480px; font-size:14.8px; line-height:1.62}
+th,td{padding:11px 14px; text-align:left; vertical-align:top; border-bottom:1px solid var(--line-soft)}
+thead th{background:var(--panel-2); color:#e6ebf2; font-weight:700; font-size:13.8px; white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+td.num{font-variant-numeric:tabular-nums; white-space:nowrap}
+details{margin:16px 0; border:1px solid var(--line); border-radius:10px; background:var(--panel); overflow:hidden}
+details>summary{cursor:pointer; padding:13px 16px; font-weight:700; font-size:15.2px; color:#e6ebf2; list-style:none; display:flex; align-items:center; gap:9px}
+details>summary::-webkit-details-marker{display:none}
+details>summary::before{content:"▸"; color:var(--accent); font-size:13px; transition:transform .16s ease; flex:none}
+details[open]>summary::before{transform:rotate(90deg)}
+details>summary:hover{background:var(--panel-2)}
+.dbody{padding:2px 16px 16px; border-top:1px solid var(--line-soft)}
+.dbody>:first-child{margin-top:12px}
+.dbody>:last-child{margin-bottom:0}
+.docnav{display:flex; flex-wrap:wrap; gap:9px; margin:26px 0 0}
+.docnav a{border:1px solid var(--line); border-radius:999px; padding:7px 15px; font-size:14px; color:var(--dim); background:var(--panel); border-bottom:1px solid var(--line)}
+.docnav a:hover{border-color:var(--accent); color:var(--accent)}
+.docnav a[aria-current="page"]{border-color:var(--danger); color:var(--danger); background:var(--panel-2)}
+.ph{color:var(--warn); background:rgba(224,175,104,.1); border:1px dashed rgba(224,175,104,.45); border-radius:5px; padding:.05em .4em; font-size:.95em; font-weight:600; white-space:nowrap}
+.tpl{
+  margin:16px 0; padding:16px 18px; border:1px solid var(--line-soft); border-radius:10px;
+  background:var(--bg-soft); font-size:15px; line-height:1.8; color:var(--dim);
+}
+.tpl b{color:var(--text)}
+.en{margin-top:56px; padding-top:26px; border-top:1px solid var(--line)}
+.en h2{font-size:18.5px; margin-top:28px}
+.en{font-size:15.4px; color:var(--dim)}
+.en strong{color:var(--text)}
+footer.doc{margin-top:56px; padding-top:26px; border-top:1px solid var(--line); color:var(--faint); font-size:14px}
+footer.doc p{margin:0 0 8px}
+@media print{
+  :root{--bg:#fff;--panel:#fff;--panel-2:#fff;--bg-soft:#fff;--text:#111;--dim:#333;--faint:#555;--line:#ccc;--line-soft:#e2e2e2}
+  body{font-size:11pt} .docnav{display:none}
+  details{border:0} details>summary{padding-left:0} .dbody{padding-left:0}
+  details:not([open])>.dbody{display:block}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <p class="eyebrow">라이즈 컨디셔닝</p>
+  <h1>계정·데이터 삭제 요청</h1>
+  <p class="meta">
+    <b>대상 앱</b> 라이즈 컨디셔닝 회원 앱 (iOS · Android, <code>ai.stra.rize</code>)<br>
+    <b>최종 갱신</b> <span class="ph" data-biz="effective_date">(시행일 미정)</span>
+  </p>
+  <div class="docnav">
+    <a href="./terms.html">이용약관</a>
+    <a href="./privacy.html">개인정보처리방침</a>
+    <a href="./sensitive-consent.html">민감정보 동의</a>
+    <a href="./account-deletion.html" aria-current="page">계정 삭제</a>
+  </div>
+</header>
+
+<div class="callout danger" id="draft-notice">
+  <span class="t">아직 시행 전 초안입니다</span>
+  <p>본문에 <b>(항목명 미정)</b>으로 표시된 자리가 남아 있습니다 — 사업자 정보와 개인정보
+  보호책임자가 아직 등록되지 않아 채우지 못한 항목이에요. 어드민 <b>설정 → 사업자 정보</b>에서
+  12개 항목을 모두 등록하고 약관 시행일을 지정하면 이 안내는 자동으로 사라집니다.
+  <b>그 전까지 이 문서는 효력이 없고, 앱 스토어 제출·회원 고지에 그대로 쓰면 안 됩니다.</b>
+  지금은 내용 검토용으로만 봐주세요.</p>
+</div>
+
+
+<p>라이즈 컨디셔닝 회원 앱의 계정과 그에 연결된 개인정보의 삭제를 원하시면 아래 방법으로 요청해 주세요.
+<b>사유를 밝히실 필요는 없습니다.</b></p>
+
+<h2 id="how"><span class="num">1</span>요청 방법</h2>
+<div class="callout danger big">
+  <span class="t">아래 중 편한 방법 하나로 요청하세요</span>
+  <ul style="margin-bottom:0">
+    <li><b>이메일</b> — <span class="ph" data-biz="privacy_officer_email">(보호책임자 이메일 미정)</span><br>
+        <span style="color:var(--dim);font-size:.95em">제목에 <b>“계정 삭제 요청”</b>을 적어 주세요.</span></li>
+    <li><b>전화</b> — <span class="ph" data-biz="phone">(대표 전화 미정)</span></li>
+    <li><b>방문</b> — 센터 데스크에서 직접 요청</li>
+  </ul>
+</div>
+
+<h3>이메일로 요청할 때 적어 주실 내용</h3>
+<div class="tpl">
+  받는 사람: <b><span class="ph" data-biz="privacy_officer_email">(보호책임자 이메일 미정)</span></b><br>
+  제목: <b>계정 삭제 요청</b><br><br>
+  · 이름: <b>____________</b><br>
+  · 앱에 로그인할 때 쓰는 휴대폰 번호: <b>____________</b><br>
+  · 요청 내용: <b>계정과 개인정보 전부 삭제</b>를 요청합니다.<br>
+  &nbsp;&nbsp;<span style="font-size:.94em">(체형사진만 삭제 등 일부만 원하시면 그 내용을 적어 주세요.)</span>
+</div>
+<p>센터는 <b>본인 확인</b>을 위해 등록된 휴대폰 번호로 연락드릴 수 있습니다. 타인의 계정이 삭제되는 것을
+막기 위한 절차이니 양해 부탁드립니다.</p>
+
+<h2 id="when"><span class="num">2</span>처리 기간</h2>
+<div class="tablewrap">
+<table>
+<thead><tr><th>단계</th><th>기간</th></tr></thead>
+<tbody>
+<tr><td>접수 확인 회신</td><td>요청일로부터 영업일 기준 <b>3일 이내</b></td></tr>
+<tr><td>본인 확인 후 삭제 완료</td><td><b>지체 없이</b> — 정당한 사유가 없는 한 <b>10일 이내</b></td></tr>
+<tr><td>처리 결과 회신</td><td>삭제 완료 즉시</td></tr>
+<tr><td>백업본에서의 소멸</td><td>삭제 시점으로부터 <b>7일 이내</b> 자동 소멸</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="what"><span class="num">3</span>삭제되는 항목</h2>
+<div class="callout ok">
+  <span class="t">계정을 잠그는 것이 아니라 실제로 지웁니다</span>
+  <p>일시 정지·비활성화·휴면 전환이 아니라 <b>기록 자체를 파기</b>합니다.</p>
+</div>
+<ul>
+  <li><b>계정 정보</b> — 이름, 휴대폰 번호, 인증 계정</li>
+  <li><b>체형 분석 사진 전부</b> — 저장소의 이미지 파일과 그 기록</li>
+  <li><b>체성분(InBody) 기록</b> — 측정일과 6개 수치 전부</li>
+  <li><b>건강 상태 메모</b> — 부상·통증 등에 관한 메모</li>
+  <li><b>운동 기록·홈워크</b> — 수업별 종목·세트·중량·코치 메모, 과제 배정과 수행 체크</li>
+  <li><b>예약·체크인 기록</b></li>
+  <li><b>회원 관리 정보</b> — 담당 코치, 진입경로, 최종 방문일시, 동의 상태</li>
+</ul>
+
+<h2 id="keep"><span class="num">4</span>삭제 후에도 보존되는 항목</h2>
+<div class="callout warn">
+  <span class="t">법령이 보존을 의무화한 기록입니다</span>
+  <p>아래 기록은 삭제 요청 후에도 법령이 정한 기간 동안 <b>별도로 분리하여 보관</b>한 뒤 파기합니다.
+  이 기간 동안에는 <b>서비스 제공에 이용하지 않고 보존 목적으로만</b> 둡니다.</p>
+</div>
+<div class="tablewrap">
+<table>
+<thead><tr><th>보존 항목</th><th>기간</th><th>법적 근거</th></tr></thead>
+<tbody>
+<tr><td>계약 또는 청약철회 등에 관한 기록<br><span style="color:var(--dim);font-size:.94em">(전자계약, 회원권 발급·해지·환불)</span></td><td class="num">5년</td><td>「전자상거래 등에서의 소비자보호에 관한 법률」 제6조·시행령 제6조</td></tr>
+<tr><td>대금결제 및 재화등의 공급에 관한 기록<br><span style="color:var(--dim);font-size:.94em">(결제 내역, 세션 이용내역)</span></td><td class="num">5년</td><td>동 법 제6조·시행령 제6조</td></tr>
+<tr><td>소비자의 불만 또는 분쟁처리에 관한 기록</td><td class="num">3년</td><td>동 법 제6조·시행령 제6조</td></tr>
+<tr><td>개인정보처리시스템 접속기록</td><td class="num">2년</td><td>「개인정보의 안전성 확보조치 기준」 제8조</td></tr>
+</tbody>
+</table>
+</div>
+<p><b>체형사진·체성분 기록·건강 상태 메모는 이 보존 대상이 아닙니다.</b> 요청하시면 보존 의무를 이유로
+남겨 두지 않고 파기합니다.</p>
+
+<h2 id="note"><span class="num">5</span>알아 두실 점</h2>
+<ol class="legal">
+  <li><b>계정 삭제와 회원권 해지는 별개입니다.</b> 잔여 세션이 남아 있는 경우의 환불은
+      <a href="./terms.html#a11">이용약관 제11조(중도해지와 환불)</a>에 따라 별도로 정산합니다.
+      계정만 삭제하고 센터에서 계속 수업을 받으실 수도 있습니다.</li>
+  <li><b>일부만 삭제할 수도 있습니다.</b> 계정을 유지한 채 체형사진만, 또는 체성분 기록만 삭제하는 것도
+      가능합니다. 요청하실 때 범위를 적어 주세요.</li>
+  <li><b>동의 철회는 앱에서 바로 가능합니다.</b> 삭제까지는 원하지 않고 “앞으로 더 모으지 않기”만 원하시면
+      앱의 <b>마이 → 동의 관리</b>에서 민감정보 동의를 끄시면 됩니다
+      (<a href="./sensitive-consent.html#s6">자세히</a>).</li>
+  <li><b>회원이 앱에서 직접 입력한 체성분 기록</b>은 요청 없이 앱에서 바로 삭제할 수 있습니다
+      (기록 → 인바디 → 해당 기록 삭제).</li>
+  <li>삭제된 데이터는 <b>복구할 수 없습니다.</b> 필요한 기록이 있다면 삭제 전에 미리 저장해 두세요.</li>
+</ol>
+
+<h2 id="help"><span class="num">6</span>도움이 더 필요하시면</h2>
+<p>센터의 처리 결과에 만족하지 못하시면 아래 기관에 상담·분쟁조정을 신청하실 수 있습니다.</p>
+<ul>
+  <li>개인정보분쟁조정위원회 — (국번없이) 1833-6972 · <a href="https://www.kopico.go.kr">www.kopico.go.kr</a></li>
+  <li>개인정보침해신고센터 — (국번없이) 118 · <a href="https://privacy.kisa.or.kr">privacy.kisa.or.kr</a></li>
+</ul>
+<p>개인정보 처리에 관한 전체 내용은 <a href="./privacy.html">개인정보처리방침</a>에서 확인하실 수 있습니다.</p>
+
+<section class="en" lang="en">
+  <h2>Account and Data Deletion Request (English)</h2>
+  <p>To request deletion of your <strong>RISE Conditioning member app</strong> account
+  (<code>ai.stra.rize</code>) and its associated personal data, contact us by any of the following:</p>
+  <ul>
+    <li><strong>Email</strong> — <span class="ph" data-biz="privacy_officer_email">(email not registered yet)</span> (subject: “Account deletion request”)</li>
+    <li><strong>Phone</strong> — <span class="ph" data-biz="phone">(phone not registered yet)</span></li>
+    <li><strong>In person</strong> — at the studio front desk</li>
+  </ul>
+  <p>Please include your <strong>name</strong> and the <strong>mobile phone number you use to sign in</strong>.
+  We may call that number to verify your identity before deleting the account.</p>
+  <p><strong>Data that is deleted:</strong> account details (name, phone number, authentication account),
+  <strong>all body-composition photos</strong>, InBody body-composition records, injury/health notes,
+  workout logs and homework, booking and check-in records, and member management data.
+  The account is <strong>permanently deleted, not deactivated or suspended</strong>.</p>
+  <p><strong>Data that is retained after deletion,</strong> as required by Korean law, stored separately and
+  used only for the retention purpose:</p>
+  <ul>
+    <li>Records of contracts and withdrawal of offers — <strong>5 years</strong></li>
+    <li>Records of payment and supply of goods/services — <strong>5 years</strong></li>
+    <li>Records of consumer complaints and dispute resolution — <strong>3 years</strong></li>
+    <li>System access logs — <strong>2 years</strong></li>
+  </ul>
+  <p>(Act on Consumer Protection in Electronic Commerce, Art. 6 and its Enforcement Decree Art. 6;
+  Standards for Ensuring the Safety of Personal Information, Art. 8.)</p>
+  <p><strong>Timeline:</strong> we acknowledge the request within 3 business days and complete deletion
+  without delay — within 10 days at the latest. Data may remain in encrypted backups for up to
+  <strong>7 days</strong> after deletion, after which it is automatically purged.</p>
+  <p>See our <a href="./privacy.html">Privacy Policy</a> for full details.</p>
+</section>
+
+<footer class="doc">
+  <p><b><span class="ph" data-biz="biz_name">(사업자명 미정)</span></b> · 대표 <span class="ph" data-biz="ceo_name">(대표자명 미정)</span></p>
+  <p>사업자등록번호 <span class="ph" data-biz="biz_reg_no">(사업자등록번호 미정)</span> · 주소 <span class="ph" data-biz="address">(사업장 주소 미정)</span></p>
+  <p>개인정보 보호 문의 <span class="ph" data-biz="privacy_officer_email">(보호책임자 이메일 미정)</span> · <span class="ph" data-biz="phone">(대표 전화 미정)</span></p>
+  <p style="margin-top:14px">
+    <a href="./terms.html">이용약관</a> ·
+    <a href="./privacy.html">개인정보처리방침</a> ·
+    <a href="./sensitive-consent.html">민감정보 동의</a>
+  </p>
+</footer>
+
+</div>
+<script>
+/* 사업자 정보 채우기 — GET /api/v1/public/business (계약 v2.13, 무인증 · 동일 오리진).
+ *
+ * 왜 서버에서 받아오나: 상호·대표자·등록번호·보호책임자는 문서가 아니라 **센터가 등록하는 값**이다.
+ * HTML 5장에 손으로 박아 두면 상호 한 번 바뀔 때 5장을 고쳐야 하고, 한 장을 빠뜨린 채로
+ * 법정 고지가 서로 다른 사업자를 가리키게 된다.
+ *
+ * 왜 상대 경로인가: firebase.json이 /api/** 를 Cloud Run으로 리라이트한다 — 이 문서와
+ * 같은 오리진이라 CORS 설정도, 외부 호스트도 필요 없다. 이 페이지가 하는 네트워크 요청은
+ * 이것 하나뿐이다(외부 폰트·CDN·분석 도구 없음).
+ *
+ * **중괄호는 애초에 파일에 없다.** 각 자리는 `(항목명 미정)`으로 미리 렌더돼 있고 이 스크립트는
+ * 그 위에 값을 덮어쓸 뿐이다 — 요청이 실패하든 JS가 꺼져 있든 원시 플레이스홀더가 보일 수
+ * 없는 구조다. 실패는 조용히 넘긴다(폴백이 이미 화면에 있다).
+ *
+ * 초안 배너는 **채울 게 하나도 남지 않았을 때만** 사라진다: 서버가 계산한 complete + 시행일
+ * 존재 + 화면에 남은 미기재 0개. 셋 다여야 한다 — 배너를 무조건 지우면 반쪽짜리 문서가
+ * "시행 중"인 척하게 되고, 그건 고지 누락이다.
+ */
+(function () {
+  var slots = document.querySelectorAll("[data-biz]");
+  if (!slots.length) return;
+
+  var ctl = typeof AbortController === "function" ? new AbortController() : null;
+  var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 6000);
+
+  fetch("/api/v1/public/business", ctl ? { signal: ctl.signal } : undefined)
+    .then(function (res) { return res.ok ? res.json() : null; })
+    .then(function (data) {
+      if (!data || typeof data !== "object") return;
+      var unfilled = 0;
+      for (var i = 0; i < slots.length; i++) {
+        var el = slots[i];
+        var v = data[el.getAttribute("data-biz")];
+        if (typeof v === "string" && v.trim() !== "") {
+          el.textContent = v.trim();
+          el.classList.remove("ph"); /* 채워진 자리는 일반 본문으로 — 경고 칩을 벗긴다 */
+        } else {
+          unfilled++;
+        }
+      }
+      var effective = typeof data.effective_date === "string" ? data.effective_date.trim() : "";
+      if (data.complete === true && effective !== "" && unfilled === 0) {
+        var notice = document.getElementById("draft-notice");
+        if (notice && notice.parentNode) notice.parentNode.removeChild(notice);
+      }
+    })
+    .catch(function () { /* 폴백이 이미 렌더돼 있다 — 배너도 그대로 둔다(fail-closed) */ })
+    .then(function () { clearTimeout(timer); });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,182 @@
+@import "tailwindcss";
+
+/* 라이즈 컨디셔닝 어드민 토큰 — 목업(목업_어드민_라이즈_2026-08-14.html) 다크·레드 팔레트와 1:1 정합 */
+@theme {
+  /* 목업(어드민)의 반응형 기준은 880px — Tailwind 기본 md(768px)를 목업에 맞춰 올린다.
+     사이드바→상단 가로 네비 전환(App.tsx)과 README의 "<880px" 서술이 이 값에 의존한다. */
+  --breakpoint-md: 55rem;
+  --color-bg: #0c0d12;
+  --color-panel: #15161d;
+  --color-panel-2: #1d1f29;
+  --color-line: #2a2c3a;
+  --color-ink: #e9eaf2;
+  --color-muted: #8b8fa3;
+  --color-brand: #f43f5e;
+  --color-brand-2: #e11d48;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-danger: #fb7185;
+  --color-blue: #60a5fa;
+  --color-amber: #f59e0b;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: "Pretendard", "Apple SD Gothic Neo", ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+/* 스크롤바(다크 톤 최소화) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  outline: none;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--color-brand);
+}
+
+/* 키보드 포커스 표시(접근성) — 마우스 클릭에는 outline이 뜨지 않게 focus-visible만. */
+:where(button, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* ── 데스크 체크인 QR 인쇄 시트(P11, features/CheckinQr.tsx) ──────────────────
+   화면에서는 항상 숨어 있고, 인쇄할 때만 어드민 셸(#root) 대신 이 한 장이 나온다.
+   시트는 React 포털로 document.body 바로 아래에 붙는다 — 셸 안에 두고 "나머지를 전부
+   숨기는" 방식은 숨긴 요소의 높이가 남아 빈 페이지를 만든다.
+   색 토큰(다크 팔레트)을 일부러 쓰지 않는다: QR 규격은 "밝은 배경 위 어두운 모듈"이고,
+   다크 테마가 종이로 새어 나가면 토너만 먹고 스캔은 안 된다. */
+#checkin-qr-print {
+  display: none;
+}
+
+#checkin-qr-print .qrp-sheet {
+  color: #000;
+  background: #fff;
+  text-align: center;
+  word-break: keep-all;
+  line-height: 1.7;
+  /* @page 여백(14mm) 위에 얹는 시각 보정 — 그냥 두면 내용이 위로 쏠린다.
+     세로 가운데정렬(flex+100%)은 인쇄 컨텍스트에서 브라우저마다 어긋나므로 고정 여백으로 민다.
+     P14 H2로 안내 문구가 앱 실물에 맞춰 길어져(버튼 이름·비활성 조건·예약 없을 때) 내용이
+     약 235mm가 됐다 — 20mm였던 값을 줄여 A4 한 장을 유지한다(headless Chrome PDF로 실측).
+     P19 브랜드 헤더(마크 9mm + 여백)가 위에 얹히며 12mm를 다시 7mm로 — 헤더가 여백 몫을
+     일부 대신한다. 두 변경 모두 A4 1장은 headless Chrome PDF로 재실측했다. */
+  padding-top: 7mm;
+}
+/* 브랜드 헤더(P19) — R 마크 + 영문 워드마크(qrp-eyebrow 재사용). 마크 실치수는 여기 mm가
+   정한다(컴포넌트 size prop은 명목값). 9mm — 타이틀(32pt ≈ 11mm)보다 한 급 아래로,
+   종이의 주인공은 어디까지나 QR이다. */
+#checkin-qr-print .qrp-brand svg {
+  display: block;
+  margin: 0 auto 1.5mm;
+  width: 9mm;
+  height: 9mm;
+}
+#checkin-qr-print .qrp-eyebrow {
+  font-size: 11pt;
+  letter-spacing: 0.12em;
+  color: #444;
+}
+#checkin-qr-print .qrp-title {
+  margin: 2mm 0 0;
+  font-size: 32pt;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+#checkin-qr-print .qrp-lead {
+  margin: 3mm 0 0;
+  font-size: 13pt;
+  color: #222;
+}
+#checkin-qr-print .qrp-qr {
+  margin: 10mm 0;
+}
+#checkin-qr-print .qrp-qr svg {
+  display: block;
+  margin: 0 auto;
+  /* 실치수는 CheckinQr.tsx의 PRINT_QR_MM이 인라인 style로 지정한다. */
+}
+#checkin-qr-print .qrp-steps {
+  display: inline-block;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  list-style: none;
+  font-size: 13pt;
+}
+#checkin-qr-print .qrp-steps li {
+  margin-top: 2.5mm;
+}
+#checkin-qr-print .qrp-num {
+  display: inline-block;
+  min-width: 7mm;
+  margin-right: 2mm;
+  font-weight: 900;
+}
+#checkin-qr-print .qrp-rules {
+  margin: 9mm auto 0;
+  max-width: 150mm;
+  padding-top: 5mm;
+  border-top: 0.4mm solid #000;
+  font-size: 11.5pt;
+}
+#checkin-qr-print .qrp-rules p {
+  margin: 1.5mm 0 0;
+}
+#checkin-qr-print .qrp-foot {
+  margin-top: 8mm;
+  font-size: 8pt;
+  color: #777;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    /* 프린터 비인쇄 영역(보통 5~10mm)을 넉넉히 피한다 — 여백을 0으로 두면 QR 귀퉁이가
+       잘려 스캔이 안 되는 개체가 나온다. */
+    margin: 14mm;
+  }
+  /* 시트가 떠 있을 때만 셸을 숨긴다. 무조건 숨기면 다른 화면에서 ⌘P를 눌렀을 때
+     빈 종이가 나온다(클래스는 PrintSheet가 마운트되는 동안만 body에 붙는다). */
+  body.has-qr-print > #root {
+    display: none !important;
+  }
+  /* 인쇄 대화상자에서 "배경 그래픽"을 켜면 body의 다크 배경(#0c0d12)이 시트 아래 남은
+     자리에 검은 띠로 찍힌다(P19 headless PDF 실측에서 발견) — 시트가 떠 있는 동안은
+     종이 전체를 흰 바탕으로 되돌린다. */
+  body.has-qr-print {
+    background: #fff;
+  }
+  body.has-qr-print #checkin-qr-print {
+    display: block !important;
+  }
+  #checkin-qr-print .qrp-sheet {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}

@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="index,follow">
+<meta name="description" content="라이즈 컨디셔닝 회원 앱 이용약관">
+<title>이용약관 — 라이즈 컨디셔닝</title>
+<style>
+/* ── 단일 자립 파일: 외부 CDN·폰트·스크립트 0. file:// 에서도 그대로 동작한다 ── */
+:root{
+  --bg:#14181f; --bg-soft:#181d25; --panel:#1c222c; --panel-2:#222a36;
+  --line:#2b3441; --line-soft:#232b37;
+  --text:#d7dde6; --dim:#a6b2c2; --faint:#7d8a9c;
+  --accent:#7db3f0; --ok:#86c48f; --warn:#e0af68; --danger:#e2726e;
+  --measure:76ch;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,
+    "Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+  font-size:16px; line-height:1.78; word-break:keep-all; overflow-wrap:anywhere;
+  letter-spacing:-.003em;
+}
+.wrap{max-width:var(--measure); margin:0 auto; padding:0 20px 96px}
+header.doc{padding:56px 0 28px; border-bottom:1px solid var(--line)}
+.eyebrow{font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); font-weight:700; margin:0 0 10px}
+h1{font-size:clamp(26px,4.6vw,34px); line-height:1.32; margin:0 0 14px; font-weight:800; letter-spacing:-.02em}
+.meta{margin:0; color:var(--dim); font-size:14.5px; line-height:1.7}
+.meta b{color:var(--text); font-weight:600}
+h2{font-size:20.5px; line-height:1.45; margin:52px 0 12px; font-weight:750; letter-spacing:-.012em; scroll-margin-top:20px}
+h2 .num{color:var(--accent); font-weight:700; margin-right:.4em; font-variant-numeric:tabular-nums}
+h3{font-size:16.5px; margin:28px 0 8px; font-weight:700; color:#e6ebf2}
+p{margin:0 0 14px}
+ul,ol{margin:0 0 14px; padding-left:1.35em}
+li{margin:0 0 7px}
+li::marker{color:var(--faint)}
+ol.legal{list-style:none; padding-left:0; counter-reset:cl}
+ol.legal>li{counter-increment:cl; position:relative; padding-left:2.1em; margin-bottom:11px}
+ol.legal>li::before{
+  content:"(" counter(cl) ")"; position:absolute; left:0; top:0;
+  color:var(--faint); font-variant-numeric:tabular-nums; font-size:14.5px;
+}
+a{color:var(--accent); text-decoration:none; border-bottom:1px solid rgba(125,179,240,.35)}
+a:hover{border-bottom-color:var(--accent)}
+strong{color:#eaeff5; font-weight:700}
+code{
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.9em;
+  background:var(--panel-2); border:1px solid var(--line-soft); border-radius:5px; padding:.1em .38em;
+  color:#c9d6e6;
+}
+hr{border:0; border-top:1px solid var(--line); margin:44px 0}
+
+/* 콜아웃 */
+.callout{
+  margin:20px 0; padding:15px 18px; border-radius:10px;
+  background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--accent);
+  font-size:15.3px; line-height:1.72;
+}
+.callout>:last-child{margin-bottom:0}
+.callout .t{display:block; font-weight:750; margin-bottom:6px; color:var(--accent); font-size:14.5px; letter-spacing:.01em}
+.callout.warn{border-left-color:var(--warn)} .callout.warn .t{color:var(--warn)}
+.callout.danger{border-left-color:var(--danger)} .callout.danger .t{color:var(--danger)}
+.callout.ok{border-left-color:var(--ok)} .callout.ok .t{color:var(--ok)}
+
+/* 표 */
+.tablewrap{overflow-x:auto; margin:20px 0; border:1px solid var(--line); border-radius:10px; background:var(--panel)}
+table{border-collapse:collapse; width:100%; min-width:520px; font-size:14.8px; line-height:1.62}
+th,td{padding:11px 14px; text-align:left; vertical-align:top; border-bottom:1px solid var(--line-soft)}
+thead th{background:var(--panel-2); color:#e6ebf2; font-weight:700; font-size:13.8px; letter-spacing:.01em; white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+td.num{font-variant-numeric:tabular-nums; white-space:nowrap}
+
+/* 접기 */
+details{
+  margin:16px 0; border:1px solid var(--line); border-radius:10px;
+  background:var(--panel); overflow:hidden;
+}
+details>summary{
+  cursor:pointer; padding:13px 16px; font-weight:700; font-size:15.2px; color:#e6ebf2;
+  list-style:none; display:flex; align-items:center; gap:9px;
+}
+details>summary::-webkit-details-marker{display:none}
+details>summary::before{
+  content:"▸"; color:var(--accent); font-size:13px; transition:transform .16s ease; flex:none;
+}
+details[open]>summary::before{transform:rotate(90deg)}
+details>summary:hover{background:var(--panel-2)}
+.dbody{padding:2px 16px 16px; border-top:1px solid var(--line-soft)}
+.dbody>:first-child{margin-top:12px}
+.dbody>:last-child{margin-bottom:0}
+
+/* 목차 */
+nav.toc{
+  margin:32px 0 8px; padding:18px 20px; background:var(--bg-soft);
+  border:1px solid var(--line); border-radius:12px;
+}
+nav.toc .th{font-size:13px; font-weight:750; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); margin:0 0 10px}
+nav.toc ol{list-style:none; margin:0; padding:0; columns:2; column-gap:26px}
+nav.toc li{margin:0 0 5px; break-inside:avoid; font-size:14.6px}
+nav.toc a{border-bottom:0; color:var(--dim)}
+nav.toc a:hover{color:var(--accent)}
+nav.toc a .n{color:var(--faint); font-variant-numeric:tabular-nums; margin-right:.35em}
+@media (max-width:560px){nav.toc ol{columns:1}}
+
+/* 문서 간 이동 */
+.docnav{display:flex; flex-wrap:wrap; gap:9px; margin:26px 0 0}
+.docnav a{
+  border:1px solid var(--line); border-radius:999px; padding:7px 15px; font-size:14px;
+  color:var(--dim); background:var(--panel); border-bottom:1px solid var(--line);
+}
+.docnav a:hover{border-color:var(--accent); color:var(--accent)}
+.docnav a[aria-current="page"]{border-color:var(--accent); color:var(--accent); background:var(--panel-2)}
+
+/* 채워 넣을 자리 */
+.ph{
+  color:var(--warn); background:rgba(224,175,104,.1);
+  border:1px dashed rgba(224,175,104,.45); border-radius:5px;
+  padding:.05em .4em; font-size:.95em; font-weight:600; white-space:nowrap;
+}
+
+footer.doc{margin-top:60px; padding-top:26px; border-top:1px solid var(--line); color:var(--faint); font-size:14px}
+footer.doc p{margin:0 0 8px}
+.totop{
+  position:fixed; right:18px; bottom:18px; width:42px; height:42px; border-radius:999px;
+  display:none; place-items:center; background:var(--panel-2); border:1px solid var(--line);
+  color:var(--dim); font-size:16px; cursor:pointer; z-index:9;
+}
+.totop.on{display:grid}
+.totop:hover{color:var(--accent); border-color:var(--accent)}
+@media print{
+  :root{--bg:#fff;--panel:#fff;--panel-2:#fff;--text:#111;--dim:#333;--faint:#555;--line:#ccc;--line-soft:#e2e2e2}
+  body{font-size:11pt} nav.toc,.totop,.docnav{display:none}
+  details{border:0} details>summary{padding-left:0} .dbody{padding-left:0}
+  details:not([open])>.dbody{display:block}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <p class="eyebrow">라이즈 컨디셔닝</p>
+  <h1>회원 앱 이용약관</h1>
+  <p class="meta">
+    <b>시행일</b> <span class="ph" data-biz="effective_date">(시행일 미정)</span> · <b>버전</b> v1.0<br>
+    <b>서비스</b> 라이즈 컨디셔닝 회원 앱 (iOS · Android, 패키지 <code>ai.stra.rize</code>)
+  </p>
+  <div class="docnav">
+    <a href="./terms.html" aria-current="page">이용약관</a>
+    <a href="./privacy.html">개인정보처리방침</a>
+    <a href="./sensitive-consent.html">민감정보 동의</a>
+    <a href="./account-deletion.html">계정 삭제</a>
+  </div>
+</header>
+
+<div class="callout danger" id="draft-notice">
+  <span class="t">아직 시행 전 초안입니다</span>
+  <p>본문에 <b>(항목명 미정)</b>으로 표시된 자리가 남아 있습니다 — 사업자 정보와 개인정보
+  보호책임자가 아직 등록되지 않아 채우지 못한 항목이에요. 어드민 <b>설정 → 사업자 정보</b>에서
+  12개 항목을 모두 등록하고 약관 시행일을 지정하면 이 안내는 자동으로 사라집니다.
+  <b>그 전까지 이 문서는 효력이 없고, 앱 스토어 제출·회원 고지에 그대로 쓰면 안 됩니다.</b>
+  지금은 내용 검토용으로만 봐주세요.</p>
+</div>
+
+
+<nav class="toc" aria-label="목차">
+  <p class="th">목차</p>
+  <ol>
+    <li><a href="#a1"><span class="n">제1조</span>목적</a></li>
+    <li><a href="#a2"><span class="n">제2조</span>용어의 정의</a></li>
+    <li><a href="#a3"><span class="n">제3조</span>약관의 게시와 개정</a></li>
+    <li><a href="#a4"><span class="n">제4조</span>서비스의 내용</a></li>
+    <li><a href="#a5"><span class="n">제5조</span>이용계약의 성립</a></li>
+    <li><a href="#a6"><span class="n">제6조</span>계정과 본인확인</a></li>
+    <li><a href="#a7"><span class="n">제7조</span>회원의 의무</a></li>
+    <li><a href="#a8"><span class="n">제8조</span>회원권·결제</a></li>
+    <li><a href="#a9"><span class="n">제9조</span>예약·취소·노쇼</a></li>
+    <li><a href="#a10"><span class="n">제10조</span>회원권 일시정지</a></li>
+    <li><a href="#a11"><span class="n">제11조</span>중도해지와 환불</a></li>
+    <li><a href="#a12"><span class="n">제12조</span>전자계약과 서명</a></li>
+    <li><a href="#a13"><span class="n">제13조</span>체형사진·체성분 기록</a></li>
+    <li><a href="#a14"><span class="n">제14조</span>기록의 열람 범위</a></li>
+    <li><a href="#a15"><span class="n">제15조</span>서비스의 변경·중단</a></li>
+    <li><a href="#a16"><span class="n">제16조</span>이용 제한</a></li>
+    <li><a href="#a17"><span class="n">제17조</span>이용계약의 해지</a></li>
+    <li><a href="#a18"><span class="n">제18조</span>지식재산권</a></li>
+    <li><a href="#a19"><span class="n">제19조</span>건강 관련 면책</a></li>
+    <li><a href="#a20"><span class="n">제20조</span>책임의 범위</a></li>
+    <li><a href="#a21"><span class="n">제21조</span>개인정보의 보호</a></li>
+    <li><a href="#a22"><span class="n">제22조</span>분쟁해결·준거법</a></li>
+  </ol>
+</nav>
+
+<div class="callout">
+  <span class="t">이 약관이 다루는 범위</span>
+  <p>이 약관은 <b>회원 앱(소프트웨어)의 이용</b>에 적용됩니다. 개인 트레이닝(PT) 자체의 지도·시설
+  이용에 관한 계약은 회원님과 센터가 <b>별도로 체결한 회원권 계약</b>이 정하며, 앱은 그 계약의
+  내용을 조회·관리하는 수단입니다. 두 문서가 충돌하면 <b>회원권 계약이 우선</b>합니다.</p>
+</div>
+
+<h2 id="a1"><span class="num">제1조</span>목적</h2>
+<p>이 약관은 <span class="ph" data-biz="biz_name">(사업자명 미정)</span>(이하 “센터”)이 운영하는 <b>라이즈 컨디셔닝 회원 앱</b>
+(이하 “서비스”)을 회원이 이용함에 있어 센터와 회원의 권리·의무 및 책임사항, 이용 조건과 절차를
+정함을 목적으로 합니다.</p>
+
+<h2 id="a2"><span class="num">제2조</span>용어의 정의</h2>
+<ol class="legal">
+  <li><b>서비스</b> — 센터가 제공하는 회원 앱과 이에 부수하는 웹·서버 기능 일체를 말합니다.</li>
+  <li><b>회원</b> — 이 약관에 동의하고 센터의 회원 명부에 등록되어 서비스를 이용하는 자연인을 말합니다.</li>
+  <li><b>스태프</b> — 센터의 대표 또는 트레이너(코치)로서 센터 운영 도구(어드민)에 접근 권한을 가진 자를 말합니다.</li>
+  <li><b>담당 코치</b> — 회원 명부상 해당 회원에게 배정된 트레이너를 말합니다.</li>
+  <li><b>회원권</b> — 정해진 횟수의 세션과 유효기간을 갖는 이용권을 말하며, 앱에서 잔여 횟수·유효기간·이용내역을 조회할 수 있습니다.</li>
+  <li><b>세션</b> — 회원권에서 1회 차감되는 트레이닝 수업을 말합니다.</li>
+  <li><b>예약</b> — 특정 날짜·시간대(슬롯)에 세션을 배정받는 행위를 말합니다.</li>
+  <li><b>홈워크</b> — 코치가 회원에게 배정하는 자율 운동 과제를 말합니다.</li>
+  <li><b>체형 분석</b> — 앱의 카메라로 정해진 포즈를 촬영하여 시점별로 비교·보관하는 기능을 말합니다.</li>
+  <li><b>체성분 기록</b> — 체성분 분석기(InBody 등) 결과지의 수치를 앱에 입력하여 보관·조회하는 기능을 말합니다.</li>
+</ol>
+
+<h2 id="a3"><span class="num">제3조</span>약관의 게시와 개정</h2>
+<ol class="legal">
+  <li>센터는 이 약관을 회원이 쉽게 확인할 수 있도록 서비스 화면과 위 주소에 게시합니다.</li>
+  <li>센터는 관련 법령을 위배하지 않는 범위에서 이 약관을 개정할 수 있습니다.</li>
+  <li>약관을 개정할 때에는 적용일자와 개정사유를 밝혀 <b>적용일자 7일 전</b>부터 서비스 내 공지 또는 앱 내 안내로 알립니다. 다만 회원에게 <b>불리한 변경</b>인 경우에는 <b>적용일자 30일 전</b>부터 알립니다.</li>
+  <li>회원이 개정 약관에 동의하지 않는 경우 이용계약을 해지할 수 있습니다. 개정 약관의 적용일자 이후에도 서비스를 계속 이용하는 경우 개정 약관에 동의한 것으로 봅니다.</li>
+</ol>
+
+<h2 id="a4"><span class="num">제4조</span>서비스의 내용</h2>
+<p>서비스는 현재 다음 기능을 제공합니다. 각 기능은 센터의 운영 정책과 회원의 동의 상태에 따라 일부만 제공될 수 있습니다.</p>
+<div class="tablewrap">
+<table>
+<thead><tr><th>구분</th><th>내용</th></tr></thead>
+<tbody>
+<tr><td>로그인</td><td>휴대폰 번호 인증(SMS 인증번호)으로 로그인하고, 센터 회원 명부와 자동으로 대조하여 본인 계정을 연결합니다.</td></tr>
+<tr><td>회원권</td><td>보유 회원권의 상품명·결제금액·총 횟수·잔여 횟수·유효기간·상태 조회, 세션 이용내역(원장) 조회.</td></tr>
+<tr><td>예약</td><td>날짜·시간대별 예약 가능 여부 확인, 예약 신청·취소, 고정 스케줄(반복 예약) 확인.</td></tr>
+<tr><td>체크인</td><td>센터 데스크에 비치된 QR 코드를 앱 카메라로 스캔하여 출석을 기록합니다(예약 시각 기준 ±30분 이내에만 인정).</td></tr>
+<tr><td>홈워크</td><td>코치가 배정한 과제 목록 확인과 수행 체크.</td></tr>
+<tr><td>수업 기록</td><td>코치가 작성한 수업별 운동 종목·세트·횟수·중량·코치 메모 열람.</td></tr>
+<tr><td>체성분 기록</td><td>체성분 분석기 결과지의 6개 수치(체중·골격근량·체지방량·체지방률·내장지방레벨·기초대사량) 입력·조회·추이 확인, 결과지 사진을 이용한 자동 입력 보조.</td></tr>
+<tr><td>체형 분석</td><td>정해진 포즈로 촬영하여 시점별 사진을 보관·비교합니다.</td></tr>
+<tr><td>전자계약</td><td>회원권 계약서 확인과 앱 내 서명.</td></tr>
+<tr><td>일시정지</td><td>회원권 홀딩(일시정지) 신청·해제.</td></tr>
+<tr><td>동의 관리</td><td>일반 이용 동의와 민감정보 동의의 상태 확인, 동의·철회.</td></tr>
+</tbody>
+</table>
+</div>
+<div class="callout ok">
+  <span class="t">서비스가 하지 않는 것</span>
+  <p>서비스는 앱 안에서 <b>결제를 받지 않습니다.</b> 회원권 대금 결제는 센터에서 직접 이루어지며,
+  앱은 센터가 기록한 결제 내역을 <b>조회</b>만 합니다. 또한 서비스는 <b>광고성 정보를 발송하지 않으며</b>,
+  현재 푸시 알림·문자 마케팅 기능이 없습니다.</p>
+</div>
+
+<h2 id="a5"><span class="num">제5조</span>이용계약의 성립</h2>
+<ol class="legal">
+  <li>이용계약은 서비스 이용을 원하는 자가 이 약관에 동의하고, 센터가 이를 승낙함으로써 성립합니다.</li>
+  <li>회원 가입은 다음 두 경로로 이루어집니다.
+    <ul>
+      <li><b>자동 매칭</b> — 휴대폰 번호 인증 후 센터 회원 명부에 같은 번호가 있으면, 본인 이름을 확인하는 절차를 거쳐 계정이 연결됩니다.</li>
+      <li><b>가입 요청</b> — 명부에 번호가 없으면 이름·연락처로 가입을 요청하고, 센터 대표가 승인한 뒤 계정이 연결됩니다.</li>
+    </ul>
+  </li>
+  <li>센터는 다음의 경우 승낙을 유보하거나 거절할 수 있습니다.
+    <ul>
+      <li>타인의 명의로 인증하거나 허위 정보를 기재한 경우</li>
+      <li>센터의 회원이 아니거나 회원권이 종료된 경우</li>
+      <li>과거 이 약관 위반으로 이용이 제한된 이력이 있는 경우</li>
+    </ul>
+  </li>
+</ol>
+
+<h2 id="a6"><span class="num">제6조</span>계정과 본인확인</h2>
+<ol class="legal">
+  <li>계정은 <b>휴대폰 번호</b>를 기준으로 식별되며, 회원 본인 명의의 번호여야 합니다.</li>
+  <li>회원은 자신의 계정을 타인에게 양도·대여하거나 공유할 수 없습니다.</li>
+  <li>회원은 사용하던 휴대폰 번호가 변경·해지되는 경우 지체 없이 센터에 알려야 합니다. 번호를 회수하여 제3자가 사용하게 된 경우 그로 인한 계정 접근을 센터가 기술적으로 차단할 수 없으므로, 이 통지는 회원의 의무입니다.</li>
+  <li>계정 관리 소홀로 발생한 손해에 대해서는 센터에 고의 또는 중대한 과실이 없는 한 회원이 책임을 부담합니다.</li>
+</ol>
+
+<h2 id="a7"><span class="num">제7조</span>회원의 의무</h2>
+<p>회원은 다음 행위를 하여서는 안 됩니다.</p>
+<ol class="legal">
+  <li>타인의 개인정보를 도용하거나 허위 정보를 등록하는 행위</li>
+  <li><b>체형 분석 촬영 시 회원 본인이 아닌 사람이 촬영되도록 하는 행위</b>. 앱은 배경에 다른 사람이 찍히지 않도록 안내만 하며, 자동으로 가려주지 않습니다.</li>
+  <li>서비스에서 열람한 다른 회원 또는 스태프의 정보를 외부에 공개하는 행위</li>
+  <li>서비스를 역설계하거나, 자동화된 수단으로 접근하거나, 서버에 과도한 부하를 유발하는 행위</li>
+  <li>센터 데스크의 체크인 QR을 촬영·복제하여 실제 방문 없이 출석을 기록하려는 행위</li>
+  <li>관련 법령과 이 약관, 서비스 이용 안내를 위반하는 행위</li>
+</ol>
+
+<h2 id="a8"><span class="num">제8조</span>회원권·결제</h2>
+<ol class="legal">
+  <li>회원권의 상품 구성, 가격, 총 횟수, 유효기간은 센터가 정하며 회원권 계약과 앱 화면에 표시됩니다.</li>
+  <li>대금 결제는 센터에서 직접(카드·현금·계좌이체) 이루어지며, <b>앱은 결제 수단을 제공하지 않습니다.</b> 분할 납부의 경우 회차별 납부 예정일과 금액이 앱에 표시됩니다.</li>
+  <li>세션의 차감은 <b>코치의 수업 완료 처리</b>를 기준으로 하며, 회원의 체크인 여부와는 별개입니다. 모든 차감·복구 내역은 앱의 이용내역(원장)에서 확인할 수 있습니다.</li>
+  <li>유효기간이 지난 회원권의 잔여 횟수는 센터의 운영 정책에 따릅니다.</li>
+</ol>
+
+<h2 id="a9"><span class="num">제9조</span>예약·취소·노쇼</h2>
+<ol class="legal">
+  <li>예약은 시간대별 정원과 코치의 일정 범위 안에서만 확정되며, 잔여 세션이 있어야 합니다.</li>
+  <li><b>무료 취소 마감</b>은 수업 시작 기준 <b>24시간 전</b>이 기본값입니다. 마감 이후의 취소는 세션이 차감될 수 있습니다.</li>
+  <li>예약 시간에 나타나지 않은 경우(노쇼) 세션이 차감됩니다. 다만 센터 정책에 따라 <b>최초 1회에 한하여 유예</b>될 수 있습니다.</li>
+  <li>제2항의 마감 시간과 제3항의 유예 여부는 <b>센터가 설정으로 변경할 수 있으며, 변경은 이미 잡혀 있는 예약에도 즉시 적용</b>됩니다. 현재 적용 중인 값은 앱의 예약 화면에서 확인할 수 있습니다.</li>
+</ol>
+<div class="callout warn">
+  <span class="t">정책 값은 센터 설정을 따릅니다</span>
+  <p>이 약관에 적힌 24시간·1회 유예 등은 <b>기본값</b>입니다. 실제 적용되는 값은 앱이 서버에서 받아
+  화면에 표시하는 값이며, 그 값이 이 약관의 예시와 다를 경우 <b>앱에 표시된 값이 실제로 적용</b>됩니다.</p>
+</div>
+
+<h2 id="a10"><span class="num">제10조</span>회원권 일시정지(홀딩)</h2>
+<ol class="legal">
+  <li>회원은 앱에서 회원권의 일시정지를 신청할 수 있습니다. 일시정지 기간만큼 유효기간이 연장됩니다.</li>
+  <li>일시정지는 회원권 1개당 <b>최대 2회, 총 30일</b>이 기본 상한이며, 센터 설정에 따라 달라질 수 있습니다.</li>
+  <li>일시정지 기간에는 신규 예약이 제한됩니다.</li>
+</ol>
+
+<h2 id="a11"><span class="num">제11조</span>중도해지와 환불</h2>
+<ol class="legal">
+  <li>회원은 회원권의 유효기간 중 <b>언제든지 중도해지를 요청할 수 있습니다.</b> 이는 「방문판매 등에 관한 법률」 제31조가 계속거래 소비자에게 보장하는 권리로, <b>약관으로 제한하거나 배제할 수 없습니다.</b></li>
+  <li>환불액은 <b>할인 전 정가가 아니라 회원이 실제 결제한 금액</b>을 기준으로, 이미 이용한 부분의 대가와 위약금을 공제하여 산정합니다. 산정 결과는 요청 시 앱 또는 센터에서 미리 확인할 수 있습니다.</li>
+  <li>위약금은 회원권 계약 체결 시점에 고지된 요율을 적용하며, 그 요율은 <b>이용료의 10분의 1(10%)을 넘지 않습니다.</b> 계약 이후 센터가 요율을 변경하더라도 이미 체결된 계약에는 소급하지 않습니다.</li>
+  <li><b>센터의 폐업·휴업 등 센터 사정으로 이용이 불가능해진 경우</b>에는 위약금을 공제하지 않고, 「체육시설의 설치·이용에 관한 법률 시행령」 [별표 3의2]에 따라 <b>미이용분에 위약금을 더하여</b> 반환합니다.</li>
+  <li>센터는 반환 사유가 발생한 날부터 <b>3영업일 이내</b>에 이용료를 반환합니다. 반환이 지연되는 경우 지연 기간에 대하여 <b>연 15%의 지연이자</b>를 함께 지급합니다(같은 법 시행령 제21조의3·[별표 3의2]).</li>
+  <li>이 약관의 환불 기준이 <b>「체육시설의 설치·이용에 관한 법률」 제22조 및 같은 법 시행령 [별표 3의2], 「방문판매 등에 관한 법률」 제31조·제32조, 「소비자기본법」에 따른 소비자분쟁해결기준(체육시설업), 공정거래위원회 표준약관</b> 등 관계 법령·기준이 정한 것보다 회원에게 불리한 경우에는 <b>법령·기준이 정한 것을 우선 적용</b>합니다.</li>
+</ol>
+<div class="callout warn">
+  <span class="t">센터가 문을 닫게 되는 경우</span>
+  <p>센터는 폐업 또는 휴업이 예정된 경우 <b>예정일 14일 전까지</b> 회원에게 알리고, 잔여 이용분을
+  제4항의 기준에 따라 반환합니다.</p>
+</div>
+<details>
+  <summary>환불액 산정 방식(예시)</summary>
+  <div class="dbody">
+    <p>총 결제금액 1,000,000원 / 총 20회 / 7회 이용 / 위약금율 10%인 회원권을 중도해지하는 경우:</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>항목</th><th>산식</th><th>금액</th></tr></thead>
+      <tbody>
+        <tr><td>1회당 단가</td><td>1,000,000 ÷ 20회</td><td class="num">50,000원</td></tr>
+        <tr><td>이용 대가</td><td>50,000 × 7회</td><td class="num">350,000원</td></tr>
+        <tr><td>위약금</td><td>1,000,000 × 10%</td><td class="num">100,000원</td></tr>
+        <tr><td><b>환불액</b></td><td>1,000,000 − 350,000 − 100,000</td><td class="num"><b>550,000원</b></td></tr>
+      </tbody>
+    </table></div>
+    <p>실제 산정에는 회원권별 결제금액·이용 횟수·계약 시점의 위약금율이 적용됩니다.</p>
+  </div>
+</details>
+
+<h2 id="a12"><span class="num">제12조</span>전자계약과 서명</h2>
+<ol class="legal">
+  <li>회원권 계약은 앱에서 내용을 확인하고 서명하는 방식으로 체결할 수 있습니다.</li>
+  <li>서명이 이루어지면 센터는 위·변조 방지와 분쟁 대비를 위하여 <b>서명 시각과 서명 당시의 IP 주소</b>를 함께 기록합니다.</li>
+  <li>서명이 완료된 계약은 회원과 센터 양쪽에 효력이 있으며, 임의로 수정·삭제되지 않습니다.</li>
+</ol>
+
+<h2 id="a13"><span class="num">제13조</span>체형사진·체성분 기록</h2>
+<ol class="legal">
+  <li>체형사진과 체성분 수치는 「개인정보 보호법」 제23조의 <b>민감정보(건강에 관한 정보)</b>에 해당하며, 다른 개인정보와 <b>별도의 동의</b>를 받은 경우에만 수집·이용합니다.</li>
+  <li>회원이 민감정보 동의를 하지 않거나 <b>동의를 철회하면, 그 즉시 체형사진과 체성분 기록을 새로 저장할 수 없습니다.</b> 이미 저장된 기록은 회원 본인이 계속 열람할 수 있으나, 스태프의 열람은 차단됩니다.</li>
+  <li>체형사진은 회원 본인이 앱에서 직접 촬영하여 업로드하며, <b>스태프가 회원을 대신하여 업로드할 수 없습니다.</b></li>
+  <li>동의·철회의 시각은 기록되며, 회원은 앱의 <b>마이 → 동의 관리</b>에서 언제든지 상태를 확인하고 변경할 수 있습니다.</li>
+  <li>상세한 내용은 <a href="./sensitive-consent.html">민감정보(건강정보) 수집·이용 동의</a> 문서를 따릅니다.</li>
+</ol>
+
+<h2 id="a14"><span class="num">제14조</span>기록의 열람 범위</h2>
+<p>서비스에 저장된 회원의 기록은 다음 범위에서만 열람됩니다. 이 범위는 서버에서 강제되며, 스태프라도 권한 밖의 기록은 조회할 수 없습니다.</p>
+<div class="tablewrap">
+<table>
+<thead><tr><th>기록</th><th>회원 본인</th><th>담당 코치</th><th>센터 대표</th><th>담당 아닌 코치</th></tr></thead>
+<tbody>
+<tr><td>회원권·예약·이용내역</td><td>○</td><td>○</td><td>○</td><td>✕</td></tr>
+<tr><td>수업 기록·홈워크</td><td>○</td><td>○</td><td>○</td><td>✕</td></tr>
+<tr><td>체성분(InBody) 기록</td><td>○</td><td>○</td><td>○</td><td>✕</td></tr>
+<tr><td><b>체형사진</b></td><td>○</td><td>△ 동의 유효 시</td><td>△ 동의 유효 시</td><td>✕</td></tr>
+</tbody>
+</table>
+</div>
+<p style="font-size:14.6px;color:var(--dim)">△ = 회원의 민감정보 동의가 유효한 동안에만 열람 가능. 동의를 철회하면 사진 파일 접근이 차단됩니다.</p>
+
+<h2 id="a15"><span class="num">제15조</span>서비스의 변경·중단</h2>
+<ol class="legal">
+  <li>센터는 서비스의 내용을 변경하거나 일부를 중단할 수 있으며, 중요한 변경은 사전에 공지합니다.</li>
+  <li>시스템 점검·설비 장애·통신 두절 등 부득이한 사유가 있는 경우 서비스 제공이 일시 중단될 수 있습니다.</li>
+  <li>서비스가 중단되더라도 회원이 이미 취득한 회원권의 권리(잔여 세션·유효기간)는 소멸하지 않으며, 센터는 앱 이외의 방법으로 이를 이행합니다.</li>
+</ol>
+
+<h2 id="a16"><span class="num">제16조</span>이용 제한</h2>
+<ol class="legal">
+  <li>회원이 제7조의 의무를 위반한 경우 센터는 사전 통지 후 서비스 이용을 제한할 수 있습니다. 다만 긴급하거나 중대한 위반의 경우 즉시 제한할 수 있습니다.</li>
+  <li>이용 제한이 이루어지더라도 회원권 계약 자체의 효력에는 영향이 없으며, 회원은 센터에서 직접 서비스를 이용할 수 있습니다.</li>
+  <li>회원은 이용 제한에 대하여 이의를 제기할 수 있고, 이유가 타당한 경우 센터는 즉시 제한을 해제합니다.</li>
+</ol>
+
+<h2 id="a17"><span class="num">제17조</span>이용계약의 해지</h2>
+<ol class="legal">
+  <li>회원은 언제든지 이용계약의 해지(계정 삭제)를 요청할 수 있습니다.</li>
+  <li>해지 요청은 <b>센터 데스크</b> 또는 <a href="./account-deletion.html">계정·데이터 삭제 요청</a> 안내에 기재된 연락처로 접수하며, 센터는 본인 확인 후 <b>지체 없이(정당한 사유가 없는 한 10일 이내)</b> 계정과 개인정보를 파기합니다.</li>
+  <li>다만 관계 법령에 따라 보존 의무가 있는 거래 기록은 해당 법령이 정한 기간 동안 별도로 분리 보관한 뒤 파기합니다. 자세한 내용은 개인정보처리방침의 보유기간 항목을 따릅니다.</li>
+  <li>해지 시 회원권의 잔여 세션에 대한 정산은 제11조(중도해지와 환불)에 따릅니다. <b>계정 삭제가 곧 회원권 해지를 뜻하지는 않습니다.</b></li>
+</ol>
+<div class="callout warn">
+  <span class="t">계정 삭제 요청 경로</span>
+  <p>계정 삭제 요청 방법, 삭제되는 항목과 법령에 따라 보존되는 항목, 처리 기간은
+  <a href="./account-deletion.html"><b>계정·데이터 삭제 요청</b></a> 안내에 정리되어 있습니다.
+  센터는 요청 사실과 처리 결과를 회원에게 회신합니다.</p>
+</div>
+
+<h2 id="a18"><span class="num">제18조</span>지식재산권</h2>
+<ol class="legal">
+  <li>서비스와 그 구성요소(소프트웨어·디자인·아이콘·문구)에 대한 지식재산권은 센터 또는 정당한 권리자에게 귀속됩니다.</li>
+  <li>회원이 촬영한 체형사진에 대한 권리는 <b>회원 본인</b>에게 있습니다. 센터는 이 약관과 민감정보 동의서가 정한 범위(트레이닝 지도와 변화 비교) 안에서만 이를 이용하며, <b>홍보·광고·전시 등 다른 목적으로 이용하려면 그때마다 회원의 별도 동의</b>를 받습니다.</li>
+</ol>
+
+<h2 id="a19"><span class="num">제19조</span>건강 관련 면책</h2>
+<div class="callout danger">
+  <span class="t">서비스는 의료행위가 아닙니다</span>
+  <p>서비스가 제공하는 체성분 수치, 체형사진 비교, 운동 기록과 홈워크는 <b>운동 지도를 돕기 위한
+  참고 자료</b>이며 <b>의학적 진단·치료·처방이 아닙니다.</b> 질병의 진단이나 치료가 필요한 경우
+  반드시 의료기관의 진료를 받으시기 바랍니다.</p>
+</div>
+<ol class="legal">
+  <li>체성분 수치는 측정 시점의 수분·식사·측정 조건에 따라 변동될 수 있으며, 서비스는 그 수치의 의학적 정확성을 보증하지 않습니다.</li>
+  <li>회원은 부상·질환·임신 등 운동에 영향을 줄 수 있는 건강 상태를 사전에 센터에 알려야 하며, 이를 알리지 않아 발생한 결과에 대해서는 센터가 책임지지 않습니다.</li>
+  <li>홈워크는 센터 외부에서 회원이 자율적으로 수행하는 운동이며, 수행 중 발생한 사고에 대하여 센터는 고의 또는 중대한 과실이 없는 한 책임을 지지 않습니다.</li>
+</ol>
+
+<h2 id="a20"><span class="num">제20조</span>책임의 범위</h2>
+<ol class="legal">
+  <li>센터는 천재지변, 통신사·클라우드 사업자의 장애 등 불가항력으로 인한 서비스 장애에 대하여 책임을 지지 않습니다.</li>
+  <li>센터는 회원의 귀책사유로 인한 서비스 이용 장애에 대하여 책임을 지지 않습니다.</li>
+  <li>이 조의 어떠한 내용도 센터의 <b>고의 또는 중대한 과실</b>로 인한 손해에 대한 책임을 면제하지 않으며, 관계 법령이 인정하는 회원의 권리를 제한하지 않습니다.</li>
+</ol>
+
+<h2 id="a21"><span class="num">제21조</span>개인정보의 보호</h2>
+<p>센터는 관계 법령이 정하는 바에 따라 회원의 개인정보를 보호합니다. 수집하는 항목, 이용 목적,
+보유 기간, 처리 위탁, 국외 이전, 정보주체의 권리와 행사 방법 등 상세한 사항은
+<a href="./privacy.html">개인정보처리방침</a>에서 정합니다.</p>
+
+<h2 id="a22"><span class="num">제22조</span>분쟁해결·준거법</h2>
+<ol class="legal">
+  <li>센터는 회원의 의견과 불만을 처리하기 위한 창구를 운영합니다. 접수처는 개인정보처리방침에 기재된 연락처와 같습니다.</li>
+  <li>이 약관과 서비스 이용에 관하여는 <b>대한민국 법</b>을 준거법으로 합니다.</li>
+  <li>분쟁이 발생한 경우 센터와 회원은 성실히 협의하여 해결합니다. 협의가 이루어지지 않는 경우 「민사소송법」이 정한 관할 법원에 소를 제기할 수 있습니다.</li>
+  <li>회원은 「소비자기본법」에 따른 <b>한국소비자원</b>의 피해구제·분쟁조정, 「전자문서 및 전자거래 기본법」에 따른 <b>전자문서·전자거래분쟁조정위원회</b>의 조정을 신청할 수 있습니다.</li>
+</ol>
+
+<hr>
+
+<h2 id="addendum">부칙</h2>
+<ol class="legal">
+  <li>이 약관은 <span class="ph" data-biz="effective_date">(시행일 미정)</span>부터 시행합니다.</li>
+</ol>
+
+<footer class="doc">
+  <p><b><span class="ph" data-biz="biz_name">(사업자명 미정)</span></b> · 대표 <span class="ph" data-biz="ceo_name">(대표자명 미정)</span></p>
+  <p>사업자등록번호 <span class="ph" data-biz="biz_reg_no">(사업자등록번호 미정)</span> · 주소 <span class="ph" data-biz="address">(사업장 주소 미정)</span></p>
+  <p>문의 <span class="ph" data-biz="phone">(대표 전화 미정)</span> · <span class="ph" data-biz="email">(대표 이메일 미정)</span></p>
+  <p style="margin-top:14px">
+    <a href="./privacy.html">개인정보처리방침</a> ·
+    <a href="./sensitive-consent.html">민감정보(건강정보) 수집·이용 동의</a> ·
+    <a href="./account-deletion.html">계정·데이터 삭제 요청</a>
+  </p>
+</footer>
+
+</div>
+<button class="totop" id="totop" type="button" aria-label="맨 위로">↑</button>
+<script>
+/* 사업자 정보 채우기 — GET /api/v1/public/business (계약 v2.13, 무인증 · 동일 오리진).
+ *
+ * 왜 서버에서 받아오나: 상호·대표자·등록번호·보호책임자는 문서가 아니라 **센터가 등록하는 값**이다.
+ * HTML 5장에 손으로 박아 두면 상호 한 번 바뀔 때 5장을 고쳐야 하고, 한 장을 빠뜨린 채로
+ * 법정 고지가 서로 다른 사업자를 가리키게 된다.
+ *
+ * 왜 상대 경로인가: firebase.json이 /api/** 를 Cloud Run으로 리라이트한다 — 이 문서와
+ * 같은 오리진이라 CORS 설정도, 외부 호스트도 필요 없다. 이 페이지가 하는 네트워크 요청은
+ * 이것 하나뿐이다(외부 폰트·CDN·분석 도구 없음).
+ *
+ * **중괄호는 애초에 파일에 없다.** 각 자리는 `(항목명 미정)`으로 미리 렌더돼 있고 이 스크립트는
+ * 그 위에 값을 덮어쓸 뿐이다 — 요청이 실패하든 JS가 꺼져 있든 원시 플레이스홀더가 보일 수
+ * 없는 구조다. 실패는 조용히 넘긴다(폴백이 이미 화면에 있다).
+ *
+ * 초안 배너는 **채울 게 하나도 남지 않았을 때만** 사라진다: 서버가 계산한 complete + 시행일
+ * 존재 + 화면에 남은 미기재 0개. 셋 다여야 한다 — 배너를 무조건 지우면 반쪽짜리 문서가
+ * "시행 중"인 척하게 되고, 그건 고지 누락이다.
+ */
+(function () {
+  var slots = document.querySelectorAll("[data-biz]");
+  if (!slots.length) return;
+
+  var ctl = typeof AbortController === "function" ? new AbortController() : null;
+  var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 6000);
+
+  fetch("/api/v1/public/business", ctl ? { signal: ctl.signal } : undefined)
+    .then(function (res) { return res.ok ? res.json() : null; })
+    .then(function (data) {
+      if (!data || typeof data !== "object") return;
+      var unfilled = 0;
+      for (var i = 0; i < slots.length; i++) {
+        var el = slots[i];
+        var v = data[el.getAttribute("data-biz")];
+        if (typeof v === "string" && v.trim() !== "") {
+          el.textContent = v.trim();
+          el.classList.remove("ph"); /* 채워진 자리는 일반 본문으로 — 경고 칩을 벗긴다 */
+        } else {
+          unfilled++;
+        }
+      }
+      var effective = typeof data.effective_date === "string" ? data.effective_date.trim() : "";
+      if (data.complete === true && effective !== "" && unfilled === 0) {
+        var notice = document.getElementById("draft-notice");
+        if (notice && notice.parentNode) notice.parentNode.removeChild(notice);
+      }
+    })
+    .catch(function () { /* 폴백이 이미 렌더돼 있다 — 배너도 그대로 둔다(fail-closed) */ })
+    .then(function () { clearTimeout(timer); });
+})();
+</script>
+<script>
+/* 맨 위로 버튼. (사업자 정보 조회는 위 스크립트 — 이 문서의 유일한 네트워크 요청이다.) */
+(function(){
+  var b=document.getElementById('totop');
+  addEventListener('scroll',function(){b.classList.toggle('on',scrollY>600)},{passive:true});
+  b.addEventListener('click',function(){scrollTo({top:0,behavior:'smooth'})});
+})();
+</script>
+</body>
+</html>

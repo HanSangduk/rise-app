@@ -1,0 +1,534 @@
+# 라이즈 컨디셔닝 백엔드 (Go)
+
+PT 센터 운영 SaaS "라이즈 컨디셔닝"의 백엔드 API 서버. 회원 → 회원권(세션) → 예약 → 체크인 →
+정산으로 이어지는 코어 루프를 다룬다. 설계 근거는 `../PT데스크_설계_00_제품정의_자문자답_2026-08-14.md`
+(§4 도메인, §10 결정로그 P1~P20)와 `../PT데스크_설계_03_라이즈_v1확정_DB백엔드_2026-08-14.md`
+(P33~P48: 슬롯3팀·역할·홀딩·고정스케줄·체크인·가입매칭). API 계약의 단일 진실은
+`../docs/API계약_v1.md` — 필드명·엔드포인트가 여기와 다르면 계약 문서가 맞다.
+
+## 스택
+
+| 역할 | 선택 | 근거 |
+|---|---|---|
+| 언어/런타임 | Go 1.26 | 스케일투제로 콜드스타트·단일 바이너리(와드샷 백엔드와 동일 근거) |
+| 라우팅 | chi v5 | net/http 100% 호환·미들웨어·zero dep |
+| DB | Firestore(+인메모리 개발) | 예약 원자성=트랜잭션, 설계03 §11 스키마 |
+| 인증 | Firebase Auth(ID 토큰) + dev 헤더 폴백 | 로컬 개발은 키 없이 즉시 구동 |
+
+## 아키텍처(클린 아키텍처)
+
+```
+cmd/server         부트스트랩·DI·graceful shutdown
+internal/
+  domain/          순수 stdlib(프레임워크 0) — 회원권 원장·환불계산·예약규칙·홈워크배정·체크인시간창
+                   골든값 테이블 테스트로 교차검증(각 *_test.go)
+  store/           Store 인터페이스 뒤 Firestore(실연동)/Memory(개발). BookAtomic이 슬롯 원자성을 강제
+  api/             chi 라우터·Firebase/dev 인증·역할 스코프·서비스 오케스트레이션·핸들러
+  config/          환경변수
+```
+
+의존 방향: `api → {store, domain}`. domain은 아무것도 모른다(표준 라이브러리만) → SDK 없이
+테스트·이식 자유. Store 인터페이스가 Firestore·Memory 구현을 감춘다(와드샷 패턴 재사용).
+
+## 설치
+
+```bash
+cd ptdesk/backend
+go mod tidy      # 최초 1회: chi·firebase-admin·firestore 의존성 고정(네트워크 필요, go.sum 생성)
+```
+
+## 실행
+
+```bash
+go run ./cmd/server     # 기본: 인메모리 스토어 + dev 헤더 인증(키·DB 없이 즉시 구동)
+```
+
+실행 모드는 환경변수로 스왑([.env.example](.env.example) 참고):
+
+| 원함 | 설정 |
+|---|---|
+| 오프라인 개발(기본) | (기본) 인메모리 + dev 헤더 인증 |
+| **데모 데이터 시딩(v1.4)** | `DEV_SEED=true` — 스태프 3·회원 5·패스·예약·홈워크·결제(미납)·계약·수업기록 시딩. 어드민 데모 uid `owner1`/`t1`/`t2`, 회원 앱 데모 uid `member1`(김민지). 인메모리 한정 |
+| 실 DB | `USE_FIRESTORE=true GCP_PROJECT=...`(또는 `FIRESTORE_EMULATOR_HOST`) |
+| 실 인증 | `FIREBASE_PROJECT=...` (Firebase Admin SDK가 Application Default Credentials로 인증) |
+
+### 로컬 개발 인증(dev 헤더)
+
+`FIREBASE_PROJECT`가 비어 있으면 모든 `/v1` 요청에 아래 헤더가 필요하다:
+
+```
+X-Dev-Uid: owner1
+X-Dev-Role: owner        # owner|trainer|member
+```
+
+`curl` 예시:
+
+```bash
+curl -s http://localhost:8080/v1/me -H "X-Dev-Uid: owner1" -H "X-Dev-Role: owner"
+```
+
+## 테스트
+
+```bash
+go test ./...                    # 전체(도메인 골든값 + api 통합 테스트)
+go test ./internal/domain/...    # domain은 외부 의존 0 → 오프라인으로 항상 통과해야 함
+go test ./internal/api/... -v    # 서비스 오케스트레이션 통합 테스트(인메모리 스토어)
+go test ./internal/domain/... -run TestRefundQuoteGolden -v
+```
+
+domain 패키지의 골든값(모두 `API계약_v1.md` "핵심 골든값" 문단과 설계03 §14 R10에서 그대로 가져옴):
+
+- 환불: 1,000,000원·20회·7회사용·10% → per 50,000 / usage 350,000 / penalty 100,000 / **refund 550,000**
+- 예약: 슬롯 용량 3 초과 거부, 동일 트레이너 중복 예약 거부
+- 재등록률: 2/8 + 1/6 + 1/6 = 4/20 = 20%
+- 홈워크: 부상 플래그 회원 자동 제외(my_members·center_notice), individual은 필터 미적용, 수동 포함 오버라이드
+- 체크인: 예약 슬롯 시작 ±30분 시간창
+- 홀딩 상한: 회원 셀프 홀딩 최대 2회·총 30일(정책값, 경계 30일=통과·31일=거부)
+
+api 패키지의 통합 테스트는 감사 라운드마다 나온 버그들의 회귀를 고정한다 — 발급 직후 예약 성공
+(잔여 스냅샷), 이중 complete 400, 노쇼 유예 1회 소진, 미연결 회원 403(스코프 우회 차단),
+member 셀프 스코프 강제, consent 전이 시각, 부분 PUT 머지, 셀프 홀딩 상한, recurring 잔여 캡,
+트레이너 center 통계 금액 제외, self_qr 체크인 등. 파일이 주제별로 나뉘어 있다:
+
+| 파일 | 주제 | `func Test` |
+|---|---|---|
+| `internal/api/service_test.go` | 코어 루프 전반(P01~) | 60 |
+| `internal/api/service_staff_test.go` | 직원 생애주기(v1.8·v2.0) | 22 |
+| `internal/api/service_atomicity_test.go` | 트랜잭션·경합(v2.6) | 9 |
+| `internal/api/service_recurring_hw_test.go` | 고정 스케줄·HW 스케줄(v2.3) | 8 |
+| `internal/api/service_money_test.go` | 환불 기준액·발급 검증(v2.4) | 6 |
+| `internal/api/service_scope_test.go` | 쓰기 경로 담당 경계(v2.5) | 4 |
+| `internal/api/service_hwschedule_wiring_test.go` · `service_inbody_date_test.go` | 배선 회귀 | 1 + 1 |
+| `internal/api/service_contract_test.go` | 전자계약 전이·경합(v2.15) | 10 |
+| `internal/api/hookstore_test.go` | 실패 주입용 훅 스토어(테스트 없음, 헬퍼) | 0 |
+
+현재 총계(2026-08-29, P37 시점 재집계): **api 179 · domain 84 · store 9 · config 2 = 274**
+(그중 1개는 아래 에뮬레이터 태그가 있어야 돈다). 위 표의 파일별 숫자는 각 파일이 만들어진
+시점 것이라 이후 추가분을 반영하지 않는다 — 정확한 값은 `grep -c "^func Test"`. 종전 README가
+적어 둔 "api 통합 34케이스"는 v1.5, "총계 182"는 v2.7 시점 숫자다.
+
+### 두 스토어 공통 계약 스위트 (v2.6)
+
+`Memory`와 `Firestore`는 **같은 인터페이스를 만족한다고 해서 같게 동작하지 않는다**. v2.6 감사에서
+18개 프로브 중 13개에서 동작이 갈렸다(없는 ID Update가 Firestore에선 유령 문서 + 200, Memory에선
+404 등). 드리프트를 막으려고 같은 테스트 함수를 두 구현에 돌리는 공통 스위트를 뒀다.
+
+```bash
+go test ./internal/store/       # 기본 = Memory 구현으로 스위트 실행
+```
+
+- 스위트 본체: `internal/store/conformance_test.go`(서브테스트 20종 — 유령 문서·Ledger 롤백·
+  fresh 재검증·페널티 원장 동반 취소·잔여 예산·정렬·**동시 환불/홀딩/예약**, v2.15부터 계약
+  전이 fresh 재검증·**동시 서명 vs 재발송**·환불 마감+무효화 원자성·**동시 계약 생성** 포함).
+- **새 스토어 동사를 추가하면 이 스위트에 케이스를 함께 넣는다.**
+
+경합 결함은 Memory에서 **재현되지 않는다**(전역 뮤텍스 하나라 경합 창이 나노초). `go test`가
+전부 초록인데 프로덕션에서만 터지는 종류라, 에뮬레이터 러너를 별도 빌드 태그로 옵트인한다:
+
+```bash
+# 사전: JDK 21+ (firebase-tools 15가 그 아래를 거부한다)
+export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-21.jdk/Contents/Home
+export PATH="$JAVA_HOME/bin:$PATH"
+
+firebase emulators:exec --only firestore --project demo-rize \
+  --config testdata/firebase.json \
+  'go test -tags firestore_emulator -count=1 ./internal/store/'
+```
+
+- 태그가 붙는 파일은 `internal/store/firestore_conformance_test.go` **하나뿐**이다
+  (`//go:build firestore_emulator` — 저장소 전체에서 유일한 빌드 태그).
+- `emulators:exec`가 자식 프로세스에 `FIRESTORE_EMULATOR_HOST`를 주입하고 SDK가 그걸 자동
+  감지한다. 미설정이면 테스트가 스스로 `t.Skip`하므로 태그만 켜고 러너 없이 돌리면 조용히 건너뛴다.
+- 에뮬레이터 설정은 `backend/testdata/firebase.json`(포트 8480, UI 끔, singleProjectMode).
+  저장소 루트의 `firebase.json`과 **다른 파일**이다 — 루트 쪽은 Hosting·rules 배포용이라
+  emulators 블록이 없다. 프로젝트 ID의 `demo-` 접두는 자격증명을 요구하지 않게 하는 관례다.
+- **CI 잡은 아직 없다**(저장소에 `.github` 없음). 지금은 사람이 손으로 돌린다.
+
+## API
+
+전체 엔드포인트·JSON 필드명은 [`../docs/API계약_v1.md`](../docs/API계약_v1.md) 참고. 요약:
+
+```
+GET  /v1/me                                          POST /v1/join/match|confirm|request|approve
+GET  /v1/join/requests                               (v1.1)
+GET  /v1/members  POST /v1/members  PUT /v1/members/{id}  GET /v1/members/{id}/ledger
+POST /v1/passes  GET /v1/passes(v1.1)  POST /v1/passes/{id}/hold|resume|refund-quote
+GET  /v1/slots  POST /v1/bookings  GET /v1/bookings(v1.1)  DELETE /v1/bookings/{id}  POST /v1/bookings/{id}/complete|noshow
+POST /v1/recurrings  DELETE /v1/recurrings/{id}  POST /v1/checkin
+GET  /v1/homeworks  POST /v1/homeworks  POST /v1/hw-checks  GET /v1/hw-checks?hw_id=&member=&date=(v1.1·v1.2)
+GET  /v1/stats  POST /v1/payments  GET /v1/payments(v1.1)  POST /v1/payments/{id}/installments/{i}/pay
+GET  /v1/contracts(v1.1)  POST /v1/contracts(v1.1)  POST /v1/contracts/{id}/send(v1.1)
+GET  /v1/body-photos  POST /v1/body-photos  GET /v1/inbody  POST /v1/inbody
+GET  /v1/staff  POST /v1/staff(v1.8 초대·재고용)  POST /v1/staff/{uid}/offdays
+PUT  /v1/staff/{uid}  POST /v1/staff/{uid}/transfer|deactivate|reactivate   (v2.0 생애주기)
+GET  /v1/center(v1.1·v1.4 member 공개)  PUT /v1/center(v1.4 정책 편집)
+GET  /v1/workout-logs  POST /v1/workout-logs        (v1.4 수업 기록)
+GET  /v1/recurrings?include_expired=                 (v1.4 고정 스케줄 관리 · v2.3 만료 규칙 포함)
+DELETE /v1/recurrings/{id}?keep_bookings=            (v2.3: 204 → 200 {cancelled, kept})
+POST /v1/passes/{id}/refund                          (v1.4 환불 실행)
+POST /v1/contracts/{id}/sign                         (v1.4 회원 자체서명)
+PUT  /v1/staff/{uid}/profile                         (v1.6 트레이너 공개 프로필)
+GET  /healthz  GET /health  ← Cloud Run(run.app)에서는 /health만 사용 — GFE가 /healthz를 가로챔(P06)
+```
+
+라우터에 실제로 등록된 `/v1` 라우트는 **54개**이고, 전부 `/v1/*`과 `/api/v1/*` **양쪽에 미러
+마운트**된다(이유는 아래 "배포" 절). 위 목록은 그 미러를 접어서 적은 것이다.
+
+**v1.4 기능 패치(2026-08-22, 기능 갭 리서치·UX 여정 검수 — 계약 문서 "## v1.4 기능 패치" 섹션)**:
+코어 루프의 마지막 구멍(수업기록)과 owner 여정 데드엔드 4곳을 채웠다 — WorkoutLog 엔티티+
+목록/생성, 고정 스케줄 목록(GET /v1/recurrings), 운영 정책 편집(PUT /v1/center, 범위 검증 —
+member도 GET은 가능하되 매출 목표 제외), 환불 실행(원장 refund 마감+refunded 전이, owner 전용),
+계약 자체서명(sent→signed, member 본인), Stats에 sessions(트레이너 정산 근거)·미수금
+(unpaid_total/count, owner 전용), 예약 생성 시 트레이너 휴무일 거부, DEV_SEED 데모 시딩.
+전부 api 통합 테스트(총 26케이스)와 실서버 E2E로 검증됨(work_log/P02).
+
+**v1.4.1 검수 보완(2026-08-22, P03 새눈 검수 — 계약 "v1.4.1" 절)**: 환불 실행이 미래 confirmed
+예약을 무차감 일괄 취소(원장 음수·정산 오집계·슬롯 점유 방지, complete/noshow에 refunded 패스
+이중 방어선), used는 원장 파생값 검증(빈 바디 전액 환불 견적 버그 수정), PUT /v1/center 머지
+시맨틱(누락 필드 초기화 방지), WorkoutLog 날짜 형식 검증(정렬·필터 오염 방지), refunded 패스
+홀딩/재개 차단, recurring의 지난 시각 회차 생성 금지, by_trainer에서 owner 행 제외, 재발송↔서명
+경합 가드, decodeJSON 다중 문서 거부. 회귀 테스트 4개 추가(api 통합 총 30케이스).
+잔여(당시 문서화된 LOW)의 현재 상태: **RefundPass의 마감은 v2.6에서 트랜잭션화됐고**
+(`UpdatePassWithLedger`), **`SendContract`·`SignContract`는 v2.15에서 트랜잭션화됐다**
+(`TransitionContract` — P37. v1.4.1의 재발송↔서명 경합 가드는 저장 직전 재확인이라 창을
+좁혔을 뿐이었고, 이제 판정 자체가 트랜잭션 안이다). `PayInstallment`는 **여전히 열려 있다**
+(아래 갭 목록). 휴무일 소급 등록 시 기존 confirmed 예약 스윕 없음도 그대로다(고정 스케줄
+해제는 v2.3에서 스윕이 생겼지만 휴무일은 별개 경로다). `signer_ip`는 신뢰 프록시 전제
+(v1.5에서 XFF 마지막 홉으로 좁힘).
+
+**v1.5 정산·정합 패치(2026-08-22, 예약·결제·계약 도메인 수직 감사 — 계약 "v1.5" 절, work_log/P04)**:
+환불이 세 도메인을 관통하는 한 사건이 되도록 재구성 — 실수납(Σ납부 회차) 기준 정산(분할 미완납
+패스의 과지급 차단, RefundResult.paid_sum), 계약 요율 스냅샷(penalty_rate — 정책 변경 소급 차단),
+미납 회차 청구 종결(waived_at → 유령 미수금 제거), 미서명 계약 자동 무효(voided), 미래 예약 취소와
+합쳐 4종 부수효과 일원화. 미수금을 연체(due 경과)로 재정의(+upcoming_total), 매출은 순매출(환불
+제외). CreatePayment 검증 게이트 7종·납부 멱등·회원 동시 1팀 규칙·스태프 무차감 취소(?waive=true)·
+tap 체크인 가드·recurring 검증(hour/days)·슬롯 최소노출(member)·빈 슬롯 용량 갱신·계약 중복 차단·
+first_sent_at·signer_ip XFF 마지막 홉. 도메인 감사 3팀의 실증(스크래치 사본 재현 테스트) 기반이며
+회귀 테스트로 고정(api 통합 34케이스 + 정산 골든: 완납 550,000 / 분할 50만 수납 시 50,000).
+
+v1.1 정합 패치(2026-08, `../docs/API계약_v1.md` "## v1.1 정합 패치" 섹션)가 위 (v1.1) 표시 엔드포인트와
+`Contract` 엔티티, `Slot.teams[].status`, `GET /v1/members`의 임베드 `passes:[]`를 모두 반영했다.
+`POST /v1/passes`는 이제 발급과 동시에 `Contract`를 `status=sent`로 자동 생성한다(하단 확정 플로우).
+
+**v1.2 정합 패치(2026-08-17, 3계층 교차검증 — 계약 문서 "## v1.2 정합 패치" 섹션)** 반영 요약:
+
+- **회원 앱 셀프서비스 허용**: member가 `GET /v1/members`(본인 1건=내 프로필), `PUT /v1/members/{id}`
+  (본인 consent만 — 전이 시각은 서버 기록), `hold/resume`(정책 상한: 기본 2회·총 30일), `refund-quote`를
+  호출할 수 있다. 종전엔 전부 403이라 회원 앱 마이 탭이 전멸이었다.
+- **스코프 우회 차단**: member인데 member_id 미연결(가입 매칭 전)이면 목록 엔드포인트가 403 —
+  빈 스코프가 필터를 지워 센터 전체가 노출되던 결함 수정.
+- **PUT /v1/members/{id} = 머지 시맨틱**: 보낸 필드만 갱신(부분 PUT이 app_linked·last_visit_at을 지우지 않음).
+- **예약 규칙 보강**: 발급 직후 예약 실패(잔여 스냅샷 0) 수정 — 잔여는 항상 원장 재계산. 슬롯 날짜도
+  유효기간·홀딩과 대조. complete/noshow는 confirmed에서만(이중 차감 방지). 노쇼 유예는 waived 이력도
+  소진으로 집계(무한 유예 수정). recurring도 동일 검증 + 잔여 캡.
+- **stats**: trainer의 `scope=center` 허용하되 금액(monthly/ytd/target)·by_trainer 제외(P45 비교는 비율만).
+- **에러 메시지**: 사용자향 한국어로 통일(내부 마커·Go 원문 제거), 500은 로그로만 원문 기록.
+
+**v1.3 정합 패치(2026-08-18, 2라운드 로직 재검증 — 계약 문서 "## v1.3 정합 패치" 섹션)** 반영 요약:
+
+- **보안**: `join/confirm`에 전화번호 재대조 필수(유출 member_id만으로 타인 레코드 연결 불가),
+  member의 홈워크 응답에서 대상/제외 명단 제거 + 부상 제외 회원에겐 공지형도 미배달,
+  `DELETE /bookings/{id}` 상태 가드(재취소 이중 차감 차단 — 스토어 트랜잭션 내부 재검증 포함),
+  member 셀프 홀딩의 시간축 검증(과거/유효기간 밖/겹침 거부 — 공짜 연장·만료 부활 차단),
+  stats의 target(매출 목표)은 scope 무관 owner 전용.
+- **예약 시간축 확정**: 상태·잔여는 지금 기준, 날짜 적합성은 슬롯 기준 — 지난 시간대 거부,
+  미래 시작 패스의 유효기간 내 선예약 허용(재등록 플로우), 홀딩 구간 슬롯 거부.
+  `Booking.status=waitlist`는 예약어로만 유지(알림 인프라 없는 자동 승격은 노쇼 함정 — 후속).
+- **직렬화·정책 규약**: 배열 필드 항상 `[]`(null 금지 — 어드민 크래시 방지), Policy 홀딩 상한
+  0=부재→기본값 승격·-1=무제한(v1.2 이전 Firestore 문서에서 상한이 풀리는 것 방지),
+  consent 전이 시각 항상 서버 기록(스태프 PUT 포함), 체크인 기록 예약당 1건 멱등 upsert,
+  JSON 파싱 에러 한국어화, offdays 날짜 형식 검증, CreatePass의 member 실존 검증.
+
+빠른 확인:
+
+```bash
+go run ./cmd/server &
+curl -s -X POST http://localhost:8080/v1/members \
+  -H "X-Dev-Uid: owner1" -H "X-Dev-Role: owner" -H "Content-Type: application/json" \
+  -d '{"name":"김민지","phone":"010-1234-5678","channel":"워크인","trainer_id":"t1","status":"active"}' | jq .
+```
+
+**v1.9 보안 패치(2026-08-22, P08 새눈 감사 — 계약 "v1.9" 절)**: 가입 경로가 뚫려 있었다.
+v1.7의 "토큰에 번호가 **있으면** 진실" 조건부 규칙이, 번호 없는 토큰(이메일 계정)을 바디 폴백으로
+흘려보내 **번호만 알면 남의 회원 계정에 연결**할 수 있었다(자체 가입 허용 + 공개 웹 API 키).
+조건부 → 필수로 강화. 더불어 join/confirm·approve가 호출자 UserIndex를 무조건 member로 덮어써
+**대표가 한 번 호출하면 센터가 영구히 잠기던** 경로를 차단, 승인 멱등 가드, 연결 전 응답에서
+건강정보(부상 메모) 제거, 권한 검사를 데이터 조회보다 앞으로(존재 오라클 차단).
+프로덕션에서 공격 시나리오를 재현해 6/6 차단 확인.
+
+**v2.0 직원 생애주기(2026-08-23, P08 — 계약 "v2.0" 절)**: `Staff.status`(부재=active 승격) +
+정정·이관·퇴사·재입사 4 엔드포인트. 퇴사는 담당 이관을 **선행 요구**하고(막는 이유를 blockers로
+반환), 이관은 패스마다 원장에 `transfer`(delta 0)를 남긴다 — v1부터 선언만 돼 있던 예약된 사유값의
+첫 사용이다. 락아웃 3중 가드(자기 자신·마지막 활성 owner·강등 우회). 같은 패치에서 **체형사진·
+인바디 쓰기에 권한 검사가 없던 구멍**(읽기는 막혀 있어 비대칭)과 미연결 회원의 주인 없는 홈워크
+체크도 함께 막았다. 프로덕션 전 여정 E2E 24/24 통과.
+
+**v2.1 비율 분모·차단 사유(2026-08-23, P09 — 계약 "v2.1" 절)**: `Stats`에 `noshow_d`·`hw_d`와
+`by_trainer[]`의 같은 분모를 추가했다. 비율만 주고 분모를 감추면 클라이언트가 "성과 0"과 "모수
+없음"을 가를 수 없어, 이번 기간 수업 0건인 코치가 "노쇼율 0.0%"로 **최우수처럼** 표시됐다.
+`omitempty`를 일부러 붙이지 않는다 — 0은 정보이고, 필드가 사라지면 구버전 서버와 구별되지 않는다.
+같은 패치에서 퇴사 차단의 `blockers.bookings`를 `{id, slot_key}` 객체로 바꾸고(어드민이 이유를
+사람 눈으로 읽으려 예약을 한 번 더 조회하던 왕복 제거), `POST /v1/passes`·`/v1/members`·
+`PUT /v1/members/{id}`의 `trainer_id`에 실존·재직 검증을 걸었다(v2.0이 예약·고정스케줄만 막아
+발급 경로로 루프가 다시 열려 있었다). 목록 기본 정렬은 두 스토어 공통 **문서 ID 오름차순**.
+
+**v2.2 `/v1/me` 표시 이름(2026-08-23, P10 — 계약 "v2.2" 절)**: 응답에 `name`(omitempty)을 더했다.
+staff면 Staff.name, 연결된 member면 Member.name. **best-effort** — 이름 조회가 실패해도 이 호출은
+성공한다. 모든 클라이언트가 가장 먼저 부르는 부트스트랩 엔드포인트라, 표시용 이름 하나 때문에
+"앱이 온보딩을 시작 못 하고 어드민이 로그인 화면에 갇히는" 위험을 지지 않는다.
+
+**v2.3 고정 스케줄·Home Work 스케줄(2026-08-23, P12 — 계약 "v2.3" 절)**: 고정 스케줄의 "잔여 이내"
+보장이 **규칙 단위**라 규칙을 두 번 만들면 무력화됐고(잔여 10회 → confirmed 21건), 규칙을 지워도
+그 규칙이 만든 예약은 남았다. 캡 기준을 "이 요청이 만든 건수"에서 **이 패스의 살아있는 confirmed
+예약 총량**으로 옮겼다(`budget = remaining − open`, `countOpenPassBookings`) — 잔여는 완료 시점
+차감(P4)이라 예약이 늘어도 줄지 않는 값이어서 뺄셈 없이는 캡이 성립하지 않는다. `until` 과거
+날짜 400, `GET /v1/recurrings?include_expired=true`(숨기기만 하면 UI에서 지울 수 없다),
+`DELETE /v1/recurrings/{id}`는 **204 → 200 `{cancelled, kept}`** + 그 규칙이 만든 **미래
+confirmed 예약을 무차감 취소**(`CancelAtomic(..., entry=nil)` — 노쇼 유예를 소진하지 않는다.
+`?keep_bookings=true`로 옵트아웃). 그리고 `Homework.schedule`은 **판정하는 코드가 어디에도 없어**
+저장만 되고 있었다 — `domain.HwSchedule`(순수 도메인 타입, `internal/domain/homework.go`)의
+`IsActiveOn`/`IsEndedOn`/`ValidateHwSchedule`을 신설해 목록 필터·통계 분모·쓰기 검증에 물렸다.
+판정 규칙은 **이미 출시된 회원 앱의 순수 함수(`homework_schedule_rules.dart`)와 동일**하다.
+
+**v2.4 돈 무결성(2026-08-23, P12 — 계약 "v2.4" 절)**: 서버가 "이 거래로 실제 오간 돈이 얼마인지"를
+스스로 판정하지 않고 클라이언트 기록을 그대로 믿었다. 실측: 550,000원 회원권에 결제를 한 번 더
+기록하면 환불 견적 **5,445,000원**, 반대로 일시불(회차 미기재)로 기록하면 **0원 환불 + refunded
+확정(복구 API 없음)** — **정확히 기록할수록 손해가 커지는** 역방향 인센티브였다. 원장은
+append-only(P3)라 잘못 박힌 기록을 지울 수 없으므로 **쓰기 게이트와 읽기 캡을 이중으로** 건다:
+`CreatePass`의 `total_sessions >= 1`·`paid_amount >= 0`(0은 허용 — 무료 체험권은 실제 영업 조건),
+`CreatePayment`의 Σtotal ≤ `pass.paid_amount` **합계 상한**(건수 제한이 아니라 카드+현금 분할은
+통과), `installments[].paid_at` 미래 시각 400(시계 오차 5분), 일시불(installments 생략) = 실수납
+`total`로 확정(`Payment.PaidSum` — 불변식 `PaidSum + Outstanding == Total`), 환불 정산식
+`refund = max(min(실수납, 계약가) − usage − penalty, 0)`. 캡이 걸린 사건은 서버 로그에 남긴다.
+
+**v2.5 쓰기 경로 담당 경계(2026-08-23, P12 — 계약 "v2.5" 절)**: 읽기 경로는 여러 라운드 감사를
+거쳐 촘촘한데 **쓰기 4곳에 스코프 검사 자체가 없었다**(전부 curl 실측으로 재현). ①
+`POST /v1/workout-logs`는 `booking_id` 없이 오면 `checkMemberScope` — 종전엔 booking_id를 생략하는
+것만으로 교차검증 전체가 비활성화됐다. ② `POST /v1/homeworks`는 후보 집합과 부상 맵을 **같은
+출처(pool)**에서 뽑고 `my_members` subset을 담당과 교집합 처리. ③ `POST /v1/hw-checks`는 배정
+실존·배달 대상·`done` 길이 검증 + 스태프 대행은 담당 회원만(hw_rate는 정산·평가 지표다).
+④ `POST /v1/checkin` tap은 `p.IsTrainer() && booking.TrainerID != p.UID`면 **403** —
+complete/noshow와 같은 규칙이고, 상태 검사보다 **앞에** 둬서 400/200 차이로 예약 상태를 캐지
+못하게 한다.
+
+> ⚠ **운영 영향(데스크 운영 방식)**: tap 체크인이 **담당 예약으로 좁혀졌다.** 데스크 태블릿을
+> 트레이너 계정으로 로그인해 쓰고 있었다면, 그 계정으로는 **다른 코치의 회원을 체크인할 수 없다**
+> (403). 데스크는 **대표(owner) 계정으로 운영**해야 한다. owner는 이 분기를 타지 않아 센터 전
+> 예약을 체크인할 수 있다. 회귀 가드는 `TestCheckinTapRespectsTrainerScope`.
+
+**v2.6 원자성(2026-08-23, P13 — 계약 "v2.6" 절)**: 원자성이 제대로 된 곳은 **예약 상태 전이
+하나뿐**이었고, 발급·환불·홀딩은 스토어 트랜잭션 **밖에서** 2~3개의 독립 호출로 쪼개져 있었다.
+에뮬레이터 실측으로 재현한 것: 동시 환불 2건이 **둘 다 200**(495,000원 두 번 승인) · 발급 3회가
+**HTTP 500 세 번인데 실제로는 60회 지급** · 동시 홀딩 5건 전부 200인데 패스엔 1건·원장엔 5건 ·
+잔여 2회 패스에 4건 예약 후 완료 → **잔여 −2**. 스토어 인터페이스에 트랜잭션 동사 6개를 뒀다:
+`IssuePass` · `UpdatePassWithLedger`(환불·홀딩·재개·이관 4갈래 공유) · `BookAtomic` ·
+`CancelAtomic` · `SetBookingStatusWithLedger` · `ReassignBookingTrainer`. `PassMutator`에는
+**두 제약이 인터페이스에 못박혀 있다** — mutate는 순수해야 하고(트랜잭션이 재시도된다),
+mutate 안에서 Store를 다시 부르면 안 된다(Memory 스토어 교착). 정책 같은 외부 값은 트랜잭션
+밖에서 미리 읽어 캡처한다. 계약 변경으로는 예약 생성의 잔여 캡(`domain.ErrNoSessionsLeft` —
+remaining > 0이어도 거부될 수 있다), 홀딩 중복 400, 동시 환불 중 1건만 200, `GET /v1/passes`
+정렬을 `valid_from` 오름차순(동률 시 id)으로 확정, Update 계열의 없는 ID는 **404**
+(종전 Firestore는 `.Set()` upsert라 **유령 문서를 만들고 200**을 돌려줬다).
+
+**v2.7 센터 정책 집행 정합(2026-08-23, P14 — 계약 "v2.7" 절)**: 정책 화면은 대표가 돈과 약관을
+정하는 자리인데 **저장한 값과 집행되는 값이 달랐다.** `Policy`는 위약금율 0~1을 전부 허용하는데
+`RefundQuote`가 10%로 하드 캡해서, 30%를 저장하면 어드민 푸터·회원 앱 `GET /v1/center`·**계약서
+스냅샷(회원이 서명하는 조항)** 셋이 전부 30%를 말하고 실제 공제만 10%였다. 캡을 남기고 경고만
+붙이는 대신 **상한을 정책으로 끌어올렸다**: `PUT /v1/center`의 `penalty_rate` 유효 범위 `0~0.1`
+(초과 400), `GET /v1/center`는 검증을 지나지 않은 구문서 값을 **읽는 자리에서 접는다**
+(`Policy.Normalize`/`EffectivePenaltyRate` — 저장 시점에 접으면 머지 PUT이 초과값을 이어받아
+용량 하나만 바꿔도 400이 나는 잠금이 생긴다). `RefundQuote`의 런타임 캡은 **유지**한다 —
+이미 30%로 서명된 계약이 실재할 수 있다. 정책 변경의 소급 여부도 명문화했다: 취소 컷오프·슬롯
+용량·통계 임계값은 **즉시·소급**(취소 시점에 정책을 새로 읽는다), 위약금율은 **계약 스냅샷**
+(`Contract.penalty_rate`, 발급 시점 값 고정). 홀딩 상한(`max_holds_per_pass`/`max_hold_total_days`)은
+**회원 셀프 홀딩에만** 걸린다 — owner·trainer가 어드민에서 거는 홀딩은 정책을 로드하지 않는다.
+
+## 배포(Cloud Run) — P06 실배포 완료
+
+운영 서비스: **`rize-api`** / 리전 **asia-northeast3(서울)** / 프로젝트 **rize-218c1**
+URL: `https://rize-api-773077624928.asia-northeast3.run.app`
+
+재배포는 저장소 루트에서(빌드팩이 모듈 루트를 `backend`로, 엔트리를 `cmd/server`로 잡는다):
+
+```bash
+gcloud run deploy rize-api --source backend --region asia-northeast3 --project rize-218c1 \
+  --set-build-env-vars GOOGLE_BUILDABLE=./cmd/server
+```
+
+현재 설정된 환경변수(`--set-env-vars`로 최초 배포 시 지정, 이후 유지):
+
+| 키 | 값 | 비고 |
+|---|---|---|
+| `USE_FIRESTORE` | `true` | Firestore 스토어 사용 |
+| `GCP_PROJECT` · `FIREBASE_PROJECT` | `rize-218c1` | 둘 다 필요 — 후자가 있으면 dev 헤더는 무시된다 |
+| `DEFAULT_CENTER_ID` | `rise` | 센터 부트스트랩 |
+| `CHECKIN_QR_TOKEN` | (운영 토큰) | 셀프 체크인 대조값. **어드민 설정 화면의 "데스크 체크인 QR"에 대표가 입력해 인쇄한 문자열과 정확히 같아야** 한다(`admin/src/features/CheckinQr.tsx` — 이 값을 돌려주는 API는 없다). 회원 앱은 그 QR을 스캔해 그대로 보낸다(`app/README.md`) |
+| `CORS_ORIGINS` | `http://localhost:5174` | 로컬 개발 어드민용. 운영 어드민은 Firebase Hosting에서 같은 오리진의 `/api`로 붙어 **CORS가 발생하지 않는다**(P07) |
+
+**`USE_FIRESTORE=true`인데 `FIREBASE_PROJECT`가 비어 있으면 기동을 거부한다**(P08). 그 조합은 실
+DB에 붙은 채 dev 헤더 인증으로 뜨는 것이라, 헤더만 보내면 누구나 owner가 된다 — 종전엔 경고만
+찍고 기동했다. 검증은 `config.Config.Validate()`(테스트 있음).
+
+Firestore 서비스 계정에 `roles/datastore.user` 권한이 필요하다. `FIREBASE_PROJECT`를 설정하면
+Firebase Admin SDK가 Cloud Run의 서비스 계정으로 Application Default Credentials를 자동 사용한다
+(별도 키 파일 불필요). 스태프 초대·퇴사는 Admin SDK로 Firebase 계정을 만들고 잠그므로 서비스
+계정에 Firebase Auth 관리 권한이 필요하다(기본 compute SA의 Editor로 충족).
+
+**복합 인덱스는 필요 없다**(P06 실측). 이 코드의 Firestore 쿼리는 전부 (a) 동등 필터이거나
+(b) 같은 필드의 범위 필터(`slot_key >= lo AND <= hi`)이고, `OrderBy`를 쓰지 않는다 — 정렬은
+전부 Go에서 한다. 자동 생성되는 단일 필드 인덱스로 충분하다. 나중에 `OrderBy`나 서로 다른
+필드의 부등호를 추가하면 그때 복합 인덱스가 필요해진다(Firestore가 콘솔 링크로 안내한다).
+
+**헬스체크는 `/health`를 쓴다.** run.app 도메인에서는 Google 프론트엔드가 `/healthz`를 가로채
+컨테이너까지 도달하지 않는다(실측: 앱의 404는 `text/plain`, `/healthz`의 404는 구글 HTML 페이지).
+`/healthz`는 로컬·다른 호스팅용으로 그대로 남겨 두었다. Cloud Monitoring의 uptime check가
+5분 주기로 3개 리전에서 `/health`를 확인하고, 실패 시 알림 정책이 메일을 보낸다(P07).
+
+**API는 `/v1/*` 과 `/api/v1/*` 양쪽에 붙어 있다**(P07, `router.go`의 미러 마운트). 어드민이
+Firebase Hosting에서 서비스되고 `/api/**`가 이 서비스로 리라이트되는데 Hosting이 경로 접두사를
+벗겨주지 못하기 때문이다. 덕분에 어드민은 API와 같은 오리진을 쓰게 되어 **CORS가 아예 발생하지
+않고**, 개발(vite 프록시가 `/api`를 벗김)과 운영의 클라이언트 코드가 완전히 동일하다.
+앱(Flutter)은 이 URL을 직접 부르므로 `/v1/*`을 쓴다. 회귀 가드는 `TestAPIPrefixMirror`.
+
+Firestore 보안 규칙은 저장소 루트 `firestore.rules`가 소스 오브 트루스이며 **클라이언트 전면
+차단**이다(모든 접근은 Admin SDK를 쓰는 이 백엔드를 경유 — Admin SDK는 규칙을 우회한다).
+
+## 알려진 갭 / TODO(정직한 목록)
+
+이 절은 "무엇을 안 만들었는가"를 숨기지 않기 위한 목록이다. API계약_v1.md가 모든 세부사항을
+명시하지 않은 지점에서 내린 판단과, 명백히 v1 범위 밖으로 미룬 것을 구분해 적는다.
+
+**최근 닫힌 갭(2026-08-23 코드 대조 — 무엇이 닫았는지 함께 적는다)**
+
+이 목록은 자랑이 아니라 **이 README를 다시 읽는 사람이 옛 서술에 속지 않게** 하려는 것이다.
+아래 5건은 종전 README가 "없다"고 적어 두었으나 지금은 있다.
+
+| 종전 서술 | 무엇으로 닫혔나 |
+|---|---|
+| 정책(Policy) 조회/수정 API 없음 | `GET /v1/center`(`Service.GetCenter`) · `PUT /v1/center`(`Service.UpdateCenterPolicy`, owner 전용·머지 시맨틱) — v1.4, 범위 검증은 `domain.Policy.Validate`(v2.7에서 `penalty_rate` 0~0.1) |
+| 환불 "실행" 엔드포인트 없음(계산만) | `POST /v1/passes/{id}/refund` → `Service.RefundPass` — v1.4. owner 전용, 마감은 `store.UpdatePassWithLedger` 트랜잭션(v2.6) |
+| Contract `signed` 전이 엔드포인트 없음 | `POST /v1/contracts/{id}/sign` → `Service.SignContract` — v1.4, member 본인. `signed_at`·`signer_ip`를 서버가 기록 |
+| 스태프 생성 엔드포인트 없음(GET·offdays 뿐) | `POST /v1/staff`(`Service.CreateStaff`, v1.8) + `PUT /v1/staff/{uid}`·`/transfer`·`/deactivate`·`/reactivate`(v2.0) + `PUT /v1/staff/{uid}/profile`(v1.6) — 총 8개 |
+| `GET /v1/center`는 member 403 | member도 **200**을 받는다(v1.4). owner가 아니면 `revenue_target`만 0으로 지운다 — trainer도 마찬가지다. 쓰기(PUT)만 owner 전용 |
+
+**설계 판단(계약이 침묵한 부분에서 합리적으로 채운 것)**
+
+- **멀티센터 해석은 단일 센터로 단순화**: `users/{uid}.memberships[]`(설계03 §6, 여러 센터 가입)
+  대신 `store.UserIndex`가 uid당 센터 1건만 유지한다. 실제 1호 고객(라이즈 컨디셔닝)이 단일
+  센터라 v1엔 충분하지만, 진짜 멀티센터 전환 시 슬라이스로 승격해야 한다.
+- **센터 생성 API가 없고, 부트스트랩 owner는 여전히 수동이다**: `centers/{centerId}`는
+  `DEFAULT_CENTER_ID` 환경변수로 부트스트랩되고, 정책(Policy)은 최초 접근 시 기본값이 지연
+  시딩된다. 스태프 생성은 v1.8의 `POST /v1/staff`로 닫혔지만 **그 핸들러가 owner 전용**이라
+  (`!p.IsOwner()` → 403) **최초 owner 한 명은 만들 경로가 없다** — Firestore에 손으로 심어야
+  한다. `store.SeedDemo`는 `DEV_SEED=true` + 인메모리 전용이라 프로덕션 부트스트랩에 못 쓴다.
+- **예약 생성 바디의 `kind`**: 계약 예시는 `{slot_key, member_id, pass_id}`뿐이라 kind(pt/group/ot)
+  출처가 불명확 — 기본값 `pt`로 채우되 요청에 `kind`가 오면 그대로 쓴다.
+- **체크인 응답/부수효과**: 계약은 검증 규칙만 명시한다. 구현은 `Member.last_visit_at` 갱신
+  (설계03 §11에 명시)과 예약 객체 반환을 부수효과로 채택했고, 체크인 이력 자체는 계약에 없는
+  내부 전용 타입(`store.CheckinRecord`)으로만 남긴다.
+- **컷오프 이내 취소의 처리**: "컷오프 검사(24h)"만 명시돼 있어, 컷오프 이내 취소는 노쇼와
+  동일한 유예 정책(최초 1회 무차감)을 적용하는 것으로 해석했다. 취소 자체를 막지는 않는다.
+- **홀딩(P46)의 "회원 신청 → 어드민 승인" 플로우는 v1에서 단순화**: 계약에 신청 큐 엔드포인트가
+  없어, 회원 본인 패스의 셀프 홀딩을 정책 상한(기본 최대 2회·총 30일, `Policy.max_holds_per_pass`/
+  `max_hold_total_days`) 안에서 직접 허용했다(v1.2). 스태프는 상한 없이 처리 가능(데스크 예외) —
+  v2.7에서 **"상한은 회원 셀프 홀딩에만 걸린다"를 계약에 명문화**했다(어드민 경로는 정책을
+  로드조차 하지 않는다). 상한 `0`은 저장할 수 없다(400) — "홀딩 완전 금지"를 표현할 방법이
+  현재 없고 최소 1회는 항상 허용된다. 진짜 승인 큐가 필요해지면
+  `POST /v1/passes/{id}/hold-requests` 류의 후속 추가가 자연스럽다.
+- **stats scope 게이팅(v1.2로 개정)**: 트레이너도 `scope=center`를 호출할 수 있다. 단 금액 지표
+  (monthly/ytd/target)와 by_trainer 비교표는 owner 전용이라 비워서 반환한다 — P45의 "센터 평균과
+  비교"는 비율 지표(재등록·노쇼·HW)로 성립하고, P13(타인·센터 매출 비공개)도 지킨다.
+- **v1.1 "가정 승인" 목록 엔드포인트의 역할 스코프**: `GET /v1/passes|bookings|hw-checks|contracts|payments`
+  모두 `member=` 쿼리 파라미터가 있어도 role=member 호출자는 항상 본인 것만 보도록 강제
+  덮어쓴다(`ListHomeworks`와 동일한 override 패턴 — 불일치 시 에러가 아니라 조용히 본인 스코프로
+  대체). trainer는 담당 회원(또는 담당 트레이너 소속 패스로 연결된) 것만, owner는 전체를 본다.
+  `Payment`·`Contract`는 엔티티에 `trainer_id`가 없어 연결된 `Pass.trainer_id`로 소유를 판별한다.
+- **전자계약은 "상태 전이"만 있고 문서 실체가 없다**: `POST /v1/contracts/{id}/sign`은 v1.4에
+  생겼고(`Service.SignContract`) `signed_at`·`signer_ip`를 서버가 기록한다. 하지만
+  **`sha256`·`pdf_path`는 필드만 있고 채우는 코드가 0곳이다** — 실제 PDF 생성·해시 봉인 연동이
+  붙어야 채워진다. 즉 지금의 "서명"은 동의 기록이지 위·변조를 증명하는 문서가 아니다.
+  `signer_ip`도 신뢰 프록시(Cloud Run/GCLB) 전제다 — XFF의 **마지막** 홉을 쓴다(v1.5. 첫 항목은
+  클라이언트가 위조할 수 있다).
+- **`GET /v1/join/requests`는 owner 전용**: `JoinApprove`(승인)가 이미 owner 전용이라 목록도
+  동일 경계로 맞췄다 — trainer는 가입 요청을 볼 수 없다.
+- **P14(v2.7) 이전에 10%를 넘겨 서명된 계약**: `Contract.penalty_rate`에 0.3 같은 값이 그대로
+  남고 어드민도 그대로 표시한다(실공제는 `RefundQuote`의 런타임 캡으로 10%). **서명된 문서를
+  소급 수정하지 않는다**는 판단이다 — 표시에 "실제 공제 10%" 각주를 붙일지는 미결.
+- **예약 단위 컷오프 스냅샷은 넣지 않았다**: 넣으면 앱의 취소 가능 판정(센터 정책 실값 사용)과
+  서버가 예약마다 갈려 새로운 3자 불일치가 생긴다. 대신 컷오프는 취소 시점 정책으로 판정하고
+  (즉시·소급), 어드민이 **컷오프를 올릴 때만** 확인 단계를 세운다.
+
+**정확도 근사치(정밀 구현엔 스키마 확장이 필요)**
+
+- **`stats.registered`**: Member에 가입일 필드가 계약에 없어 활성 회원수로 근사한다.
+- **`stats.hw_rate`**: "배정 대상 중 체크가 한 번이라도 있었는가"의 근사 비율. 스케줄 반복
+  대비 실제 이행율(예: 주3회 배정 중 몇 회 완료)은 계산하지 않는다.
+  단 **기간이 끝난 배정(`schedule.to` 경과)은 분모에서 제외한다**(v2.3) — 종전엔 종료일을
+  아무도 보지 않아 분모가 단조 증가했고, 완료율이 시간이 갈수록 구조적으로 하락했다.
+  "오늘 대상 요일인가"가 아니라 "기간이 끝났는가"로 가른다: 주3회 배정은 화요일에도 진행 중인
+  배정이라, 요일로 거르면 비율이 요일마다 출렁인다(`domain.HwSchedule.IsEndedOn`).
+- **`GET /v1/stats?range=`가 아직 무시된다**(v2.1에 명시된 구현 갭): `noshow_d`·`hw_d` 등 분모는
+  "해당 기간"이 아니라 **전 기간** 집계다. 어드민에 기간 필터 UI를 붙이는 시점에 분자·분모가
+  함께 기간을 타도록 고쳐야 한다. 계약 위반은 아니지만 소비하는 쪽이 알아야 하는 사실이다.
+- **월별 매출(`stats.monthly`)**: `Payment`에 결제일 필드가 계약에 없어 연결된 `Pass.valid_from`의
+  월로 귀속시킨다. 분할납부의 실제 입금 시점(installments[].paid_at)별 집계는 아니다.
+- **재등록률**: "만료 후 N일 내 같은 회원의 새 패스 발급"으로 판정한다. 같은 트레이너 유지율과
+  센터 유지율(P45가 언급하는 2종 정의)을 코드가 자동 구분하진 않는다 — trainer_id로 미리
+  필터링된 입력을 넣으면 트레이너 유지율이, 필터링 안 하면 센터 유지율이 나오는 방식으로 by_trainer
+  루프가 트레이너별로 계산한다.
+- **`GET /v1/slots?date=`는 예약이 하나라도 있는 시간대만 반환**: 센터 영업시간 모델이 없어
+  빈 시간대(0/3)를 합성할 근거가 없다. 어드민 프론트가 영업시간을 자체적으로 알고 있다면
+  빈 슬롯을 프론트에서 채워 넣어야 한다.
+- **가입 매칭(`/v1/join/match`) 대상 센터**: 요청자가 아직 어느 센터에도 연결되지 않았으면
+  `DEFAULT_CENTER_ID`를 대상으로 검색한다. 진짜 멀티센터에서는 "센터 검색" UI가 지정한
+  center_id를 받아야 한다(위 멀티센터 갭과 연결).
+
+**되돌릴 수단의 부재(v2.5에서 계약 갭으로 명문화 — 아직 열려 있다)**
+
+원장이 append-only(P3)라 "삭제"가 아니라 **역전 원장(상쇄 기록)**으로 설계해야 하는데, 넷 다
+아직 없다. 어드민의 2단 확인은 지혈일 뿐이다.
+
+- **납부 취소**: `PayInstallment`에 역이 없다. 오클릭 한 번이 완납으로 영구 확정된다.
+- **환불 취소**: `RefundPass`에 역이 없다. v2.4 실측에서 **0원 환불이 확정까지** 갔는데 복구
+  수단이 없었다(그래서 v2.4가 쓰기 게이트를 먼저 세웠다).
+- **노쇼·취소 되돌리기**: `LedgerReason`에 `revert`가 정의돼 있으나 이를 만드는 코드가 없다.
+- **계약가 정정**: `PUT /v1/passes/{id}`가 없다 — `paid_amount` 오입력은 재발급이 유일한 경로다.
+
+**아직 원자적이지 않은 쓰기 경로(v2.6이 닫지 않은 나머지 — v2.15에서 계약 전이는 닫힘)**
+
+v2.6은 **돈·세션이 "움직이는"** 경로(발급·홀딩·재개·환불 마감·예약 상태 전이·담당 이관)를
+트랜잭션화했고, v2.15(P37)가 **계약 전이(send·sign·void)와 수동 계약 생성**을 같은 패턴으로
+닫았다(`TransitionContract`·`UpdatePassWithLedgerAndContracts`·`CreateContractGuarded` —
+환불의 미서명 계약 무효화는 이제 마감과 **한 트랜잭션**이다). 남은 것:
+
+- **`PayInstallment`** — `GetPayment` → 인메모리 수정 → `UpdatePayment`.
+- **`CreatePayment`의 계약가 상한 검사** — 합계 계산이 트랜잭션 밖이라 동시 2건이 각자 통과할 수
+  있다(v2.4의 쓰기 게이트를 경합이 우회한다. 읽기 캡이 2차 방어선이라 환불액은 계약가를 넘지
+  않는다).
+- **`RefundPass`의 뒷정리 중 미납 회차 종결(waived_at)** — 여전히 트랜잭션 밖이다. 결제는 센터
+  전체 스캔으로 찾고 회차 인덱스 단위 재검증이 필요해, 마감을 먼저 확정하고 뒷정리 실패는
+  **보이는 500**으로 남긴다(재시도하면 "이미 환불 처리된 패스예요"라 이유는 설명된다).
+  waived_at은 멱등 표식이라 잔존해도 금액은 틀어지지 않는다 — PayInstallment 원자화와 함께
+  닫을 후속.
+- **`pass.remaining` 스냅샷**은 완료·노쇼 경로에서 원장 합과 벌어진다. 모든 판정은 원장 재계산을
+  거치므로 현행 버그는 아니지만, **DB에 권위 있어 보이는 틀린 숫자가 남는다.**
+- **원장 동시각 정렬은 비결정**(두 스토어가 다름). 표시 순서에만 영향.
+
+**v1 범위 밖으로 명시적으로 미룬 것(설계 문서 자체가 OUT으로 표시)**
+
+- PG 결제 연동(Payment는 기록만, P19) · 인바디 기기 API 연동 · AI 루틴 자동생성 ·
+  체형사진 배경 인물 자동 블러(온디바이스 처리, 앱 레이어) · 알림톡/웹푸시 실발송(어댑터 자리만
+  전제, 이 백엔드엔 Notifier 인터페이스조차 아직 없음 — 필요 시 추가) · 고정 스케줄의 "매주
+  자동 연장" 크론(현재는 생성 시점에 4주치만 즉시 생성, 재실행 없이는 4주 이후 슬롯이 안 생김).
+
+**테스트 실행 관련(2026-08-23 갱신)**
+
+- 로컬(go 1.26)에서 `go mod tidy` → `go build ./...` → `go vet ./...` → `go test ./...` 전부
+  통과를 확인했다(go.sum 고정 완료). 현재 `func Test` 총 **182개**(api 111 · domain 60 ·
+  store 9 · config 2). 실서버 E2E(curl)로 온보딩(join/match {phone} → confirm) → 패스 목록 →
+  동의 철회/재동의 → 셀프 홀딩 상한 → 환불 골든값 → hw-checks date 필터 → 이중 complete 400 →
+  트레이너 center 통계 금액 제외까지 실측 검증했다(work_log/P01 참고).
+- **기본 `go test`로는 잡히지 않는 결함군이 있다.** Memory 스토어는 전역 뮤텍스 하나라 경합 창이
+  나노초라서, v2.6이 잡은 동시성 결함들은 전부 초록으로 통과한다. 그 계층을 확인하려면 위
+  "두 스토어 공통 계약 스위트" 절의 에뮬레이터 러너(`-tags firestore_emulator`, **JDK 21 필수**)를
+  돌려야 한다. **CI 잡이 없으므로 아무도 자동으로 대신 돌려주지 않는다.**

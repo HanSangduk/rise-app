@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>라이즈 컨디셔닝 회원 앱 — 목업 v2 (2026-08-14)</title>
+<style>
+  :root{--red:#e11d48; --red-l:#fff1f2; --red-b:#fecdd3; --ink:#111827; --line:#e5e7eb; --muted:#6b7280; --ok:#16a34a; --warn:#d97706; --dan:#dc2626; --blue:#2563eb}
+  *{box-sizing:border-box; margin:0}
+  body{font-family:"Pretendard","Apple SD Gothic Neo",system-ui,sans-serif; background:linear-gradient(135deg,#111,#4c0519); min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:24px 12px}
+  .hint{color:#9ca3af; font-size:12px; margin-bottom:12px; text-align:center; line-height:1.6}
+  .hint b{color:#fda4af}
+  .phone{width:392px; max-width:96vw; height:812px; background:#fafafa; border:10px solid #111; border-radius:44px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 30px 80px rgba(0,0,0,.55); position:relative}
+  .sb{height:32px; display:flex; align-items:center; justify-content:space-between; padding:0 22px; font-size:11.5px; font-weight:700; color:var(--ink); background:#fff; flex-shrink:0}
+  .hd{padding:7px 16px 10px; background:#fff; border-bottom:1px solid var(--line); flex-shrink:0; display:flex; justify-content:space-between; align-items:center}
+  .hd .t{font-size:16.5px; font-weight:900} .hd .t span{color:var(--red)}
+  .hd .s{font-size:10px; color:var(--muted)}
+  .bd{flex:1; overflow-y:auto; padding:12px 14px 16px; background:#f7f7f8}
+  .tabs{display:flex; background:#fff; border-top:1px solid var(--line); padding:6px 4px 13px; flex-shrink:0}
+  .tab{flex:1; background:none; border:0; font-size:9.5px; color:#9ca3af; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:3px; font-weight:700}
+  .tab .ic{font-size:19px}
+  .tab.on{color:var(--red)}
+  .tab.cam-tab .ic{width:48px; height:48px; background:var(--red); color:#fff; border-radius:50%; display:flex; align-items:center; justify-content:center; margin-top:-22px; box-shadow:0 6px 16px rgba(225,29,72,.4); font-size:22px}
+  .scr{display:none} .scr.on{display:block}
+  .card{background:#fff; border:1px solid var(--line); border-radius:14px; padding:13px; margin-bottom:10px}
+  .card h4{font-size:12.5px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center}
+  .badge{display:inline-block; padding:2px 8px; border-radius:99px; font-size:10px; font-weight:800}
+  .b-ok{background:#dcfce7;color:#15803d}.b-warn{background:#fef3c7;color:#b45309}.b-dan{background:#fee2e2;color:#b91c1c}.b-red{background:var(--red-l);color:var(--red)}.b-mut{background:#f3f4f6;color:#6b7280}.b-blue{background:#dbeafe;color:#1d4ed8}
+  .btn{border:0; border-radius:10px; padding:9px 14px; font-size:12.5px; font-weight:800; cursor:pointer}
+  .btn-p{background:var(--red); color:#fff} .btn-o{background:#fff; border:1.5px solid var(--line); color:var(--ink)}
+  .btn-sm{padding:5px 10px; font-size:10.5px}
+  .note{font-size:10px; color:var(--muted); margin-top:7px; line-height:1.6}
+  .row{display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid #f3f4f6; font-size:12px}
+  .row:last-child{border-bottom:0}
+  .chip{display:inline-block; background:#f3f4f6; border-radius:99px; padding:5px 11px; font-size:10.5px; color:#4b5563; margin:2px; cursor:pointer; border:1px solid transparent}
+  .chip.on{background:var(--red-l); color:var(--red); border-color:var(--red-b); font-weight:800}
+  .hw{display:flex; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid #f3f4f6; font-size:12px}
+  .hw input{width:17px; height:17px; accent-color:var(--red)}
+  /* 로그인 플로우 */
+  .flowbox{padding:34px 20px; text-align:center}
+  .flowbox .logo{font-size:24px; font-weight:900; margin:26px 0 4px}
+  .flowbox .logo span{color:var(--red)}
+  .flowbox input{width:100%; border:1.5px solid var(--line); border-radius:12px; padding:13px; font-size:14px; margin-top:10px; text-align:center}
+  .center-card{border:1.5px solid var(--line); border-radius:14px; padding:14px; text-align:left; margin-top:10px; cursor:pointer}
+  .center-card.on{border-color:var(--red); background:var(--red-l)}
+  /* 카메라 */
+  .camwrap{position:relative; background:linear-gradient(180deg,#43464f,#26282f); border-radius:16px; height:472px; overflow:hidden}
+  .camwrap .gridlines{position:absolute; inset:0;
+    background-image:linear-gradient(rgba(255,255,255,.3) 1px, transparent 1px),linear-gradient(90deg, rgba(255,255,255,.3) 1px, transparent 1px);
+    background-size:11.1% 8.3%}
+  .camwrap .vline{position:absolute; left:50%; top:0; bottom:0; width:2px; background:#ff2d2d}
+  .camwrap .hline{position:absolute; left:7%; right:7%; top:60%; height:2px; background:#ff2d2d}
+  .camwrap .dot{position:absolute; left:50%; bottom:8%; width:18px; height:18px; border:3px solid #ff2d2d; border-radius:50%; transform:translateX(-50%); display:flex; align-items:center; justify-content:center}
+  .camwrap .dot i{width:8px; height:8px; background:#ff2d2d; border-radius:50%}
+  .camwrap .lvl{position:absolute; left:12%; right:12%; top:36%; height:3px; background:#22c55e; box-shadow:0 0 10px rgba(34,197,94,.9); transition:.35s}
+  .camwrap.tilted .lvl{transform:rotate(-3.4deg); background:#f59e0b; box-shadow:0 0 10px rgba(245,158,11,.9)}
+  .camwrap .toplab{position:absolute; top:0; left:0; right:0; background:rgba(0,0,0,.7); color:#fff; text-align:center; font-weight:900; padding:7px; font-size:14px}
+  .camwrap .date{position:absolute; top:38px; left:10px; background:rgba(0,0,0,.55); color:#fff; border-radius:99px; padding:3px 11px; font-size:10.5px}
+  .camwrap .lvltag{position:absolute; top:33.5%; right:10px; font-size:10px; font-weight:900; color:#22c55e; background:rgba(0,0,0,.55); padding:3px 8px; border-radius:99px}
+  .camwrap.tilted .lvltag{color:#f59e0b}
+  .camwrap .ghost{position:absolute; left:50%; bottom:8%; transform:translateX(-50%); opacity:.38; transition:.3s}
+  .camwrap .ghost.off{opacity:0}
+  .camwrap .auto{position:absolute; top:37px; right:10px; background:rgba(0,0,0,.55); color:#fff; font-size:10px; border-radius:99px; padding:3px 9px}
+  .camwrap .warnbg{position:absolute; bottom:64px; left:10px; right:10px; background:rgba(220,38,38,.28); border:1px solid rgba(252,165,165,.6); color:#fecaca; font-size:10px; border-radius:9px; padding:6px 9px}
+  .camwrap .shutter{position:absolute; bottom:10px; left:50%; transform:translateX(-50%); width:52px; height:52px; border-radius:50%; background:#fff; border:5px solid rgba(255,255,255,.45); cursor:pointer}
+  .poseq{display:flex; gap:5px; margin-top:9px; justify-content:center; flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="hint">📱 <b>라이즈 컨디셔닝 회원 앱 v2</b> — ①전화번호 로그인→센터 선택 ②하단 탭 ③가운데 <b>촬영</b>=체형 분석 카메라(기울기 시뮬·고스트 토글) ④예약: 내 코치/전체 전환</div>
+<div class="phone">
+  <div class="sb"><span>09:12</span><span>🔋 82% 📶</span></div>
+
+  <!-- ═══ 로그인 플로우 ═══ -->
+  <div class="scr on" id="m-login" style="background:#fff; flex:1; overflow-y:auto">
+    <div class="flowbox" id="step-phone">
+      <div class="logo">RISE <span>CONDITIONING</span></div>
+      <div style="font-size:11.5px; color:var(--muted)">라이즈 컨디셔닝 · 회원 앱</div>
+      <input placeholder="휴대폰 번호 (010-1234-5678)" value="010-1234-5678">
+      <button class="btn btn-p" style="width:100%; margin-top:12px; padding:13px" onclick="show('step-code')">인증번호 받기</button>
+    </div>
+    <div class="flowbox" id="step-code" style="display:none">
+      <div class="logo" style="font-size:18px">인증번호 입력</div>
+      <div style="font-size:11.5px; color:var(--muted)">010-1234-5678로 보냈어요</div>
+      <input placeholder="6자리" value="482913" style="letter-spacing:8px; font-weight:900">
+      <button class="btn btn-p" style="width:100%; margin-top:12px; padding:13px" onclick="show('step-center')">확인</button>
+    </div>
+    <div class="flowbox" id="step-center" style="display:none; text-align:left">
+      <div style="font-size:16px; font-weight:900; text-align:center; margin-bottom:4px">센터 선택</div>
+      <div style="font-size:11px; color:var(--muted); text-align:center">전화번호로 등록된 센터를 찾았어요</div>
+      <div class="center-card on">
+        <div style="display:flex; justify-content:space-between"><b>라이즈 컨디셔닝 센터 (강남)</b><span class="badge b-ok">자동 매칭 ✓</span></div>
+        <div style="font-size:11px; color:var(--muted); margin-top:3px"><b>김민지</b> 님으로 등록되어 있어요 · 담당 정혜린 코치 · PT 20회권</div>
+      </div>
+      <div class="center-card">
+        <div style="display:flex; justify-content:space-between"><b>우리 센터가 안 보여요</b><span class="badge b-mut">센터 찾기</span></div>
+        <div style="font-size:11px; color:var(--muted); margin-top:3px">센터 검색 → 가입 요청 → 센터에서 승인하면 연결돼요 (코드 입력 없음)</div>
+      </div>
+      <button class="btn btn-p" style="width:100%; margin-top:14px; padding:13px" onclick="enterApp()">네, 김민지 본인이에요 — 시작하기</button>
+      <div style="text-align:center; margin-top:8px"><span style="font-size:11px; color:var(--muted); text-decoration:underline; cursor:pointer">본인이 아니에요</span></div>
+      <p class="note" style="text-align:center">본인 확인은 잘못 연결 방지용이에요(오타 번호 보호). 한 계정으로 여러 센터 이용 가능 — 홈 상단에서 전환.</p>
+    </div>
+  </div>
+
+  <!-- ═══ 메인 ═══ -->
+  <div id="m-main" style="display:none; flex:1; overflow:hidden; flex-direction:column">
+  <div class="hd">
+    <div><div class="t">라이즈 <span>컨디셔닝</span> ▾</div><div class="s">김민지 님 · 담당 정혜린 코치</div></div>
+    <span class="badge b-red">PT 20회 · 잔여 7</span>
+  </div>
+  <div class="bd">
+
+  <!-- 홈 -->
+  <section class="scr on" id="t-home">
+    <div style="margin-bottom:8px">
+      <span class="chip on">정혜린 코치 · PT 20회 (활성)</span><span class="chip">김태오 코치 · 그룹 10회 (9/1~)</span>
+    </div>
+    <div class="card" style="background:var(--red-l); border-color:var(--red-b)">
+      <h4>다음 예약 <span class="badge b-red">오늘</span></h4>
+      <div style="font-size:16px; font-weight:900">20:00 · 1:1 PT</div>
+      <div style="font-size:11.5px; color:var(--muted); margin:2px 0 9px">정혜린 코치 · 라이즈 컨디셔닝 (강남)</div>
+      <div style="display:flex; gap:7px">
+        <button class="btn btn-p btn-sm">📷 셀프 체크인 (데스크 QR 스캔)</button>
+        <button class="btn btn-o btn-sm" style="opacity:.55">취소 마감 (24시간 전)</button>
+      </div>
+    </div>
+    <div class="card">
+      <h4>Home Work · 오늘 <span class="badge b-ok">이번 주 2/3</span></h4>
+      <div class="hw"><input type="checkbox" checked><span>밴드 외회전 3×15 — 천천히, 통증 없이</span></div>
+      <div class="hw"><input type="checkbox" checked><span>힙힌지 드릴 3×10</span></div>
+      <div class="hw"><input type="checkbox"><span>걷기 30분 — 오늘까지!</span></div>
+      <p class="note">정혜린 코치가 배정했어요 · 체크하면 코치에게 완료율이 보여요</p>
+    </div>
+    <div class="card">
+      <h4>내 회원권</h4>
+      <div style="display:flex; align-items:center; gap:14px">
+        <svg width="80" height="80" viewBox="0 0 80 80">
+          <circle cx="40" cy="40" r="33" fill="none" stroke="#f3f4f6" stroke-width="9"/>
+          <circle cx="40" cy="40" r="33" fill="none" stroke="#e11d48" stroke-width="9" stroke-linecap="round" stroke-dasharray="72.6 207.3" transform="rotate(-90 40 40)"/>
+          <text x="40" y="38" text-anchor="middle" font-size="15" font-weight="900" fill="#111827">7회</text>
+          <text x="40" y="53" text-anchor="middle" font-size="8.5" fill="#6b7280">/ 20회</text>
+        </svg>
+        <div style="font-size:11.5px; line-height:1.8">
+          <b>PT 20회권 · 정혜린 코치</b><br>
+          <span style="color:var(--muted)">유효기간 2026-11-30 (D-108)</span><br>
+          <span class="badge b-warn">잔여 7회 — 연장 상담 가능</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 예약 -->
+  <section class="scr" id="t-book">
+    <div style="margin-bottom:6px">
+      <span class="chip on" id="fMy" onclick="coachFilter(true)">내 코치 (정혜린)</span>
+      <span class="chip" id="fAll" onclick="coachFilter(false)">전체 코치 보기</span>
+    </div>
+    <div style="display:flex; gap:5px; overflow-x:auto; white-space:nowrap; padding:2px 0 8px">
+      <span class="chip on">금 14</span><span class="chip">토 15</span><span class="chip">일 16</span><span class="chip">월 17</span><span class="chip">화 18</span>
+    </div>
+    <div id="slots-my">
+      <div class="card"><div class="row" style="border:0"><span><b>14:00</b> · 잔여 <b>2/3팀</b></span><button class="btn btn-p btn-sm">예약</button></div></div>
+      <div class="card" style="opacity:.75"><div class="row" style="border:0"><span><b>17:00</b> · 잔여 1/3팀<br><span style="font-size:10px; color:var(--muted)">정혜린 코치가 이 시간 수업 중이에요</span></span><span class="badge b-mut">코치 수업중</span></div></div>
+      <div class="card" style="opacity:.8"><div class="row" style="border:0"><span><b>19:00</b> · <span class="badge b-dan">3/3 만석</span></span><button class="btn btn-o btn-sm">대기 신청</button></div></div>
+      <div class="card"><div class="row" style="border:0"><span><b>20:00</b> · 내 예약</span><span class="badge b-ok">확정 ✓</span></div></div>
+    </div>
+    <div id="slots-all" style="display:none">
+      <div class="card"><div class="row" style="border:0"><span><b>14:00</b> · 잔여 2/3팀 · 정혜린/김태오 가능</span><button class="btn btn-p btn-sm">예약</button></div></div>
+      <div class="card"><div class="row" style="border:0"><span><b>17:00</b> · 잔여 1/3팀 · <span class="badge b-blue">김태오 가능</span><br><span style="font-size:10px; color:var(--muted)">김태오 코치 수업권(그룹 10회)은 9/1부터 사용 가능</span></span><button class="btn btn-o btn-sm" style="opacity:.6">9/1부터</button></div></div>
+      <div class="card" style="opacity:.8"><div class="row" style="border:0"><span><b>19:00</b> · <span class="badge b-dan">3/3 만석</span></span><button class="btn btn-o btn-sm">대기 신청</button></div></div>
+      <p class="note">전체 보기에선 모든 코치의 가능 시간이 보여요. 다른 코치 수업은 해당 코치의 수업권으로 예약됩니다.</p>
+    </div>
+    <div class="card">
+      <h4>내 예약</h4>
+      <div class="row"><span><b>오늘 20:00</b> · 1:1 · 정혜린 <span class="badge b-red">🔁 고정</span></span><span class="badge b-ok">확정</span></div>
+      <div class="row"><span>8/18 (화) 20:00 · 1:1 · 정혜린 <span class="badge b-red">🔁 고정</span></span><button class="btn btn-o btn-sm">취소</button></div>
+      <p class="note">🔁 = 매주 화·금 20:00 <b>고정 스케줄</b>(자동 예약). 시간당 최대 3팀 · 만석이면 대기 → 취소 시 선착순 자동 확정. 취소는 24시간 전까지 무료.</p>
+    </div>
+  </section>
+
+  <!-- 체형 분석 카메라 -->
+  <section class="scr" id="t-cam">
+    <div class="camwrap" id="cam">
+      <div class="gridlines"></div>
+      <div class="toplab">정면 · 오버헤드 스쿼트</div>
+      <div class="date">2026. 08. 14 (금)</div>
+      <div class="auto">자동촬영 ON</div>
+      <div class="vline"></div><div class="hline"></div>
+      <div class="lvl"></div><div class="lvltag" id="lvltag">수평 OK ✓ · 정렬되면 3·2·1</div>
+      <div class="dot"><i></i></div>
+      <svg class="ghost" id="ghost" width="74" height="180" viewBox="0 0 74 180"><ellipse cx="37" cy="18" rx="12" ry="14" fill="#fff"/><path d="M16 38 Q37 32 58 38 L62 102 Q37 111 12 102 Z" fill="#fff"/><rect x="17" y="104" width="15" height="62" rx="7" fill="#fff"/><rect x="42" y="104" width="15" height="62" rx="7" fill="#fff"/><path d="M18 42 L6 14 M56 42 L68 14" stroke="#fff" stroke-width="9" stroke-linecap="round"/></svg>
+      <div class="warnbg">👥 배경에 다른 사람이 감지됐어요 — 저장할 때 자동으로 흐림 처리합니다</div>
+      <div class="shutter" onclick="alert('데모: 동의 확인 → 촬영 → 배경 블러 → 포즈·날짜 태깅 저장')"></div>
+    </div>
+    <div class="poseq">
+      <span class="chip on">① 차렷 ✓</span><span class="chip on">② T자 ✓</span><span class="chip on">③ 전굴 ✓</span><span class="chip">④ OH스쿼트 ●</span>
+    </div>
+    <div style="display:flex; gap:6px; justify-content:center; margin-top:8px">
+      <button class="btn btn-o btn-sm" onclick="tiltSim()">📐 기울기 시뮬</button>
+      <button class="btn btn-o btn-sm" onclick="document.getElementById('ghost').classList.toggle('off')">👻 고스트 켜기/끄기</button>
+    </div>
+    <p class="note" style="text-align:center">그리드+중심선+발위치 마커로 매번 같은 조건 · 수평이면 <b style="color:#16a34a">초록</b>, 기울면 <b style="color:#d97706">주황+각도</b> · 이전 사진 고스트로 프레이밍 유지 · 사진은 나와 담당 코치만 봅니다(동의 필수)</p>
+  </section>
+
+  <!-- 기록 -->
+  <section class="scr" id="t-log">
+    <div style="display:flex; background:#eee; border-radius:10px; padding:3px; margin-bottom:10px">
+      <button class="chip on" style="flex:1; border-radius:8px" onclick="seg(this,'lw')">운동</button>
+      <button class="chip" style="flex:1; border-radius:8px" onclick="seg(this,'li')">인바디</button>
+      <button class="chip" style="flex:1; border-radius:8px" onclick="seg(this,'lb')">체형 분석</button>
+    </div>
+    <div id="seg-lw">
+      <div class="card">
+        <h4>8/12 (수) · 1:1 PT <span class="badge b-ok">완료</span></h4>
+        <div class="row"><span>고블릿 스쿼트</span><b>3×12 · 16kg</b></div>
+        <div class="row"><span>루마니안 데드리프트</span><b>3×10 · 37.5kg</b></div>
+        <div style="background:#f7f7f8; border-radius:9px; padding:8px 10px; font-size:11px; margin-top:7px">💬 정혜린 코치 "폼 안정! 다음엔 40kg 도전"</div>
+      </div>
+      <div class="card"><h4>Home Work 주간 기록</h4>
+        <div class="row"><span>이번 주 (8/11~)</span><b>2/3 · 진행중</b></div>
+        <div class="row"><span>지난 주</span><b style="color:var(--ok)">3/3 완료 ✓</b></div>
+      </div>
+    </div>
+    <div id="seg-li" style="display:none">
+      <div class="card">
+        <h4>인바디 추이</h4>
+        <svg width="100%" height="80" viewBox="0 0 320 80">
+          <polyline points="20,58 115,50 210,42 300,34" fill="none" stroke="#e11d48" stroke-width="2.5"/>
+          <polyline points="20,24 115,33 210,41 300,50" fill="none" stroke="#f59e0b" stroke-width="2.5"/>
+        </svg>
+        <div class="row"><span style="color:var(--red)">■ 골격근량(SMM)</span><b>24.1kg ▲0.4</b></div>
+        <div class="row"><span style="color:#b45309">■ 체지방률(PBF)</span><b>26.8% ▼0.9</b></div>
+      </div>
+    </div>
+    <div id="seg-lb" style="display:none">
+      <div class="card">
+        <h4>체형 분석 타임라인 <span class="badge b-red">OH스쿼트</span></h4>
+        <div style="display:flex; gap:5px; margin-bottom:8px; flex-wrap:wrap">
+          <span class="chip">7/16</span><span class="chip on">7/17</span><span class="chip">7/27</span><span class="chip">7/31</span><span class="chip on">8/14</span>
+        </div>
+        <div style="display:flex; gap:8px">
+          <div style="flex:1; background:#f3f4f6; border-radius:10px; height:130px; display:flex; align-items:center; justify-content:center; font-size:10.5px; color:var(--muted)">📸 7/17</div>
+          <div style="flex:1; background:var(--red-l); border:1px solid var(--red-b); border-radius:10px; height:130px; display:flex; align-items:center; justify-content:center; font-size:10.5px; color:var(--red)">📸 8/14</div>
+        </div>
+        <input type="range" min="0" max="100" value="50" style="width:100%; margin-top:8px">
+        <p class="note">같은 포즈끼리 자동 비교 · 코치가 그리드 눈금으로 어깨·골반 기울기를 함께 봐줘요</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 마이 -->
+  <section class="scr" id="t-my">
+    <div class="card">
+      <h4>내 회원권 (2개)</h4>
+      <div class="row"><span><b>PT 20회</b> · 정혜린 <span class="badge b-ok">활성</span></span><b>잔여 7회</b></div>
+      <div class="row"><span><b>그룹 10회</b> · 김태오 <span class="badge b-mut">9/1 시작</span></span><b>10회</b></div>
+      <div class="row"><span>⏸ 일시정지 신청 (여행·부상 시 · 최대 2회/30일)</span><span style="color:var(--muted)">›</span></div>
+      <p class="note">회원권마다 담당 코치가 달라요 — 홈 상단 칩으로 전환하면 예약·Home Work가 그 코치 기준으로 바뀝니다. 일시정지하면 유효기간이 그만큼 늘어나요.</p>
+    </div>
+    <div class="card">
+      <h4>이용 내역 (PT 20회 원장)</h4>
+      <div class="row"><span>8/12 수업 완료</span><b style="color:var(--dan)">−1</b></div>
+      <div class="row"><span>8/08 수업 완료</span><b style="color:var(--dan)">−1</b></div>
+      <div class="row"><span>8/01 노쇼 · 최초 1회 유예</span><b style="color:var(--muted)">0</b></div>
+      <div class="row" style="color:var(--muted)"><span>… 이전 내역 11건 · 6/02 시작 +20</span><span>전체 ▾</span></div>
+    </div>
+    <div class="card">
+      <h4>계약 · 동의</h4>
+      <div class="row"><span>PT 20회 계약 (6/2)</span><span class="badge b-ok">서명완료 · PDF</span></div>
+      <div class="row"><span>그룹 10회 계약</span><span class="badge b-warn">서명하기</span></div>
+      <div class="row"><span>민감정보(인바디·체형사진) 동의</span><span class="badge b-ok">✓ 철회 가능</span></div>
+    </div>
+    <div class="card">
+      <h4>센터</h4>
+      <div class="row"><span>라이즈 컨디셔닝 센터 (강남)</span><span class="badge b-red">현재</span></div>
+      <div class="row"><span>+ 다른 센터 추가 (초대코드)</span><span style="color:var(--muted)">›</span></div>
+    </div>
+  </section>
+
+  </div>
+  <div class="tabs">
+    <button class="tab on" data-t="t-home" onclick="tab(this)"><span class="ic">🏠</span>홈</button>
+    <button class="tab" data-t="t-book" onclick="tab(this)"><span class="ic">🗓</span>예약</button>
+    <button class="tab cam-tab" data-t="t-cam" onclick="tab(this)"><span class="ic">📸</span>촬영</button>
+    <button class="tab" data-t="t-log" onclick="tab(this)"><span class="ic">📈</span>기록</button>
+    <button class="tab" data-t="t-my" onclick="tab(this)"><span class="ic">👤</span>마이</button>
+  </div>
+  </div>
+</div>
+<script>
+function show(id){ ["step-phone","step-code","step-center"].forEach(s=>document.getElementById(s).style.display = (s===id?"block":"none")); }
+function enterApp(){ document.getElementById("m-login").style.display="none"; const m=document.getElementById("m-main"); m.style.display="flex"; }
+function tab(b){
+  document.querySelectorAll("#m-main .scr").forEach(s=>s.classList.remove("on"));
+  document.getElementById(b.dataset.t).classList.add("on");
+  document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on", x===b));
+}
+function seg(btn,id){
+  btn.parentElement.querySelectorAll(".chip").forEach(b=>b.classList.remove("on"));
+  btn.classList.add("on");
+  ["lw","li","lb"].forEach(k=>document.getElementById("seg-"+k).style.display=(k===id?"block":"none"));
+}
+function coachFilter(my){
+  document.getElementById("fMy").classList.toggle("on", my);
+  document.getElementById("fAll").classList.toggle("on", !my);
+  document.getElementById("slots-my").style.display = my?"block":"none";
+  document.getElementById("slots-all").style.display = my?"none":"block";
+}
+function tiltSim(){
+  const c=document.getElementById("cam"); c.classList.toggle("tilted");
+  document.getElementById("lvltag").textContent = c.classList.contains("tilted") ? "기울음 3.4° — 폰을 세워주세요" : "수평 OK ✓ · 정렬되면 3·2·1";
+}
+</script>
+</body>
+</html>

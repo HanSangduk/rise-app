@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Android 12+(API 31)의 SplashScreen API (P32).
+
+        **이 버전부터 `windowBackground`는 기동 화면에 쓰이지 않는다.** 시스템이
+        `windowSplashScreenBackground` 위에 런처 아이콘을 얹어 그린다 — 그래서
+        `launch_background.xml`의 마크는 여기선 무시된다(실기기에서 배경만 나오고
+        마크가 없는 걸로 확인).
+
+        다행히 **런처 아이콘이 이미 브랜드 마크**다(`flutter_launcher_icons`,
+        adaptive_icon_background #F6F4EF). 그래서 아이콘을 따로 지정하지 않고
+        배경색만 같은 크림으로 맞춘다 — 그러면 시스템 스플래시 → Flutter 첫 프레임이
+        같은 그림에서 이어진다.
+
+        `windowSplashScreenAnimatedIcon`을 따로 주지 않는 이유: 시스템이 아이콘을
+        원형으로 마스킹하고 크기도 강제해서, 마크를 그대로 넣으면 획이 잘린다.
+        런처 아이콘은 그 마스킹을 전제로 이미 여백을 갖고 만들어져 있다.
+    -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowSplashScreenBackground">@color/brand_cream</item>
+        <!-- API 31 미만 경로와 같은 그림을 유지한다(구형 기기). -->
+        <item name="android:windowBackground">@drawable/launch_background</item>
+    </style>
+
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@color/brand_cream</item>
+    </style>
+</resources>

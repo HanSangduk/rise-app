@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- Hosting 커스텀 404(P35). 기본 404 페이지 대신 사용자에게 "일시적 문제"임을 알린다.
+     주의: 이 페이지는 UX용이지 캐시 문제의 해법이 아니다 — 캐시 방어는 어드민 api.ts의
+     cache:"no-store"와 서버 writeJSON의 no-store 기본값이 담당한다. -->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-store">
+<title>페이지를 찾을 수 없어요</title>
+<style>
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#14181f; color:#d7dde6; font-family:Pretendard,"Apple SD Gothic Neo",sans-serif;
+         word-break:keep-all; }
+  .box { text-align:center; padding:2rem; }
+  h1 { font-size:1.4rem; margin:0 0 .6rem; }
+  p { color:#9aa5b1; line-height:1.7; margin:0 0 1.2rem; }
+  a { color:#7db3f0; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <h1>페이지를 찾을 수 없어요</h1>
+    <p>주소가 잘못됐거나 일시적인 연결 문제일 수 있어요.<br>잠시 후 새로고침하거나 처음 화면으로 돌아가주세요.</p>
+    <a href="/">처음 화면으로</a>
+  </div>
+</body>
+</html>

@@ -1,0 +1,143 @@
+name: rise_member
+description: "라이즈 컨디셔닝 — 회원 앱 (예약 · 체형 분석 카메라 · 인바디 · 회원권)"
+publish_to: "none"
+version: 0.1.0+1
+
+# 버전 기준: 2026-08 (Flutter 3.44 / Dart 3.12 / Riverpod 3.0).
+# 정확한 최신은 `flutter pub upgrade --major-versions`로 확인.
+environment:
+  sdk: ^3.12.0
+  flutter: ">=3.44.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # 상태 + DI (DI 컨테이너로 Riverpod 단일 사용 — get_it 미사용)
+  flutter_riverpod: ^3.0.0
+  riverpod_annotation: ^3.0.0
+
+  # 라우팅 (로그인 스택 + 바텀탭 5목적지 ShellRoute)
+  go_router: ^16.0.0
+
+  # 네트워크 (data 레이어 datasource 내부에서만 사용 — 도메인은 불변)
+  dio: ^5.7.0
+
+  # Firebase — 전화번호 인증(P06). 2026-08 기준 최신 stable (Flutter 3.44 호환 확인).
+  firebase_core: ^4.13.0
+  firebase_auth: ^6.5.7
+
+  # 체형 사진 원본 저장소(P11) — 버킷 rize-218c1.firebasestorage.app.
+  # 2026-08-23 pub.dev API 확인: 13.4.6이 최신 stable.
+  firebase_storage: ^13.4.6
+
+  # 하드웨어(P11). 세 패키지 모두 2026-08-23 pub.dev API로 최신 stable 확인.
+  #  · mobile_scanner 7.4.0 — 셀프 체크인 데스크 QR 스캔
+  #  · camera 0.12.0+2     — 체형 촬영 실 프리뷰 + 캡처
+  #  · sensors_plus 7.1.0  — 수평계(가속도계 기울기)
+  mobile_scanner: ^7.4.0
+  camera: ^0.12.0+2
+  sensors_plus: ^7.1.0
+
+  # 약관·개인정보처리방침을 외부 브라우저로 연다(P26). 앱 안 웹뷰가 아닌 이유:
+  # 법정 고지 문서는 회원이 주소창으로 출처를 확인하고 저장·공유할 수 있어야 하고,
+  # 웹뷰를 들이면 그 안의 링크(분쟁조정위·KISA)까지 앱이 책임지는 표면이 된다.
+  # 2026-08-25 pub.dev API 확인: 6.3.2가 최신 stable.
+  url_launcher: ^6.3.2
+
+  # 카메라 권한의 "일시 거부 / 영구 거부" 구분 + 설정 앱 열기.
+  # camera·mobile_scanner 자체 권한 요청은 이 구분을 돌려주지 않아 안내를 나눌 수 없다.
+  # 2026-08-23 pub.dev API 확인: 13.0.1이 최신 stable.
+  permission_handler: ^13.0.1
+
+  # 인바디 결과지 OCR 프리필(P20) — 온디바이스 텍스트 인식. **한국어 스크립트 필수**
+  # (기본 Latin 모델에는 한글이 없다 — design/inbody-ocr/README.md). Android는 한국어
+  # 네이티브 라이브러리가 APK에 추가된다. iOS는 이번 범위 밖: 이 패키지의 podspec이
+  # iOS 15.5를 요구하는데 프로젝트는 15.0 + Podfile 부재라 시트가 버튼 자체를 숨긴다
+  # (inbody_add_sheet.dart 주석). 2026-08-23 pub.dev API 확인: 0.17.1이 최신 stable
+  # (sdk ^3.12.0 / flutter >=3.44.0 — 본 프로젝트와 일치). # 2026-08 기준 최신 stable
+  google_mlkit_text_recognition: ^0.17.1
+
+  # 결과지 사진 선택(갤러리/카메라) — P20 전용. 갤러리는 시스템 포토피커라 저장소
+  # 권한이 필요 없고, 카메라는 매니페스트에 CAMERA가 선언된 앱이라 촬영 전에
+  # 기존 권한 게이트(core/permissions)를 통과시킨다.
+  # 2026-08-23 pub.dev API 확인: 1.2.3이 최신 stable. # 2026-08 기준 최신 stable
+  image_picker: ^1.2.3
+
+  # 로컬 영속 — 가입 요청("승인 대기 중")이 앱 재실행에도 살아남게(P2R).
+  # 2026-08-22 pub.dev 확인: 2.5.5가 최신 stable(2026-03-25 게시,
+  # sdk ^3.9.0 / flutter >=3.35.0 — 본 프로젝트 3.12.0 / 3.44.0과 호환).
+  shared_preferences: ^2.5.5
+
+  # 커스텀 SVG 아이콘 세트 (RiseIcon 위젯 — 이모지 금지)
+  flutter_svg: ^2.0.10
+
+  # 주입 가능한 시계 — `DateFmt.nowKst()`가 `clock.now()`를 읽는다(date_format.dart).
+  # 기본값은 `DateTime.now()`라 운영 동작은 그대로고, 테스트만 `withClock`으로
+  # "지금"을 고정한다(시간창 경계 판정을 실제로 기다리지 않고 검증).
+  # 2026-08-23 pub.dev 확인: 1.1.2가 최신 stable. dev_dependencies의 fake_async도
+  # 같은 패키지를 쓰므로(전이 의존) 버전이 갈리지 않는다.
+  clock: ^1.1.2
+
+  # 불변 DTO 전용(json 파싱) — 도메인 엔티티는 codegen 없는 순수 Dart
+  freezed_annotation: ^3.0.0
+  json_annotation: ^4.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+
+  # 15분 TTL 같은 시간 의존 로직을 실제로 기다리지 않고 검증(스태프 캐시 만료).
+  # flutter_test가 이미 끌어오는 패키지지만, 직접 import하므로 명시적으로 선언한다.
+  # 2026-08-23 pub.dev 확인: 1.3.3이 최신 stable.
+  fake_async: ^1.3.3
+
+  build_runner: ^2.4.13
+  riverpod_generator: ^3.0.0
+  freezed: ^3.0.0
+  json_serializable: ^6.9.0
+
+  flutter_lints: ^5.0.0
+
+  # 런처 아이콘 생성 도구(P19). 2026-08 기준 최신 stable — pub.dev API로 확인
+  # (adaptive_icon_monochrome 지원은 0.14.0부터 — CHANGELOG #497 확인).
+  flutter_launcher_icons: ^0.14.4
+
+# 런처 아이콘(P19). 원본 자산의 소스 오브 트루스는 design/brand/ (assets/brand/는 복사본 —
+# 마크 수정 시 design/brand/README.md의 재생성 파이프라인을 돌리고 여기로 다시 복사).
+# 재생성: dart run flutter_launcher_icons
+flutter_launcher_icons:
+  android: true # 레거시 mipmap(ic_launcher.png) + 적응형(anydpi-v26) 둘 다 생성
+  ios: true
+  # iOS·레거시용 마스터 — 1024×1024 RGB 불투명(알파 채널 없음, App Store 요건 충족)
+  image_path: "assets/brand/appicon-master.png"
+  min_sdk_android: 24 # build.gradle.kts의 flutter.minSdkVersion(Flutter 3.44 기본 24)과 일치
+  # 적응형 배경은 이미지 없이 브랜드 크림 단색
+  adaptive_icon_background: "#F6F4EF"
+  # 전경 fg는 1024 캔버스가 적응형 레이어(108dp) 전체에 대응하고 마크가 이미
+  # 세이프존(66/108) 안에 배치돼 있다 — 도구 기본 inset 16%를 그대로 두면
+  # 마크가 이중으로 축소되므로 0으로 고정한다(모노 레이어에도 같은 inset이 적용됨).
+  adaptive_icon_foreground: "assets/brand/appicon-fg.png"
+  adaptive_icon_foreground_inset: 0
+  # 안드로이드 13+ 테마 아이콘 — 전경과 같은 배치의 단색(알파만 쓰임)
+  adaptive_icon_monochrome: "assets/brand/appicon-mono.png"
+
+flutter:
+  uses-material-design: true
+
+  # Pretendard — 목업이 전제한 본문 서체(P09). 종전엔 ThemeData.fontFamily로 'Pretendard'를
+  # 선언만 하고 파일이 없어, 앱의 모든 글자가 iOS는 SF Pro·안드로이드는 Roboto+Noto로
+  # 떨어졌다. 10.5·11.5처럼 0.5pt 단위로 맞춘 타입 스케일이 Pretendard의 x-height와 한글
+  # 자간을 전제한 값이라, 폰트가 없으면 스케일 전체가 어긋난 기준 위에 놓인다.
+  #
+  # 가변폰트 1개로 전 굵기를 커버한다 — Flutter는 TextStyle.fontWeight를 가변폰트의 wght 축에
+  # 자동 매핑한다(공식: docs.flutter.dev/release/breaking-changes/font-weight-variation).
+  # 정적 6종(w400~w900)을 개별 번들하면 9MB인데 가변은 6.4MB로 더 작고, 나중에 굵기를
+  # 추가해도 파일이 늘지 않는다. 서브셋(woff2)은 Flutter가 지원하지 않아 쓸 수 없다.
+  # 라이선스: SIL Open Font License 1.1 (assets/fonts/LICENSE.txt) — 상용 번들 허용.
+  fonts:
+    - family: Pretendard
+      fonts:
+        - asset: assets/fonts/PretendardVariable.ttf

@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>라이즈 컨디셔닝 어드민 — 목업 v2 (2026-08-14)</title>
+<style>
+  :root{--red:#f43f5e; --red-d:#e11d48; --bg:#0c0d12; --panel:#15161d; --panel2:#1d1f29; --line:#2a2c3a; --ink:#e9eaf2; --muted:#8b8fa3; --ok:#34d399; --warn:#fbbf24; --dan:#fb7185; --blue:#60a5fa; --amber:#f59e0b}
+  *{box-sizing:border-box; margin:0}
+  body{font-family:"Pretendard","Apple SD Gothic Neo",system-ui,sans-serif; background:var(--bg); color:var(--ink); font-size:14px}
+  .demo-bar{background:#000; color:#9ca3af; text-align:center; padding:6px; font-size:11.5px}
+  .demo-bar b{color:var(--red)}
+  .layout{display:flex; min-height:100vh}
+  aside{width:212px; background:#0a0b10; padding:16px 10px; flex-shrink:0; border-right:1px solid var(--line)}
+  .logo{font-size:18px; font-weight:900; padding:2px 10px}
+  .logo b{color:var(--red)}
+  .logo-sub{font-size:10.5px; color:var(--muted); padding:0 10px 12px}
+  .nav-btn{display:flex; gap:8px; width:100%; text-align:left; background:none; border:0; color:#9aa0b4; padding:9px 10px; border-radius:9px; font-size:13.5px; cursor:pointer; align-items:center}
+  .nav-btn:hover{background:var(--panel2); color:#fff}
+  .nav-btn.active{background:rgba(244,63,94,.14); color:var(--red); font-weight:800}
+  main{flex:1; min-width:0}
+  header.top{background:var(--panel); border-bottom:1px solid var(--line); padding:9px 20px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap}
+  .crumb{font-size:13px; color:var(--muted)} .crumb b{color:var(--ink)}
+  .role-switch{display:flex; gap:4px; background:var(--panel2); border:1px solid var(--line); border-radius:99px; padding:3px}
+  .role-switch button{border:0; background:none; color:var(--muted); font-size:11.5px; font-weight:800; padding:5px 12px; border-radius:99px; cursor:pointer}
+  .role-switch button.on{background:var(--red); color:#fff}
+  .content{padding:18px 20px; max-width:1200px}
+  .screen{display:none} .screen.on{display:block}
+  h2{font-size:16.5px; margin-bottom:3px}
+  .sub{color:var(--muted); font-size:12px; margin-bottom:14px}
+  .grid{display:grid; gap:12px}
+  .g6{grid-template-columns:repeat(6,1fr)} .g4{grid-template-columns:repeat(4,1fr)} .g3{grid-template-columns:repeat(3,1fr)} .g2{grid-template-columns:repeat(2,1fr)} .g32{grid-template-columns:3fr 2fr}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:13px; padding:14px}
+  .card h3{font-size:13px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap}
+  .kpi .l{font-size:11px; color:var(--muted)} .kpi .v{font-size:21px; font-weight:900; margin:2px 0} .kpi .d{font-size:10.5px; color:var(--muted)}
+  .kpi .v span{font-size:12px; color:var(--muted); font-weight:400}
+  .badge{display:inline-block; padding:2px 8px; border-radius:99px; font-size:10.5px; font-weight:800}
+  .b-ok{background:rgba(52,211,153,.15); color:var(--ok)} .b-warn{background:rgba(251,191,36,.15); color:var(--warn)}
+  .b-dan{background:rgba(251,113,133,.18); color:var(--dan)} .b-red{background:rgba(244,63,94,.16); color:var(--red)}
+  .b-blue{background:rgba(96,165,250,.15); color:var(--blue)} .b-mut{background:var(--panel2); color:var(--muted)}
+  table{width:100%; border-collapse:collapse; font-size:12.5px}
+  th{text-align:left; color:var(--muted); font-size:10.5px; font-weight:700; padding:6px 8px; border-bottom:1px solid var(--line)}
+  td{padding:7px 8px; border-bottom:1px solid #20222e; vertical-align:middle}
+  .btn{border:0; border-radius:9px; padding:7px 12px; font-size:12px; font-weight:800; cursor:pointer}
+  .btn-p{background:var(--red); color:#fff} .btn-o{background:var(--panel2); border:1px solid var(--line); color:var(--ink)}
+  .btn-sm{padding:4px 9px; font-size:10.5px}
+  .note{font-size:10.5px; color:var(--muted); margin-top:9px; line-height:1.6} .note b{color:var(--red)}
+  .bar{height:6px; background:var(--panel2); border-radius:99px; overflow:hidden} .bar i{display:block; height:100%; background:var(--red)}
+  .hbar{display:flex; align-items:center; gap:8px; font-size:11.5px; margin:5px 0}
+  .hbar .nm{width:64px; color:var(--muted)} .hbar .tr{flex:1; height:7px; background:var(--panel2); border-radius:99px} .hbar .tr i{display:block; height:100%; border-radius:99px; background:var(--red)} .hbar .pc{width:56px; text-align:right; font-weight:700}
+  .chip{display:inline-block; background:var(--panel2); border:1px solid var(--line); border-radius:99px; padding:4px 10px; font-size:11px; color:var(--muted); margin:2px; cursor:pointer}
+  .chip.on{background:rgba(244,63,94,.16); color:var(--red); border-color:rgba(244,63,94,.4); font-weight:800}
+  /* 슬롯 레인 */
+  .lane-grid{display:grid; grid-template-columns:44px 1fr 1fr 1fr; gap:5px; font-size:11px}
+  .lane-h{font-size:10.5px; color:var(--muted); text-align:center; padding:3px 0}
+  .lt{color:var(--muted); text-align:right; padding:8px 6px 0 0; font-size:10.5px}
+  .team{border-radius:8px; padding:6px 8px; font-weight:700; min-height:30px; line-height:1.35}
+  .t-jh{background:rgba(244,63,94,.15); color:#fda4af; border-left:3px solid var(--red)}
+  .t-hr{background:rgba(245,158,11,.13); color:#fcd34d; border-left:3px solid var(--amber)}
+  .t-to{background:rgba(96,165,250,.13); color:#93c5fd; border-left:3px solid var(--blue)}
+  .t-empty{border:1px dashed var(--line); color:#4b4f63; display:flex; align-items:center; justify-content:center; cursor:pointer}
+  .t-empty:hover{color:var(--red); border-color:var(--red)}
+  /* 카메라 프리뷰 */
+  .cam{position:relative; background:linear-gradient(180deg,#3a3d46,#23252c); border-radius:14px; height:290px; overflow:hidden}
+  .cam .gridlines{position:absolute; inset:0;
+    background-image:linear-gradient(rgba(255,255,255,.28) 1px, transparent 1px),linear-gradient(90deg, rgba(255,255,255,.28) 1px, transparent 1px);
+    background-size:11.1% 8.3%}
+  .cam .vline{position:absolute; left:50%; top:0; bottom:0; width:2px; background:#ff2d2d}
+  .cam .hline{position:absolute; left:8%; right:8%; top:58%; height:2px; background:#ff2d2d}
+  .cam .dot{position:absolute; left:50%; bottom:9%; width:16px; height:16px; border:2.5px solid #ff2d2d; border-radius:50%; transform:translateX(-50%); display:flex; align-items:center; justify-content:center}
+  .cam .dot i{width:7px; height:7px; background:#ff2d2d; border-radius:50%}
+  .cam .lvl{position:absolute; left:14%; right:14%; top:38%; height:2.5px; background:var(--ok); box-shadow:0 0 8px rgba(52,211,153,.8); transition:.35s}
+  .cam.tilted .lvl{transform:rotate(-3.4deg); background:var(--amber); box-shadow:0 0 8px rgba(245,158,11,.8)}
+  .cam .lvl-tag{position:absolute; right:10px; top:34%; font-size:10px; font-weight:800; color:var(--ok); background:rgba(0,0,0,.5); padding:2px 7px; border-radius:99px}
+  .cam.tilted .lvl-tag{color:var(--amber)}
+  .cam .toplab{position:absolute; top:0; left:0; right:0; background:rgba(0,0,0,.65); text-align:center; font-weight:900; padding:5px; font-size:13px}
+  .cam .date{position:absolute; top:34px; left:10px; background:rgba(0,0,0,.55); border-radius:99px; padding:3px 10px; font-size:10.5px}
+  .cam .ghost{position:absolute; left:50%; bottom:9%; transform:translateX(-50%); opacity:.35}
+  .cam .warnbg{position:absolute; bottom:8px; left:8px; right:8px; background:rgba(251,113,133,.18); border:1px solid rgba(251,113,133,.5); color:#fda4af; font-size:10px; border-radius:8px; padding:5px 8px}
+  /* 역할·반응형 */
+  .as-trainer .owner-only{display:none !important}
+  .trainer-only{display:none} .as-trainer .trainer-only{display:block}
+  .as-trainer span.trainer-only{display:inline} .as-trainer tr.trainer-only{display:table-row}
+  #login{position:fixed; inset:0; background:rgba(5,6,10,.94); z-index:50; display:flex; align-items:center; justify-content:center}
+  .login-card{background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:28px; width:340px; text-align:center}
+  @media(max-width:880px){
+    .layout{flex-direction:column}
+    aside{width:100%; display:flex; overflow-x:auto; padding:8px; gap:2px; border-right:0; border-bottom:1px solid var(--line)}
+    .logo,.logo-sub{display:none}
+    .nav-btn{white-space:nowrap; padding:8px 10px}
+    .g6,.g4,.g3,.g2,.g32{grid-template-columns:1fr 1fr}
+    .g32{grid-template-columns:1fr}
+    .content{padding:12px}
+  }
+  @media(max-width:560px){.g6,.g4,.g3,.g2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="demo-bar">🖱 <b>라이즈 어드민 목업 v2</b> — 메뉴 클릭 · 우측 상단 <b>대표↔트레이너</b> 전환으로 권한 차이 확인 · 창 폭을 줄이면 <b>모바일 레이아웃</b>(반응형=트레이너 폰 사용)</div>
+
+<!-- 로그인 -->
+<div id="login">
+  <div class="login-card">
+    <div style="font-size:22px; font-weight:900">RISE <span style="color:var(--red)">CONDITIONING</span></div>
+    <div style="font-size:11px; color:var(--muted); margin:4px 0 18px">라이즈 컨디셔닝 센터 어드민 · powered by PT데스크</div>
+    <input placeholder="이메일" style="width:100%; background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:10px 12px; color:#fff; font-size:13px; margin-bottom:8px">
+    <input placeholder="비밀번호" type="password" style="width:100%; background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:10px 12px; color:#fff; font-size:13px; margin-bottom:14px">
+    <button class="btn btn-p" style="width:100%; padding:11px" onclick="login('owner')">대표로 로그인 (데모)</button>
+    <button class="btn btn-o" style="width:100%; padding:11px; margin-top:8px" onclick="login('trainer')">트레이너로 로그인 (데모 · 정혜린)</button>
+    <div class="note">로그인 시 역할(owner/trainer)에 따라 보이는 메뉴·데이터가 다릅니다. 매출·통계는 대표 전용.</div>
+  </div>
+</div>
+
+<div class="layout">
+<aside>
+  <div class="logo">RISE <b>어드민</b></div>
+  <div class="logo-sub">라이즈 컨디셔닝 센터 (강남)</div>
+  <button class="nav-btn active" data-s="dash" onclick="go(this)">📊 대시보드</button>
+  <button class="nav-btn" data-s="cal" onclick="go(this)">🗓 예약 (3팀/시간)</button>
+  <button class="nav-btn" data-s="members" onclick="go(this)">👥 회원 관리</button>
+  <button class="nav-btn owner-only" data-s="sales" onclick="go(this)">💰 매출·통계</button>
+  <button class="nav-btn" data-s="hw" onclick="go(this)">🏠 Home Work</button>
+  <button class="nav-btn" data-s="body" onclick="go(this)">📸 체형 분석</button>
+  <button class="nav-btn owner-only" data-s="set" onclick="go(this)">⚙️ 설정·직원</button>
+</aside>
+
+<main>
+<header class="top">
+  <div class="crumb">라이즈 컨디셔닝 · <b id="crumb">대시보드</b> · 2026-08-14 (금)</div>
+  <div class="role-switch">
+    <button id="rb-o" class="on" onclick="setRole('owner')">대표 이준호</button>
+    <button id="rb-t" onclick="setRole('trainer')">트레이너 정혜린</button>
+  </div>
+</header>
+<div class="content">
+
+<!-- ═══ 대시보드 ═══ -->
+<section class="screen on" id="s-dash">
+  <h2>대시보드</h2>
+  <p class="sub owner-only">센터 건강 상태 한눈에 — 회원·리텐션·오늘.</p>
+  <p class="sub trainer-only">정혜린 코치님, 오늘 내 수업과 담당 회원 현황입니다.</p>
+  <div class="grid g6 owner-only">
+    <div class="card kpi"><div class="l">활동 회원</div><div class="v">15 <span>/ 등록 20</span></div><div class="d">유효 회원권 보유</div></div>
+    <div class="card kpi"><div class="l">신규 등록 (누적)</div><div class="v">20명</div><div class="d">이번 달 +2</div></div>
+    <div class="card kpi"><div class="l">재등록률</div><div class="v">20%</div><div class="d">4/20명 · 만료 후 90일 내</div></div>
+    <div class="card kpi"><div class="l">미배정</div><div class="v">0명</div><div class="d">담당 트레이너 없음</div></div>
+    <div class="card kpi"><div class="l">장기 미출석</div><div class="v" style="color:var(--dan)">1명</div><div class="d">60일 이상 · 윤성호</div></div>
+    <div class="card kpi"><div class="l">회원권 종료</div><div class="v">5명</div><div class="d">임박 D-7 이내 2</div></div>
+  </div>
+  <div class="grid g32" style="margin-top:12px">
+    <div class="card">
+      <h3><span>오늘 일정 <span class="owner-only"><span class="badge b-red">11팀</span> <span class="badge b-ok">출석 4</span> <span class="badge b-dan">노쇼 1</span></span><span class="trainer-only"><span class="badge b-red">내 5팀</span> <span class="badge b-dan">노쇼 1</span></span></span><button class="btn btn-o btn-sm">예약 탭으로</button></h3>
+      <table>
+        <tr><th>시간</th><th>팀</th><th>트레이너</th><th>상태</th><th></th></tr>
+        <tr class="owner-only"><td>10:00</td><td>정도윤 1:1</td><td>김태오</td><td><span class="badge b-ok">완료</span></td><td></td></tr>
+        <tr class="owner-only"><td>10:00</td><td>체험(OT) 신규상담</td><td>이준호</td><td><span class="badge b-ok">완료</span></td><td></td></tr>
+        <tr class="owner-only"><td>11:00</td><td>박서준 1:1</td><td>김태오</td><td><span class="badge b-ok">완료</span></td><td></td></tr>
+        <tr><td>11:00</td><td>오세림 1:1</td><td>정혜린</td><td><span class="badge b-ok">완료</span></td><td></td></tr>
+        <tr><td>14:00</td><td>이하늘 1:1</td><td>정혜린</td><td><span class="badge b-dan">노쇼</span></td><td><button class="btn btn-o btn-sm">유예 처리</button></td></tr>
+        <tr class="owner-only"><td>17:00</td><td>최유나 1:1</td><td>김태오</td><td><span class="badge b-warn">예정</span></td><td><button class="btn btn-p btn-sm">✓ 체크인</button></td></tr>
+        <tr><td>17:00</td><td>한지우 1:1</td><td>정혜린</td><td><span class="badge b-warn">예정</span></td><td><button class="btn btn-p btn-sm">✓ 체크인</button></td></tr>
+        <tr><td>19:00</td><td>그룹 컨디셔닝 (5명)</td><td>정혜린</td><td><span class="badge b-warn">예정</span></td><td><button class="btn btn-o btn-sm">명단</button></td></tr>
+        <tr class="owner-only"><td>19:00</td><td>강수민 1:1 · 임태윤 1:1</td><td>김태오 · 이준호</td><td><span class="badge b-red">3/3 만석</span></td><td></td></tr>
+        <tr><td>20:00</td><td>김민지 1:1</td><td>정혜린</td><td><span class="badge b-warn">예정</span></td><td><button class="btn btn-p btn-sm">✓ 체크인</button></td></tr>
+      </table>
+      <p class="note">체크인 한 번 = 출석+세션 차감+정산 근거. 트레이너 뷰에선 <b>내 수업만</b> 보입니다 — 역할 전환으로 확인.</p>
+    </div>
+    <div class="card">
+      <h3>해야 할 일</h3>
+      <div style="font-size:12px; line-height:2.1">
+        ✍️ 계약서 미서명 <b>3건</b> (한지우·오세림·김민지 추가)<br>
+        ⏳ 회원권 만료 임박 <b>2명</b> (D-7) — 연장 제안<br>
+        🔁 잔여 3회 미만 <b>1명</b> (이하늘 2회) — 재계약 상담<br>
+        <span style="color:var(--dan)">🚨 장기 미출석 윤성호 (61일)</span> — 안부 메시지<br>
+        <span class="owner-only">💳 분할 납부 예정 1건 (박서준 2차 9/1)</span>
+      </div>
+      <div class="card" style="margin-top:10px; background:var(--panel2); border-color:var(--line)">
+        <div style="font-size:11px; color:var(--muted)">이번 주 Home Work 완료율</div>
+        <div style="display:flex; align-items:center; gap:10px; margin-top:4px"><div class="bar" style="flex:1"><i style="width:72%"></i></div><b style="font-size:13px">72%</b></div>
+      </div>
+      <div class="trainer-only">
+        <div class="card" style="margin-top:10px; background:rgba(244,63,94,.08); border-color:rgba(244,63,94,.3)">
+          <div style="font-size:11px; color:var(--muted)">내 정산 (8월 · 정혜린)</div>
+          <div style="font-size:19px; font-weight:900; margin:3px 0">₩1,470,000</div>
+          <div style="font-size:11px; color:var(--muted)">수업 42회 × ₩35,000 · 오늘 +3회 예정</div>
+        </div>
+        <div class="card" style="margin-top:8px">
+          <div style="font-size:11px; color:var(--muted); margin-bottom:6px">내 통계 — 센터 평균과 비교 (타 코치 개별 수치는 비공개)</div>
+          <table style="font-size:11.5px">
+            <tr><td>내 재등록률</td><td><b>25%</b> (2/8)</td><td style="color:var(--ok)">평균 20% ▲</td></tr>
+            <tr><td>내 노쇼율</td><td><b>3.1%</b></td><td style="color:var(--ok)">평균 4.2% ▼</td></tr>
+            <tr><td>담당 HW 완료율</td><td><b>76%</b></td><td style="color:var(--ok)">평균 72% ▲</td></tr>
+            <tr><td>재계약 상담 대상</td><td colspan="2"><b>이하늘</b> (잔여 2회) · 한지우 (미서명)</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 예약 (슬롯 3팀) ═══ -->
+<section class="screen" id="s-cal">
+  <h2>예약 — 시간당 최대 3팀</h2>
+  <p class="sub">한 시간에 3레인(동시 3세션). 초과 예약은 저장 시 자동 차단, 트레이너는 같은 시간 1팀만.</p>
+  <div class="card">
+    <h3>
+      <span><span class="chip">목 13</span><span class="chip on">금 14</span><span class="chip">토 15</span><span class="chip">일 16</span><span class="chip">월 17</span></span>
+      <span><span class="badge b-red">이준호</span> <span class="badge b-warn">정혜린</span> <span class="badge b-blue">김태오</span> <button class="btn btn-p btn-sm">+ 예약 (대행)</button></span>
+    </h3>
+    <div class="lane-grid">
+      <div></div><div class="lane-h">레인 1</div><div class="lane-h">레인 2</div><div class="lane-h">레인 3</div>
+      <div class="lt">10시</div><div class="team t-to">정도윤 1:1 ✓<br><span style="font-weight:400">김태오</span></div><div class="team t-jh">체험 OT ✓<br><span style="font-weight:400">이준호</span></div><div class="team t-empty">+ 비어있음</div>
+      <div class="lt">11시</div><div class="team t-to">박서준 1:1 ✓</div><div class="team t-hr">오세림 1:1 ✓</div><div class="team t-empty">+</div>
+      <div class="lt">14시</div><div class="team t-hr" style="opacity:.6">이하늘 노쇼</div><div class="team t-empty">+</div><div class="team t-empty">+</div>
+      <div class="lt">17시</div><div class="team t-to">최유나 1:1</div><div class="team t-hr">한지우 1:1</div><div class="team t-empty">+</div>
+      <div class="lt">19시</div><div class="team t-hr">그룹 컨디셔닝 5명</div><div class="team t-to">강수민 1:1</div><div class="team t-jh">임태윤 1:1</div>
+      <div class="lt">20시</div><div class="team t-hr">김민지 1:1</div><div class="team t-empty">+</div><div class="team t-empty">+</div>
+    </div>
+    <p class="note">19시 = <b>3/3 만석</b> → 회원 앱엔 "대기 신청"으로 표시, 취소 나면 선착순 자동 승격. 빈 레인 클릭 = 대행 예약(앱 없는 회원). 용량 3은 설정에서 변경(시간대별 오버라이드 가능). <span class="trainer-only">트레이너 뷰: 슬롯 현황은 공유되고, 타 코치 팀은 실서비스에서 회원명 대신 "예약됨"으로 표시됩니다.</span></p>
+  </div>
+</section>
+
+<!-- ═══ 회원 관리 ═══ -->
+<section class="screen" id="s-members">
+  <h2>회원 관리</h2>
+  <p class="sub owner-only">회원권은 트레이너에게 묶입니다 — 담당별 필터, 분할 납부, 원장까지.</p>
+  <p class="sub trainer-only">내 담당 회원만 표시됩니다 (타 담당은 이름·일정만 조회 가능).</p>
+  <div class="grid g32">
+    <div class="card">
+      <h3><span>회원 20명 (활동 15)</span><button class="btn btn-p btn-sm">+ 등록 · CSV</button></h3>
+      <div style="margin-bottom:8px"><span class="chip on">전체</span><span class="chip owner-only">이준호</span><span class="chip">정혜린</span><span class="chip owner-only">김태오</span><span class="chip owner-only">미배정 0</span></div>
+      <table>
+        <tr><th>이름</th><th>담당</th><th>회원권</th><th>상태</th></tr>
+        <tr style="background:rgba(244,63,94,.06)"><td><b>김민지</b></td><td><span class="badge b-warn">정혜린</span></td><td>PT20 잔여 7</td><td><span class="badge b-ok">활성</span></td></tr>
+        <tr><td>이하늘</td><td><span class="badge b-warn">정혜린</span></td><td>PT10 잔여 2</td><td><span class="badge b-warn">재계약</span></td></tr>
+        <tr><td>한지우</td><td><span class="badge b-warn">정혜린</span></td><td>PT20 잔여 20</td><td><span class="badge b-dan">미서명</span></td></tr>
+        <tr><td>박서준</td><td><span class="badge b-blue">김태오</span></td><td><span class="owner-only">PT30 잔여 21 · 분할</span><span class="trainer-only" style="color:var(--muted); font-size:11px">이름·일정만</span></td><td><span class="owner-only"><span class="badge b-ok">활성</span></span></td></tr>
+        <tr><td>최유나 <span class="badge b-dan">⚠️어깨</span></td><td><span class="badge b-blue">김태오</span></td><td><span class="owner-only">그룹 D-6</span><span class="trainer-only" style="color:var(--muted); font-size:11px">이름·일정만</span></td><td><span class="owner-only"><span class="badge b-warn">만료임박</span></span></td></tr>
+        <tr><td>윤성호</td><td><span class="badge b-red">이준호</span></td><td><span class="owner-only">PT10 잔여 6</span><span class="trainer-only" style="color:var(--muted); font-size:11px">이름·일정만</span></td><td><span class="owner-only"><span class="badge b-dan">61일 미출석</span></span></td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>김민지 <span><button class="btn btn-o btn-sm">🗓 대행 예약</button><button class="btn btn-o btn-sm">✏️</button></span></h3>
+      <div style="font-size:11.5px; color:var(--muted); margin-bottom:8px">010-1234-5678 · 진입경로 지인소개 · 앱 연결됨 ✓</div>
+      <div style="font-size:11px; color:var(--muted); margin-bottom:4px">회원권 2개 — 트레이너별 바인딩</div>
+      <div class="card" style="background:var(--panel2); margin-bottom:6px">
+        <div style="display:flex; justify-content:space-between; font-size:12.5px"><b>PT 20회 · 정혜린</b><span class="badge b-ok">활성</span></div>
+        <div style="font-size:11px; color:var(--muted)">잔여 7회 · ~11/30 · 실결제 1,000,000 (분할 2회 완납)</div>
+      </div>
+      <div class="card" style="background:var(--panel2); margin-bottom:8px">
+        <div style="display:flex; justify-content:space-between; font-size:12.5px"><b>그룹 10회 · 김태오</b><span class="badge b-mut">9/1 시작</span></div>
+        <div style="font-size:11px; color:var(--muted)">300,000 완납 · 앱에서는 활성 패스 기준으로 화면이 바뀝니다</div>
+      </div>
+      <table style="font-size:11.5px">
+        <tr><th colspan="3">세션 원장 — 최근 (PT20·정혜린)</th></tr>
+        <tr><td>8/12</td><td>수업 완료</td><td style="color:var(--dan)">−1</td></tr>
+        <tr><td>8/08</td><td>수업 완료</td><td style="color:var(--dan)">−1</td></tr>
+        <tr><td>8/01</td><td>노쇼 · 최초 1회 유예</td><td style="color:var(--muted)">0</td></tr>
+        <tr><td colspan="3" style="color:var(--muted)">… 이전 차감 11건 · 6/02 발급 +20 — 전체 보기</td></tr>
+      </table>
+      <div style="display:flex; gap:5px; flex-wrap:wrap; margin-top:8px">
+        <span class="badge b-ok">계약 서명완료</span><span class="badge b-warn">추가계약 대기</span><span class="badge b-red">민감정보 동의 ✓</span>
+      </div>
+      <div style="display:flex; gap:5px; flex-wrap:wrap; margin-top:8px">
+        <button class="btn btn-o btn-sm">🏠 Home Work</button><button class="btn btn-o btn-sm">📸 체형 분석</button><button class="btn btn-o btn-sm">📊 인바디</button><button class="btn btn-o btn-sm">⏸ 일시정지</button><button class="btn btn-o btn-sm owner-only">↩️ 환불 계산</button>
+      </div>
+      <div style="font-size:10.5px; color:var(--muted); margin-top:6px">🔁 고정 스케줄: <b>매주 화·금 20:00</b> (정혜린 · 2주 선행 자동 생성) · 홀딩 이력 0/2회</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 매출·통계 (owner) ═══ -->
+<section class="screen owner-only" id="s-sales">
+  <h2>매출 · 통계 <span class="badge b-red">대표 전용</span></h2>
+  <p class="sub">트레이너에게는 이 메뉴가 보이지 않습니다 (본인 정산만 별도 제공).</p>
+  <div class="grid g3">
+    <div class="card kpi"><div class="l">2026년 매출 (누적)</div><div class="v">₩19,215,000</div>
+      <div class="bar" style="margin:7px 0 4px"><i style="width:19.2%"></i></div>
+      <div class="d">목표 1억 · <b style="color:var(--ink)">₩80,785,000 남음</b></div></div>
+    <div class="card kpi"><div class="l">8월 매출 (진행)</div><div class="v">₩4,250,000</div><div class="d">신규 2 · 재등록 1 · 환불 0</div></div>
+    <div class="card kpi"><div class="l">미수금</div><div class="v">0원</div><div class="d">분할 예정 1건 (9/1 · 50만)</div></div>
+  </div>
+  <div class="card" style="margin-top:12px">
+    <h3>월간 매출 <span style="font-size:10.5px; color:var(--muted); font-weight:400">2026 · 3월 오픈</span></h3>
+    <svg width="100%" height="110" viewBox="0 0 560 110">
+      <text x="0" y="12" font-size="9" fill="#8b8fa3">만원</text>
+      <polyline points="20,100 60,100 100,100 140,100 180,100 220,100 260,86 300,62 340,29 380,36 420,41 460,30" fill="none" stroke="#f43f5e" stroke-width="2.5"/>
+      <g fill="#f43f5e"><circle cx="260" cy="86" r="3"/><circle cx="300" cy="62" r="3"/><circle cx="340" cy="29" r="3"/><circle cx="380" cy="36" r="3"/><circle cx="420" cy="41" r="3"/><circle cx="460" cy="30" r="3.5"/></g>
+      <g font-size="9" fill="#8b8fa3" text-anchor="middle">
+        <text x="20" y="108">9</text><text x="60" y="108">10</text><text x="100" y="108">11</text><text x="140" y="108">12</text><text x="180" y="108">1</text><text x="220" y="108">2</text>
+        <text x="260" y="108">3월</text><text x="300" y="108">4월</text><text x="340" y="108">5월</text><text x="380" y="108">6월</text><text x="420" y="108">7월</text><text x="460" y="108">8월</text>
+      </g>
+      <text x="466" y="22" font-size="9.5" fill="#fda4af">425만(진행)</text>
+    </svg>
+    <p class="note">3월 85만 → 4월 231.5만 → 5월 430만 → 6월 390만 → 7월 360만 → 8월 425만(진행) = 누적 1,921.5만</p>
+  </div>
+  <div class="grid g4" style="margin-top:12px">
+    <div class="card">
+      <h3>계약 · 객단가</h3>
+      <table><tr><td>계약 건수</td><td style="text-align:right"><b>24건</b></td></tr>
+      <tr><td>결제 회원</td><td style="text-align:right"><b>20명</b></td></tr>
+      <tr><td>객단가</td><td style="text-align:right"><b>96만원</b></td></tr>
+      <tr><td>회당 단가</td><td style="text-align:right"><b>5만원</b></td></tr>
+      <tr><td>체험(OT)→등록</td><td style="text-align:right"><b>20%</b> (4/20)</td></tr></table>
+    </div>
+    <div class="card">
+      <h3>상품별 매출</h3>
+      <div class="hbar"><span class="nm">개인 PT</span><div class="tr"><i style="width:81%"></i></div><span class="pc">1,560만</span></div>
+      <div class="hbar"><span class="nm">그룹</span><div class="tr"><i style="width:15%"></i></div><span class="pc">280만</span></div>
+      <div class="hbar"><span class="nm">체험 OT</span><div class="tr"><i style="width:4%"></i></div><span class="pc">81.5만</span></div>
+    </div>
+    <div class="card">
+      <h3>진입경로</h3>
+      <div class="hbar"><span class="nm">지인소개</span><div class="tr"><i style="width:46%"></i></div><span class="pc">46%</span></div>
+      <div class="hbar"><span class="nm">인스타</span><div class="tr"><i style="width:25%"></i></div><span class="pc">25%</span></div>
+      <div class="hbar"><span class="nm">워크인</span><div class="tr"><i style="width:17%"></i></div><span class="pc">17%</span></div>
+      <div class="hbar"><span class="nm">재등록</span><div class="tr"><i style="width:8%"></i></div><span class="pc">8%</span></div>
+      <div class="hbar"><span class="nm">미지정</span><div class="tr"><i style="width:4%"></i></div><span class="pc">4%</span></div>
+      <p class="note">계약 등록 때 경로가 <b>필수 입력</b>이라 '미지정 75%' 같은 깜깜이가 안 생깁니다.</p>
+    </div>
+    <div class="card">
+      <h3>결제수단 · 리스크</h3>
+      <div class="hbar"><span class="nm">카드</span><div class="tr"><i style="width:58%"></i></div><span class="pc">58%</span></div>
+      <div class="hbar"><span class="nm">현금·이체</span><div class="tr"><i style="width:42%"></i></div><span class="pc">42%</span></div>
+      <table style="margin-top:6px"><tr><td>노쇼율</td><td style="text-align:right"><b>4.2%</b></td></tr>
+      <tr><td>잔여 3회 미만</td><td style="text-align:right"><b>1명</b></td></tr>
+      <tr><td>환불</td><td style="text-align:right"><b>0건</b></td></tr></table>
+    </div>
+  </div>
+  <div class="grid g2" style="margin-top:12px">
+    <div class="card">
+      <h3>트레이너 비교 (8월) <span class="badge b-red">대표 전용</span></h3>
+      <table>
+        <tr><th>트레이너</th><th>정산액</th><th>재등록률</th><th>노쇼율</th><th>HW 완료</th></tr>
+        <tr><td>정혜린</td><td><b>₩1,470,000</b> (42회)</td><td><b>25%</b> (2/8)</td><td>3.1%</td><td>76%</td></tr>
+        <tr><td>김태오</td><td><b>₩810,000</b> (34회·45%)</td><td><b>17%</b> (1/6)</td><td>5.0%</td><td>65%</td></tr>
+        <tr><td>이준호 (대표)</td><td style="color:var(--muted)">센터 귀속 (18회)</td><td><b>17%</b> (1/6)</td><td>4.4%</td><td>—</td></tr>
+        <tr><td style="color:var(--muted)">센터 전체</td><td style="color:var(--muted)">₩4,250,000</td><td style="color:var(--muted)">20% (4/20)</td><td style="color:var(--muted)">4.2%</td><td style="color:var(--muted)">72%</td></tr>
+      </table>
+      <p class="note">재등록률 = <b>만료 시점 담당 기준</b>(동일 트레이너 재계약). 타 트레이너로 옮겨 남은 회원은 "센터 잔류"로 따로 집계 — 코칭 인사이트의 축. 트레이너는 <b>본인 수치+센터 평균만</b> 봅니다(비교표는 대표 전용).</p>
+    </div>
+    <div class="card">
+      <h3>환불 계산기 — 예시 <span class="badge b-ok">법규 기준</span></h3>
+      <div style="background:var(--panel2); border-radius:10px; padding:11px; font-size:12.5px; line-height:1.9">
+        실결제 1,000,000 · 총 20회 중 7회 사용<br>
+        회당 단가(실결제가) 50,000 × 7 = <b>350,000</b> 공제<br>
+        위약금 = 1,000,000 × 10%(상한) = <b>100,000</b><br>
+        <span style="font-size:14px">환불액 = <b style="color:var(--red)">₩550,000</b></span>
+      </div>
+      <p class="note">정가 공제 옵션은 없습니다 — 법원·소비자원 모두 <b>실결제가 기준</b>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ Home Work ═══ -->
+<section class="screen" id="s-hw">
+  <h2>Home Work</h2>
+  <p class="sub">수업 밖 과제를 배정하고, 완료율로 관리합니다. (구 '오늘 운동')</p>
+  <div class="grid g32">
+    <div class="card">
+      <h3>새 Home Work 배정 <button class="btn btn-p btn-sm">배정 → 앱 전송</button></h3>
+      <div style="font-size:11.5px; color:var(--muted); margin-bottom:4px">배정 대상</div>
+      <div style="margin-bottom:8px">
+        <span class="chip on">회원 1명 (김민지)</span><span class="chip">내 담당 전체 (12명)</span><span class="chip owner-only">센터 공지형 (대표 전용)</span>
+      </div>
+      <div class="card" style="background:rgba(251,191,36,.08); border-color:rgba(251,191,36,.3); margin-bottom:8px; padding:9px 11px">
+        <div style="font-size:11px; color:var(--warn)">⚠️ '담당 전체' 선택 시: <b>최유나(어깨 부상)</b>는 자동 제외됩니다 — 개별 조정 가능</div>
+      </div>
+      <table>
+        <tr><th></th><th>항목</th><th>세트×횟수</th><th>메모</th></tr>
+        <tr><td>A</td><td>밴드 외회전</td><td>3 × 15</td><td>천천히, 통증 없이</td></tr>
+        <tr><td>B</td><td>힙힌지 드릴</td><td>3 × 10</td><td>벽 터치</td></tr>
+        <tr><td>C</td><td>걷기</td><td>30분</td><td>주 3회</td></tr>
+      </table>
+      <div style="display:flex; gap:6px; align-items:center; margin-top:8px; flex-wrap:wrap; font-size:11.5px">
+        <span style="color:var(--muted)">반복:</span><span class="chip on">주 3회 (월·수·금)</span><span class="chip">1회성</span>
+        <span style="color:var(--muted); margin-left:6px">기간:</span><span class="chip">8/18 ~ 9/14</span>
+      </div>
+      <div style="margin-top:8px; font-size:11.5px"><span style="color:var(--muted)">템플릿:</span> <span class="chip">하체 기초</span><span class="chip">코어</span><span class="chip on">어깨 재활</span><span class="chip">+ 현재 구성 저장</span></div>
+      <p class="note">배정하면 회원 앱 홈에 뜨고 <b>전날 20시 리마인드</b> 푸시. 회원 체크 → 완료율 집계.</p>
+    </div>
+    <div class="card">
+      <h3>이번 주 완료율</h3>
+      <div class="hbar"><span class="nm">김민지</span><div class="tr"><i style="width:100%; background:var(--ok)"></i></div><span class="pc">3/3</span></div>
+      <div class="hbar"><span class="nm">박서준</span><div class="tr"><i style="width:33%; background:var(--warn)"></i></div><span class="pc">1/3</span></div>
+      <div class="hbar"><span class="nm">한지우</span><div class="tr"><i style="width:66%"></i></div><span class="pc">2/3</span></div>
+      <div class="hbar"><span class="nm">최유나</span><div class="tr"><i style="width:100%; background:var(--ok)"></i></div><span class="pc">재활 2/2</span></div>
+      <p class="note">완료율 하락은 이탈 신호이기도 합니다 — 회원 상세와 대시보드에 함께 집계.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 체형 분석 ═══ -->
+<section class="screen" id="s-body">
+  <h2>체형 분석</h2>
+  <p class="sub">그리드 카메라로 같은 조건 촬영 → 날짜·포즈별 타임라인 비교. (구 '눈바디')</p>
+  <div class="grid g2">
+    <div class="card">
+      <h3>촬영 화면 (회원 앱 미리보기) <button class="btn btn-o btn-sm" onclick="document.getElementById('camPrev').classList.toggle('tilted')">기울기 시뮬</button></h3>
+      <div class="cam" id="camPrev">
+        <div class="gridlines"></div>
+        <div class="toplab">정면 · 오버헤드 스쿼트</div>
+        <div class="date">2026. 08. 14 (금)</div>
+        <div class="vline"></div><div class="hline"></div>
+        <div class="lvl"></div><div class="lvl-tag" id="lvlTag">수평 OK ✓</div>
+        <div class="dot"><i></i></div>
+        <svg class="ghost" width="60" height="130" viewBox="0 0 60 130"><ellipse cx="30" cy="14" rx="10" ry="12" fill="#fff"/><path d="M14 30 Q30 25 46 30 L50 78 Q30 85 10 78 Z" fill="#fff"/><rect x="14" y="80" width="12" height="44" rx="6" fill="#fff"/><rect x="34" y="80" width="12" height="44" rx="6" fill="#fff"/></svg>
+        <div class="warnbg">👥 배경에 다른 사람이 감지됐어요 — 저장 시 자동 블러 처리됩니다</div>
+      </div>
+      <div style="font-size:11px; line-height:1.9; margin-top:9px; color:var(--muted)">
+        ✅ 그리드 + 빨간 중심선·기준선·발위치 마커 (실촬영 화면과 동일)<br>
+        ✅ <b style="color:var(--ok)">수평계</b>: 수평이면 초록 스냅+진동, 기울면 주황선+각도 (버튼으로 시뮬)<br>
+        ✅ 이전 사진 <b style="color:var(--ink)">고스트 오버레이</b>(반투명) — 프레이밍 그대로<br>
+        ✅ 수평+발위치 정렬 2초 → <b style="color:var(--ink)">자동 촬영 3·2·1</b><br>
+        ✅ 포즈 시퀀스: 차렷 → T자 → 전굴 → OH스쿼트 연속 가이드<br>
+        ✅ <b style="color:var(--dan)">배경 인물 감지→블러</b> — 실사진에서 확인된 제3자 노출 문제 차단
+      </div>
+    </div>
+    <div class="card">
+      <h3>김민지 · 타임라인 <span><span class="chip on">OH스쿼트</span><span class="chip">차렷</span><span class="chip">T자</span><span class="chip">전굴</span></span></h3>
+      <div style="display:flex; gap:6px; margin-bottom:8px">
+        <span class="chip">7/16</span><span class="chip on">7/17</span><span class="chip">7/27</span><span class="chip">7/31</span><span class="chip on">8/14</span>
+      </div>
+      <div style="display:flex; gap:8px">
+        <div style="flex:1; background:var(--panel2); border-radius:10px; height:150px; display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--muted)">📸 7/17 (목)</div>
+        <div style="flex:1; background:rgba(244,63,94,.08); border:1px solid rgba(244,63,94,.3); border-radius:10px; height:150px; display:flex; align-items:center; justify-content:center; font-size:11px; color:#fda4af">📸 8/14 (금)</div>
+      </div>
+      <input type="range" min="0" max="100" value="50" style="width:100%; margin-top:8px">
+      <p class="note">같은 포즈끼리 자동 매칭 비교. 열람 = <b>본인 + 담당 트레이너만</b>. 민감정보 동의 없으면 촬영 자체가 잠깁니다.</p>
+      <table style="margin-top:8px; font-size:11.5px">
+        <tr><th colspan="3">인바디 최근 (8/12)</th></tr>
+        <tr><td>골격근량(SMM)</td><td>24.1kg</td><td style="color:var(--ok)">▲0.4</td></tr>
+        <tr><td>체지방률(PBF)</td><td>26.8%</td><td style="color:var(--ok)">▼0.9</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 설정·직원 (owner) ═══ -->
+<section class="screen owner-only" id="s-set">
+  <h2>설정 · 직원</h2>
+  <p class="sub">센터 정책과 팀 권한 — 법의 상한 안에서 자유롭게.</p>
+  <div class="grid g2">
+    <div class="card">
+      <h3>직원 · 권한 <button class="btn btn-p btn-sm">+ 트레이너 초대</button></h3>
+      <table>
+        <tr><th>이름</th><th>역할</th><th>정산 방식</th><th></th></tr>
+        <tr><td>이준호</td><td><span class="badge b-red">대표</span></td><td>—</td><td></td></tr>
+        <tr><td>정혜린</td><td><span class="badge b-warn">트레이너</span></td><td>회당 ₩35,000</td><td><button class="btn btn-o btn-sm">✏️</button></td></tr>
+        <tr><td>김태오</td><td><span class="badge b-blue">트레이너</span></td><td>요율 45%</td><td><button class="btn btn-o btn-sm">✏️</button></td></tr>
+      </table>
+      <p class="note">트레이너는 담당 회원·본인 일정·본인 정산만 봅니다. 퇴사 시 <b>담당 이관</b> 플로우 제공.</p>
+    </div>
+    <div class="card">
+      <h3>운영 정책</h3>
+      <table>
+        <tr><td>시간당 예약 용량</td><td><b>3팀</b> <span style="color:var(--muted); font-size:11px">(시간대별 오버라이드 가능)</span></td></tr>
+        <tr><td>취소 마감</td><td><b>수업 24시간 전</b></td></tr>
+        <tr><td>노쇼</td><td><b>차감 · 최초 1회 유예 · 예외사유 기록</b></td></tr>
+        <tr><td>위약금율</td><td><b>10%</b> (법정 상한 내)</td></tr>
+        <tr><td>연 매출 목표</td><td><b>₩100,000,000</b></td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>출석 방식 <span class="badge b-red">v1 = 2가지</span></h3>
+      <div style="display:flex; gap:5px; flex-wrap:wrap"><span class="badge b-red">① 예약 원탭 (기본)</span><span class="badge b-ok">② 앱 셀프 체크인 — 데스크 인쇄 QR</span><span class="badge b-mut">키오스크·태블릿 (도입 시 활성화)</span></div>
+      <p class="note">기기 0대: 데스크에 붙인 <b>인쇄 QR을 회원이 앱으로 스캔</b>(예약·시간창 검증으로 부정 방지). 지문·얼굴 인식은 민감정보라 쓰지 않습니다.</p>
+      <table style="margin-top:8px">
+        <tr><td>일시정지(홀딩) 정책</td><td><b>회원권당 최대 2회 · 총 30일</b> — 유효기간 자동 연장, 앱 신청 → 승인</td></tr>
+        <tr><td>고정 스케줄</td><td><b>매주 요일·시간 반복 예약</b> 자동 생성(2주 선행) · 트레이너 휴무와 충돌 시 알림</td></tr>
+        <tr><td>트레이너 휴무</td><td>휴무일 설정 시 해당 슬롯 생성 제외 · 기존 예약은 재조정 큐로</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>센터 · 앱 연결</h3>
+      <table>
+        <tr><td>센터명</td><td><b>라이즈 컨디셔닝 센터</b> (강남)</td></tr>
+        <tr><td>회원 연결 (기본)</td><td><b>등록하면 끝</b> — 회원이 앱에서 번호 인증 시 자동 매칭 + <b>이름 확인 1탭</b> → "앱 연결됨 ✓"</td></tr>
+        <tr><td>초대 보내기 (보조)</td><td>카톡/문자 설치 링크 — 설치 유도 + 번호가 달라도 정확 연결</td></tr>
+        <tr><td>가입 요청 승인 (폴백)</td><td>매칭 안 된 회원의 "센터 찾기" 요청을 원탭 승인 · 현재 <b>0건</b></td></tr>
+      </table>
+      <p class="note">초대코드 입력은 없습니다. 이름 확인은 <b>오타 번호로 남의 기록에 연결되는 사고</b>를 막는 안전장치(P48).</p>
+    </div>
+    <div class="card">
+      <h3>모바일 사용 (트레이너)</h3>
+      <div style="font-size:12px; line-height:1.9">
+        이 어드민은 <b>반응형</b> — 폰 브라우저에서 그대로 쓰고,<br>
+        "홈 화면에 추가"(PWA)하면 앱처럼 아이콘으로 실행됩니다.<br>
+        별도 트레이너 앱 없이 체크인·Home Work·정산 확인까지.
+      </div>
+      <p class="note">지금 창 폭을 줄여보세요 — 모바일 레이아웃으로 전환됩니다.</p>
+    </div>
+  </div>
+</section>
+
+</div>
+</main>
+</div>
+<script>
+const names={dash:"대시보드",cal:"예약",members:"회원 관리",sales:"매출·통계",hw:"Home Work",body:"체형 분석",set:"설정·직원"};
+function go(btn){
+  document.querySelectorAll(".nav-btn").forEach(b=>b.classList.remove("active"));
+  btn.classList.add("active");
+  document.querySelectorAll(".screen").forEach(x=>x.classList.remove("on"));
+  document.getElementById("s-"+btn.dataset.s).classList.add("on");
+  document.getElementById("crumb").textContent=names[btn.dataset.s];
+}
+function setRole(r){
+  document.body.classList.toggle("as-trainer", r==="trainer");
+  document.getElementById("rb-o").classList.toggle("on", r==="owner");
+  document.getElementById("rb-t").classList.toggle("on", r==="trainer");
+  // 트레이너로 전환 시 owner 전용 화면에 있었다면 대시보드로
+  const cur=document.querySelector(".screen.on");
+  if(r==="trainer" && cur && cur.classList.contains("owner-only")){
+    document.querySelectorAll(".screen").forEach(x=>x.classList.remove("on"));
+    document.getElementById("s-dash").classList.add("on");
+    document.querySelectorAll(".nav-btn").forEach(b=>b.classList.toggle("active", b.dataset.s==="dash"));
+    document.getElementById("crumb").textContent=names.dash;
+  }
+}
+function login(r){ setRole(r); document.getElementById("login").style.display="none"; }
+// 카메라 수평 시뮬: 태그 텍스트 동기화
+const cam=document.getElementById("camPrev");
+new MutationObserver(()=>{ document.getElementById("lvlTag").textContent = cam.classList.contains("tilted") ? "기울음 3.4° →" : "수평 OK ✓"; })
+  .observe(cam,{attributes:true});
+</script>
+</body>
+</html>

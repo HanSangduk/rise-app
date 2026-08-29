@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PT데스크 3안 — 리텐션 엔진 (클릭 목업)</title>
+<style>
+  :root{--vio:#7c3aed; --vio-l:#f5f3ff; --vio-b:#ddd6fe; --ink:#1e1b4b; --bg:#f6f5fb; --line:#e4e2f0; --muted:#6b6a85; --ok:#16a34a; --warn:#d97706; --danger:#dc2626}
+  *{box-sizing:border-box; margin:0}
+  body{font-family:"Pretendard","Apple SD Gothic Neo",system-ui,sans-serif; background:var(--bg); color:var(--ink); font-size:14px}
+  .demo-bar{background:#1e1b4b; color:#c4b5fd; text-align:center; padding:7px; font-size:12px}
+  .demo-bar b{color:#fff}
+  .wrap{display:flex; gap:20px; padding:20px; max-width:1280px; margin:0 auto; align-items:flex-start; flex-wrap:wrap}
+  .main{flex:1; min-width:640px}
+  @media(max-width:1100px){.main{min-width:0}}
+  .head{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px}
+  .head h1{font-size:19px; font-weight:900}
+  .head h1 span{color:var(--vio)}
+  .head .sub{font-size:12px; color:var(--muted)}
+  .pills{display:flex; gap:6px; margin:12px 0 16px; flex-wrap:wrap}
+  .pill{border:1px solid var(--line); background:#fff; border-radius:99px; padding:8px 15px; font-size:12.5px; font-weight:700; color:var(--muted); cursor:pointer}
+  .pill.on{background:var(--vio); border-color:var(--vio); color:#fff}
+  .scr{display:none} .scr.on{display:block}
+  .grid{display:grid; gap:12px}
+  .g4{grid-template-columns:repeat(4,1fr)} .g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:900px){.g4,.g2{grid-template-columns:1fr 1fr}}
+  .card{background:#fff; border:1px solid var(--line); border-radius:14px; padding:15px}
+  .card h3{font-size:13px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center}
+  .kpi .v{font-size:22px; font-weight:900; margin:2px 0}
+  .kpi .l{font-size:11.5px; color:var(--muted)}
+  .kpi .d{font-size:11px}
+  .badge{display:inline-block; padding:2px 8px; border-radius:99px; font-size:10.5px; font-weight:800}
+  .b-ok{background:#dcfce7;color:#15803d}.b-warn{background:#fef3c7;color:#b45309}.b-dan{background:#fee2e2;color:#b91c1c}.b-vio{background:#ede9fe;color:#6d28d9}.b-mut{background:#f1f5f9;color:#64748b}
+  table{width:100%; border-collapse:collapse; font-size:12.5px}
+  th{text-align:left; color:var(--muted); font-size:11px; font-weight:700; padding:6px 8px; border-bottom:1px solid var(--line)}
+  td{padding:8px; border-bottom:1px solid #f1f0f7; vertical-align:middle}
+  .btn{border:0; border-radius:9px; padding:7px 12px; font-size:12px; font-weight:800; cursor:pointer}
+  .btn-p{background:var(--vio); color:#fff} .btn-o{background:#fff; border:1.5px solid var(--line); color:var(--ink)}
+  .btn-sm{padding:4px 9px; font-size:10.5px}
+  .note{font-size:11px; color:var(--muted); margin-top:9px; line-height:1.6}
+  .note b{color:var(--vio)}
+  .dot{display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px}
+  .d-r{background:var(--danger)} .d-y{background:var(--warn)} .d-g{background:var(--ok)}
+  /* 칸반 */
+  .kanban{display:grid; grid-template-columns:repeat(4,1fr); gap:10px}
+  @media(max-width:900px){.kanban{grid-template-columns:1fr 1fr}}
+  .kcol{background:#f1f0f7; border-radius:12px; padding:9px}
+  .kcol .kh{font-size:11.5px; font-weight:800; color:var(--muted); padding:2px 4px 8px; display:flex; justify-content:space-between}
+  .kcard{background:#fff; border:1px solid var(--line); border-radius:10px; padding:9px 10px; font-size:11.5px; margin-bottom:7px; cursor:grab}
+  .kcard b{display:block; font-size:12px}
+  .kcard .m{color:var(--muted); font-size:10.5px; margin-top:2px}
+  /* 리포트 카드 */
+  .report{background:linear-gradient(150deg,#7c3aed,#4c1d95); border-radius:16px; color:#fff; padding:18px}
+  .report .rh{display:flex; justify-content:space-between; align-items:center; margin-bottom:10px}
+  .report .rh b{font-size:15px}
+  .rstat{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:10px 0}
+  .rstat div{background:rgba(255,255,255,.12); border-radius:10px; padding:8px; text-align:center}
+  .rstat .rv{font-size:15px; font-weight:900}
+  .rstat .rl{font-size:9.5px; opacity:.8}
+  /* 폰 패널 */
+  .phonecol{width:340px; flex-shrink:0; text-align:center}
+  .phonecol .lbl{font-size:12px; font-weight:800; color:var(--vio); margin-bottom:8px}
+  .phone{width:340px; height:700px; background:#f8fafc; border:8px solid #1e1b4b; border-radius:38px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 24px 60px rgba(30,27,75,.35); text-align:left}
+  .sb{height:28px; display:flex; align-items:center; justify-content:space-between; padding:0 18px; font-size:10.5px; font-weight:700; background:#fff}
+  .phd{padding:6px 14px 9px; background:#fff; border-bottom:1px solid var(--line)}
+  .phd .t{font-size:15px; font-weight:900}
+  .phd .s{font-size:9.5px; color:var(--muted)}
+  .pbd{flex:1; overflow-y:auto; padding:11px 12px}
+  .ptabs{display:flex; background:#fff; border-top:1px solid var(--line); padding:5px 4px 11px}
+  .ptab{flex:1; background:none; border:0; font-size:9px; color:#94a3b8; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:2px; font-weight:700}
+  .ptab .i{font-size:16px}
+  .ptab.on{color:var(--vio)}
+  .pcard{background:#fff; border:1px solid var(--line); border-radius:12px; padding:11px; margin-bottom:9px; font-size:12px}
+  .pcard h5{font-size:11.5px; margin-bottom:7px; display:flex; justify-content:space-between}
+  .prow{display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #f1f0f7; font-size:11.5px}
+  .prow:last-child{border-bottom:0}
+  .bdg-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px}
+  .bdg{background:#fff; border:1px solid var(--line); border-radius:11px; padding:10px 4px; text-align:center}
+  .bdg .e{font-size:21px}
+  .bdg .n{font-size:9.5px; font-weight:700; margin-top:3px}
+  .bdg.off{opacity:.35}
+</style>
+</head>
+<body>
+<div class="demo-bar">🖱 <b>3안 클릭 목업</b> — 위 탭(어드민)과 폰 하단 탭(회원)을 눌러보세요 · 데이터는 데모 가상값</div>
+<div class="wrap">
+
+<!-- ═══════════ 어드민 ═══════════ -->
+<div class="main">
+  <div class="head">
+    <div>
+      <h1>3안 <span>그로스</span> — 리텐션 엔진</h1>
+      <div class="sub">철학: PT샵 매출의 8할은 재계약 — <b>이탈을 미리 보고, 성과를 무기로 만든다</b> · 코어핏 스튜디오</div>
+    </div>
+    <span class="badge b-vio">사장님 뷰</span>
+  </div>
+  <div class="pills">
+    <button class="pill on" data-s="radar" onclick="go(this)">🚨 리텐션 레이더</button>
+    <button class="pill" data-s="m360" onclick="go(this)">👥 회원 360</button>
+    <button class="pill" data-s="cal" onclick="go(this)">🗓 캘린더</button>
+    <button class="pill" data-s="pipe" onclick="go(this)">🔁 재계약 파이프라인</button>
+    <button class="pill" data-s="report" onclick="go(this)">📊 성과 리포트</button>
+    <button class="pill" data-s="goal" onclick="go(this)">🎯 목표 보드</button>
+    <button class="pill" data-s="ops" onclick="go(this)">✍️ 계약·정산</button>
+    <button class="pill" data-s="forecast" onclick="go(this)">💰 매출 예측</button>
+    <button class="pill" data-s="set" onclick="go(this)">⚙️ 설정</button>
+  </div>
+
+  <!-- 레이더 -->
+  <section class="scr on" id="s-radar">
+    <div class="grid g4">
+      <div class="card kpi"><div class="l">재계약률 (최근 90일)</div><div class="v">78%</div><div class="d" style="color:var(--ok)">▲ +6%p</div></div>
+      <div class="card kpi"><div class="l">이탈 위험 회원</div><div class="v" style="color:var(--danger)">4명</div><div class="d">자동 감지</div></div>
+      <div class="card kpi"><div class="l">30일 내 만료</div><div class="v">6명</div><div class="d">예상 재계약 매출 ₩4.8M</div></div>
+      <div class="card kpi"><div class="l">평균 회원 유지</div><div class="v">7.2개월</div><div class="d">업계 추정 4~6개월</div></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h3>위험 신호 감지 <span style="font-size:11px; color:var(--muted); font-weight:400">출석 간격·예약 패턴·잔여를 매일 스캔</span></h3>
+      <table>
+        <tr><th>회원</th><th>신호</th><th>상태</th><th>권장 액션</th></tr>
+        <tr><td><b>박지훈</b></td><td><span class="dot d-r"></span>12일째 예약 없음 (평소 주 2회)</td><td><span class="badge b-dan">위험</span></td><td><button class="btn btn-p btn-sm">안부 메시지</button> <button class="btn btn-o btn-sm">리포트 보내기</button></td></tr>
+        <tr><td><b>이하늘</b></td><td><span class="dot d-r"></span>잔여 2회 · 재계약 미상담 · 오늘 노쇼</td><td><span class="badge b-dan">위험</span></td><td><button class="btn btn-p btn-sm">상담 잡기</button></td></tr>
+        <tr><td><b>최유나</b></td><td><span class="dot d-y"></span>회원권 D-6 · 출석은 정상</td><td><span class="badge b-warn">주의</span></td><td><button class="btn btn-p btn-sm">연장 제안</button></td></tr>
+        <tr><td><b>오세림</b></td><td><span class="dot d-y"></span>계약서 미서명 3일 경과</td><td><span class="badge b-warn">주의</span></td><td><button class="btn btn-o btn-sm">서명 재요청</button></td></tr>
+        <tr><td>김민지</td><td><span class="dot d-g"></span>주 2회 규칙 출석 · 성과 상승</td><td><span class="badge b-ok">건강</span></td><td><span style="font-size:11px; color:var(--muted)">—</span></td></tr>
+      </table>
+      <p class="note"><b>이탈은 만료일이 아니라 "패턴이 무너질 때" 시작됩니다</b> — 평소 리듬(주 2회)에서 벗어나면 만료 전이라도 잡습니다. 액션 버튼은 기록으로 남아 다음 상담의 맥락이 됩니다.</p>
+    </div>
+  </section>
+
+  <!-- 파이프라인 -->
+  <section class="scr" id="s-pipe">
+    <div class="card">
+      <h3>재계약 파이프라인 (8월) <span style="font-size:11px; color:var(--muted); font-weight:400">카드를 끌어 단계 이동 (데모)</span></h3>
+      <div class="kanban">
+        <div class="kcol"><div class="kh">대상 <span>6</span></div>
+          <div class="kcard"><b>이하늘</b><div class="m">PT10 잔여 2 · 6개월차</div></div>
+          <div class="kcard"><b>박지훈</b><div class="m">PT20 잔여 8 · 이탈위험</div></div>
+          <div class="kcard"><b>강수민</b><div class="m">그룹 D-21</div></div>
+          <div class="kcard" style="opacity:.55"><div class="m">+ 3명 더</div></div>
+        </div>
+        <div class="kcol"><div class="kh">상담중 <span>3</span></div>
+          <div class="kcard"><b>최유나</b><div class="m">그룹 D-6 · 17일 상담 예정<br>예상 ₩900,000</div></div>
+          <div class="kcard"><b>윤재호</b><div class="m">PT30 잔여 4 · 예상 ₩1,200,000</div></div>
+          <div class="kcard"><b>서지안</b><div class="m">그룹 D-12 · 예상 ₩600,000</div></div>
+        </div>
+        <div class="kcol"><div class="kh">제안 발송 <span>2</span></div>
+          <div class="kcard"><b>김민지</b><div class="m">PT20 추가 제안 · ₩1,000,000<br>성과 리포트 함께 발송 ✓</div></div>
+          <div class="kcard"><b>임태윤</b><div class="m">PT10 → 20 업셀 · ₩650,000</div></div>
+        </div>
+        <div class="kcol" style="background:#ecfdf5"><div class="kh" style="color:#15803d">이번 달 성사 <span>4</span></div>
+          <div class="kcard"><b>한지우</b><div class="m">PT20 · ₩1,000,000 ✓</div></div>
+          <div class="kcard"><b>노유진</b><div class="m">그룹 3개월 · ₩390,000 ✓</div></div>
+          <div class="kcard" style="opacity:.55"><div class="m">+ 2명 · 합계 ₩2,640,000</div></div>
+        </div>
+      </div>
+      <p class="note">잔여 5회/만료 D-30이 되면 자동으로 "대상"에 올라옵니다. <b>재계약은 감이 아니라 파이프라인</b> — 어디서 새는지 보입니다.</p>
+    </div>
+  </section>
+
+  <!-- 성과 리포트 -->
+  <section class="scr" id="s-report">
+    <div class="grid g2">
+      <div class="card">
+        <h3>월간 성과 리포트 — 자동 생성 <select style="border:1px solid var(--line); border-radius:8px; padding:5px 8px; font-size:12px"><option>김민지</option><option>최유나</option></select></h3>
+        <div class="report">
+          <div class="rh"><b>김민지 님의 8월 🏋️</b><span style="font-size:10px; opacity:.8">코어핏 스튜디오</span></div>
+          <div class="rstat">
+            <div><div class="rv">9회</div><div class="rl">최근 30일 출석</div></div>
+            <div><div class="rv">90%</div><div class="rl">예약 이행률</div></div>
+            <div><div class="rv">+0.4</div><div class="rl">골격근량 kg</div></div>
+            <div><div class="rv">−0.9</div><div class="rl">체지방률 %p</div></div>
+          </div>
+          <div style="font-size:11px; background:rgba(255,255,255,.12); border-radius:10px; padding:9px 11px; line-height:1.7">
+            🏅 이번 달 PR: 고블릿 스쿼트 16→20kg · 플랭크 60→90초<br>
+            💬 코치 총평(자동 초안): "하체 안정성이 눈에 띄게 좋아졌어요. 9월엔 데드리프트 40kg이 목표!"
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:10px">
+          <button class="btn btn-p">📤 카톡 공유 이미지 만들기</button>
+          <button class="btn btn-o">회원 앱으로 보내기</button>
+        </div>
+        <p class="note">출석·인바디·PR·코치 코멘트가 <b>자동으로 리포트가 됩니다</b> — 총평 초안만 다듬어 발송. 이 카드가 재계약 상담의 무기이자, 회원이 지인에게 공유하는 홍보물입니다.</p>
+      </div>
+      <div class="card">
+        <h3>리포트 발송 현황 (8월)</h3>
+        <table>
+          <tr><th>회원</th><th>발송</th><th>열람</th><th>이후 행동</th></tr>
+          <tr><td>김민지</td><td>8/13</td><td><span class="badge b-ok">열람 ✓</span></td><td>재계약 제안 진행중</td></tr>
+          <tr><td>한지우</td><td>8/05</td><td><span class="badge b-ok">열람 ✓</span></td><td><b style="color:var(--ok)">재계약 성사 ✓</b></td></tr>
+          <tr><td>박지훈</td><td>—</td><td><span class="badge b-mut">미발송</span></td><td><button class="btn btn-p btn-sm">지금 보내기</button></td></tr>
+        </table>
+        <p class="note">리포트를 받은 달의 재계약 성사율이 높게 나타나는지 — <b>지표로 검증하며 운영</b>합니다(데모 수치 아님, 실서비스에서 측정).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 목표 보드 -->
+  <section class="scr" id="s-goal">
+    <div class="card">
+      <h3>회원 목표 보드 <span style="font-size:11px; color:var(--muted); font-weight:400">첫 상담 때 합의한 목표가 모든 수업의 기준</span></h3>
+      <table>
+        <tr><th>회원</th><th>합의 목표 (기한)</th><th>진행</th><th></th></tr>
+        <tr><td><b>김민지</b></td><td>골격근량 25kg (11월)</td><td><b style="color:var(--vio)">50%</b> · 시작 23.2 → 24.1 / 목표 25.0</td><td><span class="badge b-ok">순항</span></td></tr>
+        <tr><td><b>최유나</b></td><td>어깨 통증 없이 푸시업 10개 (9월)</td><td><b style="color:var(--vio)">80%</b> · 현재 8개</td><td><span class="badge b-ok">순항</span></td></tr>
+        <tr><td><b>이하늘</b></td><td>체지방률 −3%p (10월)</td><td><b style="color:var(--warn)">25%</b> · 정체 2주</td><td><span class="badge b-warn">점검 필요</span></td></tr>
+      </table>
+      <p class="note">목표가 정체되면 리텐션 레이더에 신호가 갑니다 — <b>이탈의 진짜 원인은 "변화가 안 느껴져서"</b>인 경우가 가장 많습니다. 목표 재설정 상담이 곧 리텐션 활동.</p>
+    </div>
+  </section>
+
+  <!-- 매출 예측 -->
+  <section class="scr" id="s-forecast">
+    <div class="grid g2">
+      <div class="card kpi"><div class="l">8월 확정 매출</div><div class="v">₩4,250,000</div><div class="d">신규 2 · 재계약 4</div></div>
+      <div class="card kpi"><div class="l">파이프라인 가중 예측</div><div class="v" style="color:var(--vio)">+₩2,400,000</div><div class="d">전망 합계 ₩6.65M</div></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h3>예측 근거</h3>
+      <table>
+        <tr><th>단계</th><th>건수·금액</th><th>성사 가중치</th><th>기여</th></tr>
+        <tr><td>상담중</td><td>3건 · ₩2,700,000</td><td>40%</td><td>₩1,080,000</td></tr>
+        <tr><td>제안 발송</td><td>2건 · ₩1,650,000</td><td>80%</td><td>₩1,320,000</td></tr>
+        <tr><td colspan="3"><b>가중 예측 합계</b></td><td><b>₩2,400,000</b></td></tr>
+      </table>
+      <p class="note">가중치는 이 샵의 <b>실제 단계별 성사율로 자동 보정</b>됩니다(초기값 40/80%). 다음 달 현금흐름을 감으로가 아니라 파이프라인으로 봅니다.</p>
+    </div>
+  </section>
+
+  <!-- 회원 360 -->
+  <section class="scr" id="s-m360">
+    <div class="grid g2">
+      <div class="card">
+        <h3>회원 42명 <button class="btn btn-p btn-sm">+ 신규 등록</button></h3>
+        <input placeholder="🔍 이름·연락처 검색" style="width:100%; border:1px solid var(--line); border-radius:9px; padding:8px 10px; font-size:12.5px; margin-bottom:8px">
+        <table>
+          <tr><th>이름</th><th>회원권</th><th>리텐션</th></tr>
+          <tr style="background:var(--vio-l)"><td><b>김민지</b></td><td>PT 20 · 잔여 7</td><td><span class="dot d-g"></span>건강</td></tr>
+          <tr><td>최유나</td><td>그룹 D-6</td><td><span class="dot d-y"></span>주의</td></tr>
+          <tr><td>이하늘</td><td>PT 10 · 잔여 2</td><td><span class="dot d-r"></span>위험</td></tr>
+          <tr><td>박지훈</td><td>PT 20 · 잔여 8</td><td><span class="dot d-r"></span>위험</td></tr>
+          <tr><td>정도윤</td><td>PT 10 · 잔여 8</td><td><span class="dot d-g"></span>건강</td></tr>
+          <tr><td>한지우</td><td>PT 20 · 잔여 20</td><td><span class="dot d-y"></span>계약서 대기</td></tr>
+        </table>
+        <p class="note">모든 회원에게 리텐션 신호등이 붙습니다 — 목록 자체가 오늘 챙길 순서.</p>
+      </div>
+      <div class="card">
+        <h3>김민지 — 360° 타임라인 <span class="badge b-vio">전체 여정</span></h3>
+        <table>
+          <tr><td style="width:50px; color:var(--muted)">8/14</td><td>오늘 20:00 수업 예정 · 재계약 제안 발송됨 (₩1,000,000)</td></tr>
+          <tr><td style="color:var(--muted)">8/13</td><td>📊 8월 성과 리포트 발송 → <b>열람 ✓</b></td></tr>
+          <tr><td style="color:var(--muted)">8/12</td><td>수업 완료 · 인바디 SMM 24.1(+0.4) · PR 고블릿 20kg</td></tr>
+          <tr><td style="color:var(--muted)">8/01</td><td>노쇼 1회 (최초 유예 처리)</td></tr>
+          <tr><td style="color:var(--muted)">7월</td><td>출석 8회 · 리포트 열람 · 목표 진행 순항</td></tr>
+          <tr><td style="color:var(--muted)">6/02</td><td>PT 20회 계약 ₩1,000,000 · 전자서명 · 목표 합의(골격근 25kg)</td></tr>
+        </table>
+        <div style="display:flex; gap:6px; margin-top:8px; flex-wrap:wrap">
+          <button class="btn btn-p btn-sm">🗓 예약 대행</button>
+          <button class="btn btn-o btn-sm">📊 리포트 재발송</button>
+          <button class="btn btn-o btn-sm">↩️ 환불 계산</button>
+        </div>
+        <p class="note">계약→출석→성과→리포트→제안이 <b>한 줄의 이야기</b> — 재계약 상담 전 1분이면 맥락 파악 끝.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 캘린더 -->
+  <section class="scr" id="s-cal">
+    <div class="card">
+      <h3>주간 캘린더 (8/10–8/15) <span><button class="btn btn-o btn-sm">주간</button> <button class="btn btn-p btn-sm">+ 수업 만들기</button></span></h3>
+      <table>
+        <tr><th>시간</th><th>월</th><th>화</th><th>수</th><th>목</th><th style="color:var(--vio)">금 (오늘)</th><th>토</th></tr>
+        <tr><td>10시</td><td>김민지</td><td>—</td><td>김민지</td><td>—</td><td><b>정도윤 ✓</b></td><td>박서준</td></tr>
+        <tr><td>11시</td><td>박서준</td><td>정도윤</td><td>—</td><td>박서준</td><td><b>박서준 ✓</b></td><td>—</td></tr>
+        <tr><td>14시</td><td>—</td><td>이하늘</td><td>—</td><td>—</td><td><b style="color:var(--danger)">이하늘 노쇼</b></td><td>휴무</td></tr>
+        <tr><td>17시</td><td>최유나</td><td>—</td><td>한지우</td><td>오세림</td><td><b>최유나</b></td><td>휴무</td></tr>
+        <tr><td>19시</td><td>그룹 6/8</td><td>그룹 7/8</td><td>그룹 8/8</td><td>그룹 4/8</td><td><b>그룹 5/8</b></td><td>휴무</td></tr>
+        <tr><td>20시</td><td>정도윤</td><td>한지우</td><td>오세림</td><td>—</td><td><b>김민지</b></td><td>휴무</td></tr>
+      </table>
+      <p class="note">겹침·정원 초과는 저장 시 차단 · 취소 시 대기자 선착순 자동 승격. 리텐션 관점 한 스푼: 이탈 위험 <b>박지훈에게 빈 화 11시 원탭 제안</b> — 캘린더가 리텐션 도구가 됩니다.</p>
+    </div>
+  </section>
+
+  <!-- 계약·정산 -->
+  <section class="scr" id="s-ops">
+    <div class="grid g2">
+      <div class="card">
+        <h3>계약서 현황</h3>
+        <table>
+          <tr><th>회원</th><th>계약</th><th>상태</th></tr>
+          <tr><td>김민지</td><td>그룹 3개월 (추가)</td><td><span class="badge b-warn">서명 대기</span></td></tr>
+          <tr><td>한지우</td><td>PT 20회</td><td><span class="badge b-warn">대기 3일 · 재알림</span></td></tr>
+          <tr><td>오세림</td><td>그룹 3개월</td><td><span class="badge b-warn">대기</span></td></tr>
+          <tr><td>박서준</td><td>PT 30회</td><td><span class="badge b-ok">서명완료</span></td></tr>
+        </table>
+        <p class="note">템플릿엔 <b>실결제가 기준 환불 공식·노쇼 정책</b> 등 법규 필수항목이 자동 포함. 서명엔 시각·문서 지문(해시) 기록.</p>
+      </div>
+      <div class="card">
+        <h3>정산 (8월)</h3>
+        <table>
+          <tr><th>트레이너</th><th>수업</th><th>정산액</th></tr>
+          <tr><td>정혜린</td><td>42회 × ₩35,000</td><td><b>₩1,470,000</b></td></tr>
+          <tr><td>김태오</td><td>요율 45% (₩1.8M)</td><td><b>₩810,000</b></td></tr>
+        </table>
+        <div style="background:var(--vio-l); border:1px solid var(--vio-b); border-radius:10px; padding:10px 12px; font-size:12px; margin-top:8px; line-height:1.7">
+          ↩️ <b>환불 계산기(예시)</b> · 실결제 1,000,000 · 20회 중 7회 사용<br>→ 이용분 350,000 + 위약금 100,000 = <b>환불 ₩550,000</b> <span style="color:var(--muted)">(실결제가 기준 · 위약금 상한 10%)</span>
+        </div>
+        <p class="note">수업 완료가 곧 정산 근거 — 트레이너는 본인 정산만 봅니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 설정 -->
+  <section class="scr" id="s-set">
+    <div class="grid g2">
+      <div class="card">
+        <h3>운영 정책</h3>
+        <table>
+          <tr><td>취소 마감</td><td><b>수업 24시간 전</b></td></tr>
+          <tr><td>노쇼</td><td><b>차감 · 최초 1회 유예 · 예외사유 기록</b></td></tr>
+          <tr><td>위약금율</td><td><b>10%</b> (법정 상한 내 설정)</td></tr>
+          <tr><td>회원권 만료</td><td><b>자동 소멸 안 함</b> · 만료 전환+알림</td></tr>
+          <tr><td>리텐션 감지</td><td><b>평소 리듬 대비 2주 이탈 시 경보</b></td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h3>파트너(컨설팅) 뷰 <span class="badge b-vio">B2B2C</span></h3>
+        <table>
+          <tr><th>관리 샵</th><th>재계약률</th><th>위험 회원</th></tr>
+          <tr><td>코어핏 스튜디오</td><td>78%</td><td>4명</td></tr>
+          <tr><td>리프트랩 (판교)</td><td>71%</td><td>6명</td></tr>
+        </table>
+        <p class="note">파트너는 <b>집계 지표만</b> — 회원 개인정보는 샵 밖으로 나가지 않습니다. 컨설턴트의 KPI가 재계약률이라면 이 화면이 곧 성적표.</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ═══════════ 회원 폰 ═══════════ -->
+<div class="phonecol">
+  <div class="lbl">📱 회원 앱 — "나의 변화"</div>
+  <div class="phone">
+    <div class="sb"><span>19:02</span><span>🔋 82% 📶</span></div>
+    <div class="phd"><div class="t">나의 <span style="color:var(--vio)">변화</span></div><div class="s">김민지 님 · 코어핏 스튜디오</div></div>
+    <div class="pbd">
+
+    <section class="scr on" id="p-change">
+      <div class="pcard" style="background:var(--vio-l); border-color:var(--vio-b)">
+        <h5>목표까지 <span class="badge b-vio">50%</span></h5>
+        <div style="display:flex; align-items:center; gap:12px">
+          <svg width="74" height="74" viewBox="0 0 74 74">
+            <circle cx="37" cy="37" r="30" fill="none" stroke="#e4e2f0" stroke-width="8"/>
+            <circle cx="37" cy="37" r="30" fill="none" stroke="#7c3aed" stroke-width="8" stroke-linecap="round" stroke-dasharray="94 188" transform="rotate(-90 37 37)"/>
+            <text x="37" y="35" text-anchor="middle" font-size="13" font-weight="900" fill="#1e1b4b">50%</text>
+            <text x="37" y="49" text-anchor="middle" font-size="7.5" fill="#6b6a85">골격근 25kg</text>
+          </svg>
+          <div style="font-size:11px; line-height:1.7">
+            시작 23.2 → 현재 <b>24.1kg</b> → 목표 25.0<br>
+            <span style="color:var(--muted)">11월까지 · 코치와 합의한 목표</span><br>
+            <span class="badge b-ok">절반 왔어요 — 페이스 유지!</span>
+          </div>
+        </div>
+      </div>
+      <div class="pcard">
+        <h5>3개월 변화</h5>
+        <svg width="100%" height="72" viewBox="0 0 290 72">
+          <polyline points="15,52 105,44 195,37 275,30" fill="none" stroke="#7c3aed" stroke-width="2.5"/>
+          <polyline points="15,22 105,30 195,37 275,45" fill="none" stroke="#f59e0b" stroke-width="2.5"/>
+          <circle cx="275" cy="30" r="3" fill="#7c3aed"/><circle cx="275" cy="45" r="3" fill="#f59e0b"/>
+        </svg>
+        <div class="prow"><span style="color:#6d28d9">■ 골격근량</span><b>23.2 → 24.1kg</b></div>
+        <div class="prow"><span style="color:#b45309">■ 체지방률</span><b>29.4 → 26.8%</b></div>
+        <div style="display:flex; gap:6px; margin-top:8px">
+          <div style="flex:1; background:#f8fafc; border:1px solid var(--line); border-radius:9px; height:64px; display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--muted)">📸 6/2</div>
+          <div style="flex:1; background:var(--vio-l); border:1px solid var(--vio-b); border-radius:9px; height:64px; display:flex; align-items:center; justify-content:center; font-size:10px; color:#6d28d9">📸 8/12</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="scr" id="p-report">
+      <div class="pcard" style="background:linear-gradient(150deg,#7c3aed,#4c1d95); color:#fff; border:0">
+        <h5 style="color:#fff">8월 리포트 도착 🎉</h5>
+        <div style="font-size:11px; line-height:1.8">
+          최근 30일 출석 <b>9회</b> · 이행률 <b>90%</b><br>
+          골격근 <b>+0.4kg</b> · 체지방률 <b>−0.9%p</b><br>
+          🏅 PR 2개: 고블릿 20kg · 플랭크 90초
+        </div>
+        <div style="background:rgba(255,255,255,.14); border-radius:9px; padding:8px 10px; font-size:10.5px; margin-top:8px">💬 준영 코치 "하체 안정성 급상승. 9월엔 데드 40kg 갑니다!"</div>
+        <button class="btn" style="background:#fff; color:#6d28d9; width:100%; margin-top:10px">친구에게 공유 📤</button>
+      </div>
+      <div class="pcard">
+        <h5>지난 리포트</h5>
+        <div class="prow"><span>7월 리포트</span><span class="badge b-vio">보기</span></div>
+        <div class="prow"><span>6월 리포트</span><span class="badge b-vio">보기</span></div>
+      </div>
+    </section>
+
+    <section class="scr" id="p-badge">
+      <div class="pcard">
+        <h5>스트릭 <span class="badge b-vio">🔥 4주 연속</span></h5>
+        <div style="font-size:11px; color:var(--muted)">주 2회 약속을 4주째 지키는 중 — 이번 주 1/2회</div>
+      </div>
+      <div class="bdg-grid">
+        <div class="bdg"><div class="e">🔥</div><div class="n">4주 연속</div></div>
+        <div class="bdg"><div class="e">💪</div><div class="n">첫 PR</div></div>
+        <div class="bdg"><div class="e">📸</div><div class="n">눈바디 4회</div></div>
+        <div class="bdg off"><div class="e">🏆</div><div class="n">목표 달성</div></div>
+        <div class="bdg off"><div class="e">🌙</div><div class="n">12주 연속</div></div>
+        <div class="bdg off"><div class="e">🎯</div><div class="n">이행률 95%</div></div>
+      </div>
+      <p class="note" style="padding:0 2px">배지는 "출석 그 자체"가 아니라 <b>약속(주 2회)을 지킨 것</b>에 붙습니다 — 무리한 출석 경쟁을 만들지 않아요.</p>
+    </section>
+
+    <section class="scr" id="p-book">
+      <div class="pcard">
+        <h5>예약 <span class="badge b-vio">화 8/18</span></h5>
+        <div class="prow"><span>10:00 · 1:1 PT</span><button class="btn btn-p btn-sm">예약</button></div>
+        <div class="prow"><span>19:00 · 그룹 7/8</span><button class="btn btn-p btn-sm">예약</button></div>
+        <div class="prow"><span>20:00 · 그룹 마감 8/8</span><button class="btn btn-o btn-sm">대기 2번째</button></div>
+      </div>
+      <div class="pcard">
+        <h5>내 예약</h5>
+        <div class="prow"><span><b>오늘 20:00</b> · 1:1</span><span class="badge b-ok">확정</span></div>
+        <div class="prow"><span>8/18 (화) 10:00 · 1:1</span><span class="badge b-mut">취소 가능</span></div>
+      </div>
+      <p class="note" style="padding:0 2px">취소는 24시간 전까지 무료 · 대기는 선착순 자동 확정 + 알림.</p>
+    </section>
+
+    <section class="scr" id="p-my">
+      <div class="pcard">
+        <h5>내 회원권</h5>
+        <div class="prow"><span>PT 20회권 · ~11/30</span><b>잔여 7회</b></div>
+        <div class="prow"><span>8/12 수업 완료</span><b style="color:var(--danger)">−1</b></div>
+        <div class="prow"><span>8/08 수업 완료</span><b style="color:var(--danger)">−1</b></div>
+        <div class="prow" style="color:var(--muted)"><span>… 이전 내역 11건 · 6/02 시작 +20</span><span>전체 ▾</span></div>
+      </div>
+      <div class="pcard">
+        <h5>계약 · 동의</h5>
+        <div class="prow"><span>PT 20회 계약 (6/2)</span><span class="badge b-ok">서명완료</span></div>
+        <div class="prow"><span>추가 계약 제안 도착</span><span class="badge b-warn">서명하기</span></div>
+        <div class="prow"><span>민감정보 동의</span><span class="badge b-ok">✓ 철회 가능</span></div>
+      </div>
+    </section>
+
+    </div>
+    <div class="ptabs">
+      <button class="ptab on" data-t="p-change" onclick="pTab(this)"><span class="i">📈</span>변화</button>
+      <button class="ptab" data-t="p-book" onclick="pTab(this)"><span class="i">🗓</span>예약</button>
+      <button class="ptab" data-t="p-report" onclick="pTab(this)"><span class="i">📊</span>리포트</button>
+      <button class="ptab" data-t="p-badge" onclick="pTab(this)"><span class="i">🏅</span>배지</button>
+      <button class="ptab" data-t="p-my" onclick="pTab(this)"><span class="i">👤</span>마이</button>
+    </div>
+  </div>
+</div>
+
+</div>
+<script>
+function go(btn){
+  document.querySelectorAll(".pill").forEach(b=>b.classList.remove("on"));
+  btn.classList.add("on");
+  document.querySelectorAll(".main .scr").forEach(x=>x.classList.remove("on"));
+  document.getElementById("s-"+btn.dataset.s).classList.add("on");
+}
+function pTab(b){
+  b.parentElement.querySelectorAll(".ptab").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on");
+  document.querySelectorAll(".pbd .scr").forEach(x=>x.classList.remove("on"));
+  document.getElementById(b.dataset.t).classList.add("on");
+}
+</script>
+</body>
+</html>

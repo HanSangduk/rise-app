@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PT데스크 2안 — 트레이너 모바일 퍼스트 (클릭 목업)</title>
+<style>
+  :root{--acc:#f97316; --acc-l:#ffedd5; --ink:#0f172a; --bg2:#1e293b; --line:#e2e8f0; --muted:#64748b; --ok:#16a34a; --warn:#d97706; --danger:#dc2626}
+  *{box-sizing:border-box; margin:0}
+  body{font-family:"Pretendard","Apple SD Gothic Neo",system-ui,sans-serif; background:linear-gradient(135deg,#0f172a,#431407); min-height:100vh; padding:24px 12px; color:#e2e8f0}
+  .top{text-align:center; margin-bottom:18px}
+  .top h1{font-size:19px; font-weight:900}
+  .top h1 span{color:#fb923c}
+  .top p{font-size:12px; color:#94a3b8; margin-top:4px; line-height:1.6}
+  .stage{display:flex; gap:26px; justify-content:center; flex-wrap:wrap}
+  .col{text-align:center}
+  .col .lbl{font-size:12.5px; font-weight:800; margin-bottom:10px; color:#fdba74}
+  /* 폰 */
+  .phone{width:360px; max-width:94vw; height:730px; background:#f8fafc; border:9px solid #0b1220; border-radius:40px; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 26px 70px rgba(0,0,0,.55); color:var(--ink); text-align:left}
+  .sb{height:30px; display:flex; align-items:center; justify-content:space-between; padding:0 20px; font-size:11px; font-weight:700; background:#fff; flex-shrink:0}
+  .hd{padding:8px 16px 10px; background:#fff; border-bottom:1px solid var(--line); flex-shrink:0; display:flex; justify-content:space-between; align-items:center}
+  .hd .t{font-size:16px; font-weight:900}
+  .hd .s{font-size:10px; color:var(--muted)}
+  .bd{flex:1; overflow-y:auto; padding:12px 14px 18px}
+  .tabs{display:flex; background:#fff; border-top:1px solid var(--line); padding:6px 4px 12px; flex-shrink:0}
+  .tab{flex:1; background:none; border:0; font-size:9.5px; color:#94a3b8; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:2px; font-weight:700}
+  .tab .i{font-size:18px}
+  .tab.on{color:var(--acc)}
+  .scr{display:none} .scr.on{display:block}
+  .card{background:#fff; border:1px solid var(--line); border-radius:13px; padding:12px; margin-bottom:10px}
+  .card h4{font-size:12.5px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center}
+  .badge{display:inline-block; padding:2px 7px; border-radius:99px; font-size:9.5px; font-weight:800}
+  .b-ok{background:#dcfce7;color:#15803d}.b-warn{background:#fef3c7;color:#b45309}.b-dan{background:#fee2e2;color:#b91c1c}.b-acc{background:#ffedd5;color:#c2410c}.b-mut{background:#f1f5f9;color:#64748b}
+  .btn{border:0; border-radius:10px; padding:9px 13px; font-size:12px; font-weight:800; cursor:pointer}
+  .btn-p{background:var(--acc); color:#fff} .btn-o{background:#fff; border:1.5px solid var(--line); color:var(--ink)}
+  .btn-sm{padding:5px 9px; font-size:10.5px}
+  .note{font-size:10px; color:var(--muted); margin-top:6px; line-height:1.55}
+  .row{display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid #f1f5f9; font-size:12px}
+  .row:last-child{border-bottom:0}
+  /* 타임라인 */
+  .tl{position:relative; padding-left:18px}
+  .tl:before{content:""; position:absolute; left:5px; top:6px; bottom:6px; width:2px; background:var(--line)}
+  .tl .item{position:relative; margin-bottom:9px}
+  .tl .item:before{content:""; position:absolute; left:-17px; top:12px; width:8px; height:8px; border-radius:50%; background:#cbd5e1}
+  .tl .item.done:before{background:var(--ok)}
+  .tl .item.now:before{background:var(--acc); box-shadow:0 0 0 4px #ffedd5}
+  .chip{display:inline-block; background:#f1f5f9; border-radius:99px; padding:4px 9px; font-size:10px; color:#475569; margin:2px; cursor:pointer; border:1px solid transparent}
+  .chip.sel{background:#ffedd5; color:#c2410c; border-color:#fdba74; font-weight:800}
+  .flag{background:#fef2f2; border-left:3px solid var(--danger); border-radius:8px; padding:7px 9px; font-size:10.5px; color:#7f1d1d; margin:6px 0}
+  .cond{display:flex; gap:8px; margin-top:8px}
+  .cond button{flex:1; background:#f8fafc; border:1.5px solid var(--line); border-radius:11px; padding:9px 4px; font-size:11px; cursor:pointer}
+  .cond button.sel{border-color:var(--acc); background:#ffedd5; font-weight:800}
+  .mic{width:38px; height:38px; border-radius:50%; background:#f1f5f9; border:1px solid var(--line); font-size:16px; cursor:pointer}
+  .hw{display:flex; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid #f1f5f9; font-size:12px}
+  .hw input{width:17px; height:17px; accent-color:var(--acc)}
+  .streak{display:flex; gap:4px; margin-top:6px}
+  .streak i{width:22px; height:22px; border-radius:6px; background:#f1f5f9; display:flex; align-items:center; justify-content:center; font-size:10px; font-style:normal}
+  .streak i.on{background:var(--acc); color:#fff; font-weight:800}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>2안 <span>필드</span> — 트레이너 모바일 퍼스트</h1>
+  <p>철학: 컨디셔닝 샵엔 데스크 직원이 없다 — 사장님이 곧 헤드코치. <b>수업 사이 5분, 폰 하나로 전부.</b><br>왼쪽 = 트레이너(사장님) 폰 · 오른쪽 = 회원 폰 · 하단 탭 클릭 · 2안 데모는 <b>1인 사장 시나리오</b>(인물 구성이 1안과 별개)</p>
+</div>
+<div class="stage">
+
+<!-- ═══════════ 트레이너 폰 ═══════════ -->
+<div class="col">
+  <div class="lbl">👨‍🏫 트레이너 (사장님)</div>
+  <div class="phone">
+    <div class="sb"><span>16:48</span><span>🔋 71% 📶</span></div>
+    <div class="hd"><div><div class="t">코어핏 <span style="color:var(--acc)">스튜디오</span></div><div class="s">준영 코치 (사장) · 8/14 금</div></div><span class="badge b-acc">오늘 6수업</span></div>
+    <div class="bd">
+
+    <!-- 오늘 -->
+    <section class="scr on" id="t-today">
+      <div class="tl">
+        <div class="item done"><div class="card" style="margin:0; opacity:.75">
+          <div class="row" style="border:0"><span><b>10:00</b> 정도윤 · 1:1</span><span class="badge b-ok">완료 ✓</span></div>
+        </div></div>
+        <div class="item done"><div class="card" style="margin:0; opacity:.75">
+          <div class="row" style="border:0"><span><b>11:00</b> 박서준 · 1:1</span><span class="badge b-ok">완료 ✓</span></div>
+        </div></div>
+        <div class="item"><div class="card" style="margin:0; opacity:.75">
+          <div class="row" style="border:0"><span><b>14:00</b> 이하늘 · 1:1</span><span class="badge b-dan">노쇼 · 유예 처리</span></div>
+        </div></div>
+        <div class="item now"><div class="card" style="margin:0; border-color:#fdba74">
+          <h4><span><b>17:00</b> 최유나 · 1:1 <span class="badge b-acc">곧 시작</span></span><button class="btn btn-p btn-sm" onclick="tGo('t-brief')">브리핑</button></h4>
+          <div style="font-size:11px; color:var(--muted)">그룹 3개월 · 오늘 컨디션 🙂 보통</div>
+        </div></div>
+        <div class="item"><div class="card" style="margin:0">
+          <div class="row" style="border:0"><span><b>19:00</b> 그룹 컨디셔닝 5/8</span><button class="btn btn-o btn-sm">명단</button></div>
+        </div></div>
+        <div class="item"><div class="card" style="margin:0">
+          <div class="row" style="border:0"><span><b>20:00</b> 김민지 · 1:1</span><span class="badge b-warn">예정</span></div>
+        </div></div>
+      </div>
+      <p class="note">수업 카드 하나 = 체크인·기록·차감·정산까지 전부. 미처리 수업은 다음날 아침 "미확정"으로 다시 올라옵니다.</p>
+    </section>
+
+    <!-- 다음 수업 브리핑 -->
+    <section class="scr" id="t-brief">
+      <div class="card" style="border-color:#fdba74">
+        <h4>17:00 · 최유나 <span class="badge b-acc">수업 전 브리핑 30초</span></h4>
+        <div class="flag">⚠️ <b>특이사항</b> · 왼 어깨 충돌증후군 이력 — 오버헤드 프레스 대체 (인클라인으로)</div>
+        <div class="row"><span>오늘 컨디션 체크인</span><b>🙂 보통 · 수면 6h</b></div>
+        <div class="row"><span>지난 세션 (8/12)</span><span style="font-size:11px; text-align:right">고블릿 스쿼트 18kg 완료<br>"다음엔 20kg 도전" 메모</span></div>
+        <div class="row"><span>잔여</span><b>그룹 3개월 (D-6) <span class="badge b-warn">만료임박</span></b></div>
+        <div class="row"><span>오늘 처방</span><span style="font-size:11px">스쿼트 20kg · 로우 · 컨디셔닝 8분</span></div>
+        <button class="btn btn-p" style="width:100%; margin-top:8px" onclick="tGo('t-record')">▶ 수업 시작</button>
+      </div>
+      <p class="note">회원이 앱에서 보낸 <b>컨디션 체크인</b>이 수업 전에 코치에게 도착 — 그날 강도를 미리 조절합니다. 부상 플래그는 모든 화면에서 따라다닙니다.</p>
+      <button class="btn btn-o" style="width:100%" onclick="tGo('t-today')">← 오늘로</button>
+    </section>
+
+    <!-- 수업 종료 30초 기록 -->
+    <section class="scr" id="t-record">
+      <div class="card">
+        <h4>수업 종료 · 30초 기록 <span class="badge b-mut">최유나</span></h4>
+        <div style="font-size:11px; color:var(--muted); margin-bottom:6px">퀵 코멘트 (탭)</div>
+        <div>
+          <span class="chip sel" onclick="this.classList.toggle('sel')">폼 좋아짐 👍</span>
+          <span class="chip sel" onclick="this.classList.toggle('sel')">무게 올리자 ⬆️</span>
+          <span class="chip" onclick="this.classList.toggle('sel')">폼 주의 ⚠️</span>
+          <span class="chip" onclick="this.classList.toggle('sel')">컨디션 저하 😴</span>
+          <span class="chip" onclick="this.classList.toggle('sel')">숙제 잘함 ✅</span>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:10px; align-items:center">
+          <input placeholder="한 줄 코멘트 (선택)" style="flex:1; border:1px solid var(--line); border-radius:9px; padding:8px 10px; font-size:12px" value="스쿼트 20kg 성공! 다음 목표 22kg">
+          <button class="mic" title="음성 메모">🎤</button>
+        </div>
+        <button class="btn btn-p" style="width:100%; margin-top:10px" onclick="tDone()">✓ 완료 — 출석·차감·기록 저장</button>
+        <p class="note">이 버튼 한 번이 <b>출석 체크 + 세션 −1 + 수업기록 + 내 정산 +1</b>. 코멘트는 회원 앱 피드로 전송됩니다.</p>
+      </div>
+      <div class="card" style="background:#fff7ed; border-color:#fed7aa">
+        <div style="font-size:11px; line-height:1.7">💡 <b>재계약 신호</b> · 최유나 회원권 D-6. 지금 만족도가 높을 때가 골든타임 — <button class="btn btn-o btn-sm">연장 제안 보내기</button></div>
+      </div>
+      <button class="btn btn-o" style="width:100%" onclick="tGo('t-today')">← 오늘로</button>
+    </section>
+
+    <!-- 회원 -->
+    <section class="scr" id="t-members">
+      <input placeholder="🔍 회원 검색" style="width:100%; border:1px solid var(--line); border-radius:10px; padding:9px 11px; font-size:12px; margin-bottom:8px">
+      <div class="card" onclick="tGo('t-detail')" style="cursor:pointer"><div class="row" style="border:0"><span><b>김민지</b> · 잔여 7/20 <span style="font-size:9px;color:var(--muted)">상세 ▸</span></span><span class="badge b-ok">활성</span></div></div>
+      <div class="card"><div class="row" style="border:0"><span><b>최유나</b> · 그룹 D-6 <span class="badge b-dan">⚠️ 어깨</span></span><span class="badge b-warn">만료임박</span></div></div>
+      <div class="card"><div class="row" style="border:0"><span><b>이하늘</b> · 잔여 2</span><span class="badge b-warn">재계약 제안</span></div></div>
+      <div class="card"><div class="row" style="border:0"><span><b>정도윤</b> · 잔여 8 (오늘 출석 ✓)</span><span class="badge b-ok">활성</span></div></div>
+      <div class="card"><div class="row" style="border:0"><span><b>박지훈</b> · 잔여 8 <span class="badge b-dan">12일째 예약 없음</span></span><span class="badge b-dan">이탈 주의</span></div></div>
+      <p class="note">플래그(부상·이탈 주의·만료)는 자동으로 붙습니다. 탭하면 상세 — 특이사항은 코치가 직접 씁니다.</p>
+    </section>
+
+    <!-- 내 정산 -->
+    <section class="scr" id="t-pay">
+      <div class="card" style="background:#0f172a; color:#fff; border:0">
+        <div style="font-size:11px; color:#94a3b8">8월 내 수당 (실시간)</div>
+        <div style="font-size:24px; font-weight:900; margin:3px 0">₩1,470,000</div>
+        <div style="font-size:11px; color:#fdba74">수업 42회 × ₩35,000 · 오늘 +2회 확정</div>
+      </div>
+      <div class="card">
+        <h4>이번 주</h4>
+        <div class="row"><span>월 8/10</span><b>6회 · ₩210,000</b></div>
+        <div class="row"><span>화 8/11</span><b>5회 · ₩175,000</b></div>
+        <div class="row"><span>수 8/12</span><b>6회 · ₩210,000</b></div>
+        <div class="row"><span>목 8/13</span><b>5회 · ₩175,000</b></div>
+        <div class="row"><span>금 8/14 (오늘)</span><b>2회 확정 + 3 예정</b></div>
+      </div>
+      <p class="note">수업 완료가 곧 정산 — 월말 엑셀 없음. 트레이너는 <b>본인 수당만</b> 보입니다(사장님은 전체).</p>
+    </section>
+
+    <!-- 캘린더 -->
+    <section class="scr" id="t-cal">
+      <div style="display:flex; gap:5px; overflow-x:auto; white-space:nowrap; padding-bottom:6px">
+        <span class="chip">월 10</span><span class="chip">화 11</span><span class="chip">수 12</span><span class="chip">목 13</span><span class="chip sel">금 14</span><span class="chip">토 15</span>
+      </div>
+      <div class="card">
+        <h4>8/14 (금) · 6수업</h4>
+        <div class="row"><span>10:00 · 1:1 정도윤</span><span class="badge b-ok">완료</span></div>
+        <div class="row"><span>11:00 · 1:1 박서준</span><span class="badge b-ok">완료</span></div>
+        <div class="row"><span>14:00 · 1:1 이하늘</span><span class="badge b-dan">노쇼</span></div>
+        <div class="row"><span>17:00 · 1:1 최유나</span><span class="badge b-warn">예정</span></div>
+        <div class="row"><span>19:00 · 그룹 컨디셔닝 5/8</span><span class="badge b-warn">예정</span></div>
+        <div class="row"><span>20:00 · 1:1 김민지</span><span class="badge b-warn">예정</span></div>
+      </div>
+      <div style="display:flex; gap:8px">
+        <button class="btn btn-p" style="flex:1">+ 수업 만들기</button>
+        <button class="btn btn-o" style="flex:1">회원 대신 예약</button>
+      </div>
+      <p class="note">겹침·정원 초과는 저장할 때 자동 차단. 빈 시간을 길게 누르면 바로 수업 생성(데모). 앱 없는 회원은 <b>대행 예약</b>으로.</p>
+    </section>
+
+    <!-- 회원 상세 -->
+    <section class="scr" id="t-detail">
+      <div class="card">
+        <h4>김민지 <span class="badge b-ok">활성</span></h4>
+        <div style="font-size:11px; color:var(--muted); margin-bottom:6px">010-1234-5678 · 오늘 20:00 수업</div>
+        <div class="row"><span>PT 20회권 · ~11/30</span><b>잔여 7회</b></div>
+        <div class="row"><span>8/12 수업 완료</span><b style="color:var(--danger)">−1</b></div>
+        <div class="row"><span>8/08 수업 완료</span><b style="color:var(--danger)">−1</b></div>
+        <div class="row"><span>8/01 노쇼 · 최초 1회 유예</span><b style="color:var(--muted)">0</b></div>
+        <div class="row" style="color:var(--muted)"><span>… 이전 차감 11건 · 6/02 발급 +20</span><span>전체 ▾</span></div>
+      </div>
+      <div class="card">
+        <div class="row"><span>계약서 (PT 20회)</span><span class="badge b-ok">서명완료</span></div>
+        <div class="row"><span>추가 계약 (그룹 3개월)</span><span class="badge b-warn">서명 대기</span></div>
+        <div class="row"><span>민감정보 동의</span><span class="badge b-ok">✓</span></div>
+        <div class="row"><span>인바디 최근 (8/12)</span><b>SMM 24.1 ↑ · PBF 26.8 ↓</b></div>
+      </div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap">
+        <button class="btn btn-p btn-sm">🗓 예약 대행</button>
+        <button class="btn btn-o btn-sm">💪 루틴 처방</button>
+        <button class="btn btn-o btn-sm">📊 인바디 입력</button>
+        <button class="btn btn-o btn-sm">📸 체형 촬영</button>
+        <button class="btn btn-o btn-sm">↩️ 환불 계산</button>
+      </div>
+      <button class="btn btn-o" style="width:100%; margin-top:8px" onclick="tGo('t-members')">← 회원 목록</button>
+    </section>
+
+    <!-- 운영·설정 -->
+    <section class="scr" id="t-set">
+      <div class="card">
+        <h4>운영 정책 <span class="badge b-mut">샵 설정</span></h4>
+        <div class="row"><span>취소 마감</span><b>수업 24시간 전</b></div>
+        <div class="row"><span>노쇼 차감</span><b>차감 · 최초 1회 유예</b></div>
+        <div class="row"><span>위약금율</span><b>10% (법정 상한 내)</b></div>
+        <div class="row"><span>회원권 만료</span><b>자동 소멸 안 함 · 알림</b></div>
+      </div>
+      <div class="card">
+        <h4>계약서 현황</h4>
+        <div class="row"><span>서명 완료</span><span class="badge b-ok">2건</span></div>
+        <div class="row"><span>서명 대기</span><span class="badge b-warn">3건 · 재알림 예약됨</span></div>
+      </div>
+      <div class="card">
+        <h4>출석 방식</h4>
+        <div style="display:flex; gap:5px; flex-wrap:wrap"><span class="badge b-acc">① 예약 원탭 (기본)</span><span class="badge b-mut">② 키오스크 번호</span><span class="badge b-mut">③ 앱 QR</span></div>
+        <p class="note">1:1은 수업 카드에서 원탭이 기본. 지문·얼굴 인식은 민감정보라 쓰지 않아요.</p>
+      </div>
+      <div class="card">
+        <div class="row" style="border:0"><span>알림톡 연동</span><span class="badge b-warn">채널 심사 대기 · 푸시로 대체 중</span></div>
+      </div>
+    </section>
+
+    </div>
+    <div class="tabs">
+      <button class="tab on" data-t="t-today" onclick="tTab(this)"><span class="i">📋</span>오늘</button>
+      <button class="tab" data-t="t-cal" onclick="tTab(this)"><span class="i">🗓</span>캘린더</button>
+      <button class="tab" data-t="t-members" onclick="tTab(this)"><span class="i">👥</span>회원</button>
+      <button class="tab" data-t="t-pay" onclick="tTab(this)"><span class="i">💰</span>내 정산</button>
+      <button class="tab" data-t="t-set" onclick="tTab(this)"><span class="i">⚙️</span>운영</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 회원 폰 ═══════════ -->
+<div class="col">
+  <div class="lbl">🙋 회원</div>
+  <div class="phone">
+    <div class="sb"><span>16:48</span><span>🔋 58% 📶</span></div>
+    <div class="hd"><div><div class="t">코어핏 <span style="color:var(--acc)">스튜디오</span></div><div class="s">최유나 님 · 오늘 17:00 수업</div></div><span class="badge b-warn">D-6</span></div>
+    <div class="bd">
+
+    <!-- 홈 -->
+    <section class="scr on" id="c-home">
+      <div class="card" style="border-color:#fdba74; background:#fff7ed">
+        <h4>오늘 수업 <span class="badge b-acc">17:00 · 12분 후</span></h4>
+        <div style="font-size:13px; font-weight:800">1:1 PT · 준영 코치</div>
+        <div style="font-size:11px; color:var(--muted); margin:4px 0 8px">오늘 몸 상태를 코치에게 알려주세요 — 수업 강도에 반영돼요</div>
+        <div class="cond">
+          <button onclick="pick(this)">😀 좋음</button>
+          <button class="sel" onclick="pick(this)">🙂 보통</button>
+          <button onclick="pick(this)">😴 피곤</button>
+        </div>
+      </div>
+      <div class="card">
+        <h4>이번 주 숙제 <span class="badge b-ok">2/3 완료</span></h4>
+        <div class="hw"><input type="checkbox" checked><span>폼롤러 흉추 10분 (수·완료)</span></div>
+        <div class="hw"><input type="checkbox" checked><span>밴드 외회전 3×15 (목·완료)</span></div>
+        <div class="hw"><input type="checkbox"><span>걷기 30분 — 오늘까지!</span></div>
+        <div class="streak"><i class="on">월</i><i class="on">화</i><i class="on">수</i><i class="on">목</i><i>금</i><i>토</i><i>일</i></div>
+      </div>
+      <div class="card">
+        <div class="row" style="border:0"><span>내 회원권</span><b>그룹 3개월 · D-6 <span class="badge b-warn">연장 상담</span></b></div>
+      </div>
+    </section>
+
+    <!-- 코치 피드 -->
+    <section class="scr" id="c-feed">
+      <div class="card">
+        <h4>8/12 (수) 수업 후 <span class="badge b-acc">준영 코치</span></h4>
+        <div style="font-size:12px; line-height:1.7">"고블릿 스쿼트 18kg 완료 👍 무릎 트래킹 좋아졌어요. 다음엔 20kg 도전!"</div>
+        <div style="display:flex; gap:6px; margin-top:8px">
+          <span class="chip sel">폼 좋아짐 👍</span><span class="chip sel">무게 올리자 ⬆️</span>
+        </div>
+      </div>
+      <div class="card">
+        <h4>8/07 (금) 수업 후</h4>
+        <div style="font-size:12px; line-height:1.7">"어깨 상태 좋아서 인클라인 푸시업으로 진행. 통증 0 — 이 페이스 유지해요."</div>
+        <div style="background:#f1f5f9; border-radius:8px; padding:6px 8px; font-size:10.5px; margin-top:6px">🎬 스쿼트 폼 영상 (코치 촬영) ▶</div>
+      </div>
+      <p class="note">수업이 끝나면 코치의 30초 기록이 여기로 도착 — "오늘 뭐 했지?"가 쌓여서 나의 훈련 일지가 됩니다.</p>
+    </section>
+
+    <!-- 마이 -->
+    <section class="scr" id="c-my">
+      <div class="card">
+        <h4>내 회원권</h4>
+        <div class="row"><span>그룹 컨디셔닝 3개월</span><b>~8/20 (D-6)</b></div>
+        <div class="row"><span>8/12 그룹 출석</span><span class="badge b-ok">✓</span></div>
+        <div class="row"><span>8/05 그룹 출석</span><span class="badge b-ok">✓</span></div>
+        <div class="row" style="color:var(--muted)"><span>… 이전 내역</span><span>전체 보기 ▾</span></div>
+      </div>
+      <div class="card">
+        <h4>계약서</h4>
+        <div class="row"><span>그룹 3개월 이용계약 (5/21)</span><span class="badge b-ok">서명완료 · PDF</span></div>
+        <div class="row"><span>연장 계약 (제안 도착 시 여기서 서명)</span><span class="badge b-mut">—</span></div>
+      </div>
+      <div class="card">
+        <h4>특이사항 (내가 등록)</h4>
+        <div class="flag">⚠️ 왼 어깨 충돌증후군 이력 — 2025.11 진단</div>
+        <p class="note">코치와 공유되는 건강 메모예요. 민감정보 동의 후 저장되며 언제든 삭제할 수 있어요.</p>
+      </div>
+      <div class="card">
+        <div class="row" style="border:0"><span>민감정보 동의</span><span class="badge b-ok">✓ 철회 가능</span></div>
+      </div>
+    </section>
+
+    <!-- 예약 -->
+    <section class="scr" id="c-book">
+      <div style="display:flex; gap:5px; overflow-x:auto; white-space:nowrap; padding:2px 0 8px">
+        <span class="chip">금 14</span><span class="chip">토 15</span><span class="chip">일 16</span><span class="chip">월 17</span><span class="chip sel">화 18</span><span class="chip">수 19</span>
+      </div>
+      <div class="card"><div class="row" style="border:0"><span><b>10:00</b> · 1:1 PT</span><button class="btn btn-p btn-sm">예약</button></div></div>
+      <div class="card"><div class="row" style="border:0"><span><b>19:00</b> · 그룹 컨디셔닝 <span class="badge b-acc">7/8</span></span><button class="btn btn-p btn-sm">예약</button></div></div>
+      <div class="card" style="opacity:.85"><div class="row" style="border:0"><span><b>20:00</b> · 그룹 <span class="badge b-dan">마감 8/8</span></span><button class="btn btn-o btn-sm">대기 2번째</button></div></div>
+      <div class="card">
+        <h4>내 예약</h4>
+        <div class="row"><span><b>오늘 17:00</b> · 1:1 · 준영 코치</span><span class="badge b-ok">확정</span></div>
+        <div class="row"><span>8/18 (화) 19:00 · 그룹</span><button class="btn btn-o btn-sm">취소</button></div>
+        <p class="note">취소는 24시간 전까지 무료. 자리가 나면 대기 순서대로 자동 확정 + 알림이 와요.</p>
+      </div>
+    </section>
+
+    <!-- QR 체크인 -->
+    <section class="scr" id="c-qr">
+      <div class="card" style="text-align:center">
+        <h4 style="justify-content:center">체크인 QR</h4>
+        <svg width="150" height="150" viewBox="0 0 150 150" style="margin:8px auto; display:block; border:1px solid var(--line); border-radius:12px">
+          <rect width="150" height="150" fill="#fff"/>
+          <g fill="#0f172a">
+            <rect x="10" y="10" width="34" height="34"/><rect x="106" y="10" width="34" height="34"/><rect x="10" y="106" width="34" height="34"/>
+            <rect x="18" y="18" width="18" height="18" fill="#fff"/><rect x="114" y="18" width="18" height="18" fill="#fff"/><rect x="18" y="114" width="18" height="18" fill="#fff"/>
+            <rect x="56" y="14" width="8" height="8"/><rect x="72" y="22" width="8" height="8"/><rect x="88" y="14" width="8" height="8"/>
+            <rect x="56" y="38" width="8" height="8"/><rect x="80" y="46" width="8" height="8"/><rect x="64" y="54" width="8" height="8"/>
+            <rect x="14" y="56" width="8" height="8"/><rect x="30" y="64" width="8" height="8"/><rect x="46" y="56" width="8" height="8"/>
+            <rect x="60" y="70" width="8" height="8"/><rect x="76" y="62" width="8" height="8"/><rect x="92" y="70" width="8" height="8"/>
+            <rect x="108" y="62" width="8" height="8"/><rect x="124" y="70" width="8" height="8"/><rect x="116" y="86" width="8" height="8"/>
+            <rect x="56" y="88" width="8" height="8"/><rect x="72" y="96" width="8" height="8"/><rect x="88" y="88" width="8" height="8"/>
+            <rect x="104" y="104" width="8" height="8"/><rect x="120" y="112" width="8" height="8"/><rect x="56" y="112" width="8" height="8"/>
+            <rect x="72" y="120" width="8" height="8"/><rect x="88" y="128" width="8" height="8"/><rect x="108" y="128" width="8" height="8"/>
+          </g>
+        </svg>
+        <div style="font-size:12px; font-weight:800">최유나 · 그룹 3개월 (D-6)</div>
+        <div style="margin-top:6px"><span class="badge b-acc">🔄 30초마다 자동 갱신</span></div>
+        <p class="note">카운터 태블릿에 보여주세요. 캡처 공유는 만료돼서 쓸 수 없어요.</p>
+      </div>
+      <div class="card">
+        <h4>최근 출석</h4>
+        <div class="row"><span>8/12 (수) 그룹</span><span class="badge b-ok">✓</span></div>
+        <div class="row"><span>8/07 (금) 1:1</span><span class="badge b-ok">✓</span></div>
+      </div>
+    </section>
+
+    </div>
+    <div class="tabs">
+      <button class="tab on" data-t="c-home" onclick="cTab(this)"><span class="i">🏠</span>홈</button>
+      <button class="tab" data-t="c-book" onclick="cTab(this)"><span class="i">🗓</span>예약</button>
+      <button class="tab" data-t="c-qr" onclick="cTab(this)"><span class="i">▦</span>QR</button>
+      <button class="tab" data-t="c-feed" onclick="cTab(this)"><span class="i">💬</span>피드</button>
+      <button class="tab" data-t="c-my" onclick="cTab(this)"><span class="i">👤</span>마이</button>
+    </div>
+  </div>
+</div>
+
+</div>
+<script>
+function swap(prefix, id){
+  document.querySelectorAll('[id^="'+prefix+'"]').forEach(s=>s.classList.remove("on"));
+  document.getElementById(id).classList.add("on");
+}
+function tTab(b){ b.parentElement.querySelectorAll(".tab").forEach(x=>x.classList.remove("on")); b.classList.add("on"); swap("t-", b.dataset.t); }
+function cTab(b){ b.parentElement.querySelectorAll(".tab").forEach(x=>x.classList.remove("on")); b.classList.add("on"); swap("c-", b.dataset.t); }
+function tGo(id){ swap("t-", id); }
+function tDone(){ swap("t-","t-today"); alert("데모: 출석 ✓ · 세션 −1 · 기록 저장 · 수당 +1 이 한 번에 처리됩니다"); }
+function pick(b){ b.parentElement.querySelectorAll("button").forEach(x=>x.classList.remove("sel")); b.classList.add("sel"); }
+</script>
+</body>
+</html>
