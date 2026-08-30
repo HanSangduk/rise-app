@@ -40,6 +40,31 @@ const (
 	JoinRejected = "rejected"
 )
 
+// ConsultRequest — 회원발 재등록/상담 요청(계약 v2.20, P42). JoinRequest와 같은 "요청 큐"
+// 패턴이지만 이미 센터에 귀속된 회원이 보내므로 센터 스코프 컬렉션이다(최상위 아님).
+//
+// 앱의 재등록 데드엔드("센터에 문의해주세요")를 데스크로 잇는 손잡이 — 결제·발급은 여기서
+// 일어나지 않는다. 데스크가 상담 후 기존 수기 플로우(회원권 발급+결제 기록)로 마감하고
+// done 처리한다.
+type ConsultRequest struct {
+	ID       string `json:"id"`
+	MemberID string `json:"member_id"`
+	Kind     string `json:"kind"` // renewal(재등록)|consult(상담)
+	// Note — 회원이 남긴 한 줄(선택). 길이 상한은 서비스가 검증한다.
+	Note      string    `json:"note,omitempty"`
+	Status    string    `json:"status"` // pending|done
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ConsultRequest.Kind / .Status 값.
+const (
+	ConsultKindRenewal = "renewal"
+	ConsultKindConsult = "consult"
+
+	ConsultPending = "pending"
+	ConsultDone    = "done"
+)
+
 // CheckinRecord — 체크인 감사 로그(내부 전용, API계약 엔티티가 아니다). Member.LastVisitAt
 // 갱신(설계03 §11 "체크인 시 갱신")의 근거를 남기기 위한 최소 기록.
 type CheckinRecord struct {
@@ -71,6 +96,11 @@ type PassMutator func(p *domain.Pass, entries []domain.Ledger) (*domain.Ledger, 
 // 반환 에러는 트랜잭션을 롤백시키고 그대로 호출측으로 올라간다 — 전이 재검증 실패(이미 서명됨·
 // 이미 무효됨 등)를 여기서 돌려주면 그것이 경합의 최종 판정이 된다.
 // 제약은 PassMutator와 같다(순수해야 하고, Store를 다시 부르면 안 된다).
+//
+// c의 포인터 필드(SentAt·FirstSentAt·SignedAt·PenaltyRate)는 **재할당만** 하라
+// (`c.SentAt = &t`). 경유 쓰기(`*c.SentAt = t`)는 금지 — Memory는 저장본의 얕은 사본 위에서
+// mutate를 돌리고 에러 시 사본을 버리는 방식으로 롤백하는데, 포인터가 가리키는 값은 저장본과
+// 공유라 경유 쓰기는 롤백 뒤에도 저장본에 남는다(P40 — P37 리뷰 권고 명문화).
 type ContractMutator func(c *domain.Contract, pass *domain.Pass) error
 
 // ContractSweepMutator — UpdatePassWithLedgerAndContracts가 트랜잭션 안에서 **지목된 계약마다**
@@ -118,6 +148,15 @@ type Store interface {
 	UpdateJoinRequest(ctx context.Context, jr *JoinRequest) error
 	// ListJoinRequests — 센터의 가입 요청 전체(GET /v1/join/requests, 어드민 가정 승인, v1.1 정합 패치).
 	ListJoinRequests(ctx context.Context, centerID string) ([]JoinRequest, error)
+
+	// ---- 재등록/상담 요청(계약 v2.20, P42) ----
+	// ListConsultRequests — memberID가 빈 값이면 센터 전체. 정렬은 CreatedAt 오름차순 →
+	// ID(동률 안정) — 데스크 큐는 오래 기다린 요청이 위로 온다.
+	CreateConsultRequest(ctx context.Context, centerID string, cr *ConsultRequest) (string, error)
+	GetConsultRequest(ctx context.Context, centerID, id string) (*ConsultRequest, error)
+	// UpdateConsultRequest — 없는 ID면 ErrNotFound(UpdateJoinRequest와 같은 존재 확인 선행).
+	UpdateConsultRequest(ctx context.Context, centerID string, cr *ConsultRequest) error
+	ListConsultRequests(ctx context.Context, centerID, memberID string) ([]ConsultRequest, error)
 
 	// ---- 회원 ----
 	ListMembers(ctx context.Context, centerID, trainerID, q string) ([]domain.Member, error)
@@ -323,6 +362,16 @@ type Store interface {
 	// ---- 체크인(P44) ----
 	SaveCheckinRecord(ctx context.Context, centerID string, c *CheckinRecord) error
 
+	// ---- 센터 신원(멀티센터 Phase A) ----
+	//
+	// GetCenter — 미등록이면 **빈 값**(ID만 채움, ErrNotFound 아님 — GetBusiness와 같은 규약:
+	// 읽기가 문서를 만들지 않고, 기존 rise 센터처럼 이름 없는 센터도 정상 상태다).
+	// ListCenters — `center` 신원이 등록된 센터만. GetPolicy 지연 시딩·헬스체크가 만드는
+	// "정책만 있는 유령 문서"는 목록에 오르지 않는다.
+	GetCenter(ctx context.Context, centerID string) (*domain.Center, error)
+	SaveCenter(ctx context.Context, c *domain.Center) error
+	ListCenters(ctx context.Context) ([]domain.Center, error)
+
 	// ---- 센터 정책(설정값, P6) ----
 	GetPolicy(ctx context.Context, centerID string) (*domain.Policy, error)
 	SavePolicy(ctx context.Context, centerID string, p *domain.Policy) error
@@ -332,6 +381,28 @@ type Store interface {
 	// 두 구현 모두 **읽기가 문서를 만들지 않아야 한다**(GetPolicy의 지연 시딩과 다른 규약).
 	GetBusiness(ctx context.Context, centerID string) (*domain.Business, error)
 	SaveBusiness(ctx context.Context, centerID string, b *domain.Business) error
+
+	// ---- 시설 신고 상태(체육시설업 — 계약서 템플릿 선택의 근거, P42) ----
+	// GetFacility — 미선언이면 **기본값**(report_status="unknown" — ErrNotFound 아님).
+	// GetBusiness와 같은 규약: 읽기가 문서를 만들지 않는다. unknown은 결측이 아니라 상태다 —
+	// 계약서 스탬프 게이트가 이 값으로 스킵을 고른다(모르는 상태로 문서를 만들지 않는다).
+	// SaveFacility — centers 문서의 `facility` 절만 머지로 쓴다(Policy·Business 불침범 —
+	// SaveBusiness와 같은 규약, P27 SavePolicy 교훈).
+	GetFacility(ctx context.Context, centerID string) (*domain.Facility, error)
+	SaveFacility(ctx context.Context, centerID string, f *domain.Facility) error
+
+	// ---- 데스크 체크인 QR 토큰(센터 비밀, P49) ----
+	// GetCheckinQR — 미발급이면 **빈 값**(token="", issued_at=nil — ErrNotFound 아님).
+	// GetBusiness·GetFacility와 같은 규약: 읽기가 문서를 만들지 않는다. 미발급은 결측이 아니라
+	// 상태다 — self_qr 체크인이 그 상태를 보고 "아직 발급되지 않았다"로 거부한다.
+	// SaveCheckinQR — centers 문서의 `checkin_qr` 절만 머지로 쓴다(Policy·Business·Facility·
+	// center 불침범 — SaveFacility와 같은 규약, P27 SavePolicy 교훈).
+	//
+	// **이 값은 센터 비밀이다.** 스토어는 그것을 모르지만, 읽는 쪽(api.Service)이 owner 전용
+	// 응답과 체크인 대조 두 곳에서만 쓴다 — 회원·트레이너 응답에 실리는 순간 집에서 출석을
+	// 찍을 수 있게 된다(api/service.go의 CheckinQRView 주석 + 키 집합 테스트).
+	GetCheckinQR(ctx context.Context, centerID string) (*domain.CheckinQR, error)
+	SaveCheckinQR(ctx context.Context, centerID string, q *domain.CheckinQR) error
 
 	Close() error
 }

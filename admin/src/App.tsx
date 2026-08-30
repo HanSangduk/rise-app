@@ -13,6 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { BrandMark } from "@/components/BrandMark";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Spinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { DEMO_OWNER, DEMO_TRAINER, useAuth } from "@/lib/auth";
@@ -50,7 +51,18 @@ const TITLES: Record<Section, string> = {
   set: "설정·직원",
 };
 
+// 셸 전체를 에러 경계로 감싼다 — 경계는 자기 **자식**의 렌더 예외만 잡으므로, 본체를
+// AdminShell로 내리고 여기서 감싸는 형태여야 로그인·권한 화면부터 모든 기능 탭까지 다 덮인다.
+// (한 단계 위의 AuthProvider·QueryClientProvider는 main.tsx 소관이라 이 경계 밖에 있다.)
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <AdminShell />
+    </ErrorBoundary>
+  );
+}
+
+function AdminShell() {
   // fbEmail은 헤더 표시 이름의 폴백으로만 쓰여 HeaderIdentity가 직접 읽는다.
   const { me, identity, isLoading, isAuthed, loginDev, logout } = useAuth();
   const [section, setSection] = useState<Section>("dash");

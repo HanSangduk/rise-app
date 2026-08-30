@@ -54,6 +54,11 @@ func NewRouter(h *Handlers, auth *Authenticator, corsOrigins []string) http.Hand
 		r.Get("/join/requests", h.JoinRequests) // v1.1 정합 패치(어드민 가정 승인)
 		r.Post("/join/approve", h.JoinApprove)
 
+		// ---- 재등록/상담 요청(v2.20) — 가입 요청과 같은 "회원발 요청 큐" 패턴 ----
+		r.Post("/consult-requests", h.CreateConsultRequest)
+		r.Get("/consult-requests", h.ListConsultRequests)
+		r.Post("/consult-requests/{id}/done", h.DoneConsultRequest)
+
 		r.Get("/members", h.ListMembers)
 		r.Post("/members", h.CreateMember)
 		r.Put("/members/{id}", h.UpdateMember)
@@ -118,14 +123,29 @@ func NewRouter(h *Handlers, auth *Authenticator, corsOrigins []string) http.Hand
 		r.Post("/staff", h.CreateStaff) // 스태프 온보딩(owner) — 계정+레코드+인덱스
 		r.Post("/staff/{uid}/offdays", h.SetOffdays)
 		r.Put("/staff/{uid}/profile", h.UpdateStaffProfile) // v1.6 트레이너 프로필(P05)
+		// v2.25 프로필 사진 업로드(owner 전용, P51) — 서버가 Admin SDK로 올리고 다운로드
+		// 토큰 URL을 프로필에 박는다. 응답 한 번으로 끝나므로 어드민이 profile PUT을
+		// 이어 부르지 않는다(그 왕복 사이의 동시 편집이 사진을 되감던 자리).
+		r.Post("/staff/{uid}/photo", h.UploadStaffPhoto)
 		// ---- 직원 생애주기(v2.0) — 정정은 PUT, 상태 전이는 전용 동사 ----
 		r.Put("/staff/{uid}", h.UpdateStaff)
 		r.Post("/staff/{uid}/transfer", h.TransferStaff)
 		r.Post("/staff/{uid}/deactivate", h.DeactivateStaff)
 		r.Post("/staff/{uid}/reactivate", h.ReactivateStaff)
 
-		r.Get("/center", h.Center)       // v1.1 정합 패치(v1.4: member에게도 공개)
-		r.Put("/center", h.UpdateCenter) // v1.4 운영 정책 편집(owner)
+		r.Get("/center", h.Center)                        // v1.1 정합 패치(v1.4: member에게도 공개)
+		r.Put("/center", h.UpdateCenter)                  // v1.4 운영 정책 편집(owner)
+		r.Put("/center/facility", h.UpdateCenterFacility) // v2.19 시설 신고 상태 선언(owner, P42)
+		// 데스크 체크인 QR 토큰(v2.23, P49) — **owner 전용**(서비스 가드). 종전엔 이 값이
+		// 환경변수라 돌려주는 API 자체가 없었고, 대표가 알 수 없는 문자열을 손으로 옮겨
+		// 적어야 했다. rotate는 바디 없는 POST이고 직전 인쇄물을 무효로 만든다.
+		r.Get("/center/checkin-qr", h.CheckinQR)
+		r.Post("/center/checkin-qr/rotate", h.RotateCheckinQR)
+
+		// ---- 관리 평면(멀티센터 Phase A) — superadmin 전용(서비스 가드 + 인증
+		// 미들웨어의 superadminAllowedPath 경계) ----
+		r.Post("/admin/centers", h.CreateCenter)
+		r.Get("/admin/centers", h.ListCenters)
 	}
 
 	r.Route("/v1", v1)

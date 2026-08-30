@@ -176,7 +176,8 @@ class _FakeMyRepository implements MyRepository {
 
 
   @override
-  Future<Result<void>> signContract(String contractId) async => const Ok(null);
+  Future<Result<void>> signContract(String contractId, {String? signaturePng}) async =>
+      const Ok(null);
 
   // 이 파일들은 탈퇴를 다루지 않는다 — 호출되면 그 자체가 결함이므로 조용히 성공시키지 않는다.
   @override

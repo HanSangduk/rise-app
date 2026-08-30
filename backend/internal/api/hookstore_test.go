@@ -281,6 +281,27 @@ func (h *hookStore) GetMember(ctx context.Context, centerID, id string) (*domain
 	return h.Store.GetMember(ctx, centerID, id)
 }
 
+// GetFacility — 스탬프 게이트의 latch-off 불변("래치 OFF면 facility 읽기조차 없다" —
+// 스토어 접근 횟수까지 오늘과 동일) 카운트 검증용(P42). 실패 스윕(hookedOps)에는 넣지
+// 않는다 — 그 스윕은 돈·세션 원자성 경로 대상이고 이 읽기는 스탬프 선택 전용이다.
+func (h *hookStore) GetFacility(ctx context.Context, centerID string) (*domain.Facility, error) {
+	if err := h.enter("GetFacility"); err != nil {
+		return nil, err
+	}
+	return h.Store.GetFacility(ctx, centerID)
+}
+
+// SaveStaff — 사진 업로드(v2.25)의 **찢어진 쓰기** 재현용. 업로드는 이미 끝났는데 프로필
+// 저장이 실패하는 창이 실제로 존재하고, 그때 방금 올린 오브젝트를 정리하지 않으면 아무도
+// 가리키지 않는 파일이 버킷에 남는다(발견 경로 0 — P22가 체형사진에서 겪은 그 상태).
+// hookedOps(돈·세션 원자성 스윕)에는 넣지 않는다 — 그쪽 관심사가 아니다.
+func (h *hookStore) SaveStaff(ctx context.Context, centerID string, s *domain.Staff) error {
+	if err := h.enter("SaveStaff"); err != nil {
+		return err
+	}
+	return h.Store.SaveStaff(ctx, centerID, s)
+}
+
 // hookedOps — 찢어진 쓰기 스윕이 하나씩 실패시켜 볼 메서드 목록. 위에서 래핑한 것과 같아야
 // 한다(래핑하지 않은 메서드는 실패 주입이 통하지 않아 스윕이 조용히 건너뛴다).
 var hookedOps = []string{

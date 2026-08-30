@@ -83,10 +83,11 @@ class MyViewModel extends _$MyViewModel {
     return result;
   }
 
-  /// 계약 자체서명(POST /v1/contracts/{id}/sign, v1.4) — 성공 시 마이 탭 새로고침.
-  Future<Result<void>> signContract(String contractId) async {
+  /// 계약 자체서명(POST /v1/contracts/{id}/sign, v1.4 · P44 서명 이미지 동봉) —
+  /// 성공 시 마이 탭 새로고침(서명 완료 단계의 [계약서 보기]가 이 재조회 결과를 기다린다).
+  Future<Result<void>> signContract(String contractId, {String? signaturePng}) async {
     final repo = ref.read(myRepositoryProvider);
-    final result = await repo.signContract(contractId);
+    final result = await repo.signContract(contractId, signaturePng: signaturePng);
     if (result case Ok()) refresh();
     return result;
   }

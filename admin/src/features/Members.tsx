@@ -94,7 +94,7 @@ const LEDGER_LABEL: Record<LedgerReason, string> = {
 // 섹션 전환 시 App이 이 컴포넌트를 리마운트하므로 초기값으로만 써도 안전하다.
 /// 회원 상태 표기. 종전엔 삼항 하나로 "활성/휴면"만 갈랐는데, v2.11의 withdrawn이 그 else에
 /// 걸려 **탈퇴 회원이 "휴면"으로 표시**됐다 — 다시 부를 수 있는 사람처럼 보이는 거짓말이다.
-/// 미지 값은 라벨을 지어내지 않고 원문을 그대로 띄운다(구/신 서버 혼용 구간의 안전한 기본값).
+/// 미지 값은 라벨을 지어내지 않되 원문(`suspended`)을 배지에 박지도 않는다 — 아래 UNKNOWN_LABEL.
 const MEMBER_STATUS_LABEL: Record<string, string> = {
   active: "활성",
   dormant: "휴면",
@@ -105,6 +105,17 @@ const MEMBER_STATUS_TONE: Record<string, "ok" | "muted" | "danger"> = {
   dormant: "muted",
   withdrawn: "danger",
 };
+
+/// 라벨을 못 찾은 상태 값 자리. 원문(`suspended`·`medical`)을 그대로 띄우면 한글 배지 안에
+/// 영어 코드가 박혀 대표는 그것이 상태 이름인지 고장인지 알 수 없다 — 사람 말로 "확인 필요"라
+/// 쓰고, 원문은 툴팁(title)에만 남겨 문의할 때 짚을 수 있게 한다.
+const UNKNOWN_LABEL = "확인 필요";
+
+/// 이름을 못 푼 담당 자리 — **raw uid는 어떤 경우에도 노출하지 않는다**(Schedule.tsx가 세운
+/// 규약: `8fKq2xVnRZ…`는 사람이 읽을 정보가 아니고, "이름을 못 풀었다"와 "그런 이름이다"를
+/// 구분할 수 없게 만든다). format.ts는 이 화면의 소관이 아니라 같은 문자열을 여기 둔다 —
+/// 두 곳을 함께 고쳐야 하는 값이므로 옮길 일이 생기면 Schedule.tsx와 같이 옮긴다.
+const UNRESOLVED_STAFF = "(담당 미확인)";
 
 export function Members({ focusMemberId }: { focusMemberId?: string | null }) {
   const { me } = useAuth();
@@ -177,7 +188,7 @@ export function Members({ focusMemberId }: { focusMemberId?: string | null }) {
       <p className="mt-0.5 mb-3.5 text-xs text-muted">
         {isOwner
           ? "회원권은 트레이너에게 묶입니다 — 담당별 필터, 회원권·원장까지 확인할 수 있습니다."
-          : "내 담당 회원만 표시됩니다(타 담당은 백엔드 스코프에서 자동 제외됩니다)."}
+          : "내 담당 회원만 표시됩니다 — 다른 코치의 회원은 이 목록에 나오지 않습니다."}
       </p>
 
       <div className="grid gap-3 lg:grid-cols-[3fr_2fr]">
@@ -222,10 +233,22 @@ export function Members({ focusMemberId }: { focusMemberId?: string | null }) {
               </div>
             </div>
 
+            {/* 직원 조회 실패를 화면이 조용히 삼키면 **담당이 있는 회원이 전부 "미배정"으로
+                뒤집힌다** — 대표의 자연스러운 다음 행동(전원 재배정)이 곧 잘못된 데이터 쓰기다.
+                Schedule.tsx가 같은 이유로 세운 배너 규약: 목록은 그대로 두고 "지금 무엇을
+                믿으면 안 되는지"와 "하지 말 것"을 한 줄로 못박는다. */}
+            {staffQ.isError && (
+              <p className="mb-2 rounded-[10px] border border-warn/40 bg-warn/[0.08] px-3 py-2 text-[11px] leading-relaxed text-warn">
+                직원 목록을 불러오지 못했어요 — 담당 이름을 확인할 수 없어 "{UNRESOLVED_STAFF}"로
+                표시되고, 위 담당 필터도 비어 있어요. <b>담당이 실제로 지워진 것은 아니니 지금
+                재배정하지 마세요.</b> ({staffQ.error.message})
+              </p>
+            )}
+
             {membersQ.isLoading ? (
               <Spinner />
             ) : membersQ.isError ? (
-              <ErrorState error={membersQ.error} />
+              <ErrorState error={membersQ.error} onRetry={() => void membersQ.refetch()} />
             ) : !filtered.length ? (
               // 전체 0건과 필터 0건을 구분한다 — 회원이 아예 없는데 "조건에 맞는"이라고 하면
               // 필터를 잘못 걸었나 싶어 검색어만 지워보다 등록 버튼을 못 찾는다.
@@ -274,11 +297,18 @@ export function Members({ focusMemberId }: { focusMemberId?: string | null }) {
                         </TD>
                         <TD>
                           {/* 퇴사자여도 이름 해석은 유지한다 — 빼면 담당이 있는 회원이 "미배정"으로
-                              거짓말한다(계약 v2.0). 대신 톤을 낮추고 "(퇴사)"를 붙인다. */}
+                              거짓말한다(계약 v2.0). 대신 톤을 낮추고 "(퇴사)"를 붙인다.
+                              담당이 **있는데** 이름을 못 푼 경우(직원 조회 실패·이관 드리프트)도
+                              같은 거짓말이라 "미배정"과 갈라 쓴다 — 미배정은 "배정해야 할 일",
+                              미확인은 "지금은 알 수 없음"으로 다음 행동이 정반대다. */}
                           {trainer ? (
                             <Badge tone={isStaffActive(trainer) ? "warn" : "muted"}>
                               {staffLabel(trainer)}
                             </Badge>
+                          ) : m.trainer_id ? (
+                            <span className="text-muted">
+                              {staffQ.isLoading ? "…" : UNRESOLVED_STAFF}
+                            </span>
                           ) : (
                             <span className="text-muted">미배정</span>
                           )}
@@ -288,7 +318,9 @@ export function Members({ focusMemberId }: { focusMemberId?: string | null }) {
                         </TD>
                         <TD>
                           <Badge tone={MEMBER_STATUS_TONE[m.status] ?? "muted"}>
-                            {MEMBER_STATUS_LABEL[m.status] ?? m.status}
+                            {MEMBER_STATUS_LABEL[m.status] ?? (
+                              <span title={m.status}>{UNKNOWN_LABEL}</span>
+                            )}
                           </Badge>
                         </TD>
                       </TR>
@@ -386,18 +418,30 @@ function MemberDetail({
   const paymentsQ = usePayments(member.id);
   const staffQ = useStaff();
   const resumePass = useResumePass();
-  const sendContract = useSendContract();
   // P38: 발송 성공 표식(계약 id). sent_at이 일 단위 표시라 같은 날 재발송은 화면 무변화 →
   // "안 눌린 줄" 연타 → 회원에게 서명 요청 중복 발송이었다. 대시보드 체크인(checkedInIds)과
   // 같은 세션 로컬 표시 — 새로고침하면 사라지지만 연타 혼선은 막는다.
+  // P40: 마킹은 mutate-레벨 옵션이 아니라 **훅-레벨 콜백**으로 — mutate-레벨 onSuccess는
+  // 다른 계약을 이어서 발송하는 순간 옵저버가 떨어져 실행되지 않아(react-query v5), 앞선 건이
+  // 성공하고도 "발송됨"을 얻지 못했다(연타 방지가 정확히 연속 발송에서 뚫리는 구멍).
   const [sentMarkIds, setSentMarkIds] = useState<Set<string>>(new Set());
+  const sendContract = useSendContract((id) => setSentMarkIds((prev) => new Set(prev).add(id)));
   const payInstallment = usePayInstallment();
 
   // 기존 데이터 표시라 퇴사자도 계속 해석한다 — "(퇴사)"를 붙여 재배정 대상이 아님을 알린다.
+  // 못 풀면 **uid를 그대로 흘리지 않는다**(Schedule.tsx 규약): `담당 t1`·`8fKq2xVnRZ…`는
+  // 대표에게 아무 정보도 아니면서, 이름을 못 푼 것인지 그런 이름인지조차 알 수 없게 만든다.
+  // 로딩 중과 미해석을 갈라 쓴다 — 아직 오지 않은 응답을 "확인 불가"로 단정하지 않는다.
   const staffName = (uid: string) => {
     const s = staffQ.data?.find((x) => x.uid === uid);
-    return s ? staffLabel(s) : uid;
+    if (s) return staffLabel(s);
+    return staffQ.isLoading ? "…" : UNRESOLVED_STAFF;
   };
+
+  // 민감정보 동의 철회 시각(계약 Consent.revoked_at). 어드민 전체에서 이 필드를 읽는 곳이
+  // 체형 분석 화면 한 군데뿐이라, 철회한 회원도 이 화면에서는 초록 체크로 보였다 — 아래 배지가
+  // 그 어긋남을 닫는다.
+  const consentRevokedAt = member.consent.revoked_at;
 
   // passId → 지금 목록의 Pass. 캐시가 갱신되면(다른 스태프의 수업 완료 등) 모달이 곧바로
   // 새 remaining을 본다 — 스냅샷을 붙잡고 있으면 서버의 used 정합 검사에 계속 걸린다.
@@ -444,18 +488,42 @@ function MemberDetail({
               일반 동의 {member.consent.general ? <Check className="h-3 w-3" /> : "미완료"}
             </span>
           </Badge>
-          <Badge tone={member.consent.sensitive ? "ok" : "muted"}>
+          {/* **철회를 초록 체크로 덮지 않는다.** 종전엔 revoked_at을 보지 않아 철회한 회원도
+              "민감정보 동의 ✓"였다 — 체형 분석 화면은 같은 회원을 잠근 채 "회원 관리에서 동의
+              상태를 확인하세요"라고 보내는데, 와 보면 정반대를 말하는 화면이었다. */}
+          <Badge
+            tone={consentRevokedAt ? "danger" : member.consent.sensitive ? "ok" : "muted"}
+          >
             <span className="inline-flex items-center gap-0.5">
-              민감정보 동의 {member.consent.sensitive ? <Check className="h-3 w-3" /> : "미완료"}
+              민감정보 동의{" "}
+              {consentRevokedAt ? (
+                "철회됨"
+              ) : member.consent.sensitive ? (
+                <Check className="h-3 w-3" />
+              ) : (
+                "미완료"
+              )}
             </span>
           </Badge>
           {member.flags.map((f, i) => (
             <Badge key={i} tone="danger">
-              {f.type === "injury" ? "부상" : f.type}
-              {f.note ? `: ${f.note}` : ""}
+              {/* 미지 플래그 종류의 원문(`medical`)을 한글 배지 안에 박지 않는다 — 툴팁에만 남긴다. */}
+              <span title={f.type === "injury" ? undefined : f.type}>
+                {f.type === "injury" ? "부상" : UNKNOWN_LABEL}
+                {f.note ? `: ${f.note}` : ""}
+              </span>
             </Badge>
           ))}
         </div>
+        {/* 배지 한 칸으로는 "그래서 뭘 해야 하나"에 답할 수 없다 — 이 잠금은 센터가 못 푼다는
+            사실과, 사진이 지워진 게 아니라는 사실을 같은 자리에서 말한다(체형 분석 화면과 같은 말). */}
+        {consentRevokedAt && (
+          <p className="mb-1.5 text-[10.5px] leading-relaxed text-danger">
+            {consentRevokedAt.slice(0, 10)} 철회 — 체형사진 촬영·열람이 잠겨 있어요.{" "}
+            <b>회원이 앱 마이 탭의 "민감정보(인바디·체형사진) 동의"에서 다시 동의하면 바로 열려요(센터에서는 풀 수 없어요).</b> 이미 찍어 둔
+            사진은 지워지지 않아요.
+          </p>
+        )}
 
         <div className="mb-1 mt-3 text-[11px] text-muted">
           회원권 {member.passes.length}개 — 트레이너별 바인딩
@@ -482,7 +550,11 @@ function MemberDetail({
                           p.status === "active" ? "ok" : p.status === "scheduled" ? "blue" : p.status === "refunded" ? "danger" : "muted"
                         }
                       >
-                        {heldNow ? "일시정지 중" : PASS_STATUS_LABEL[p.status]}
+                        {heldNow ? (
+                          "일시정지 중"
+                        ) : (
+                          PASS_STATUS_LABEL[p.status] ?? <span title={p.status}>{UNKNOWN_LABEL}</span>
+                        )}
                       </Badge>
                     </div>
                     <div className="mt-0.5 text-[11px] text-muted">
@@ -546,7 +618,7 @@ function MemberDetail({
         {contractsQ.isLoading ? (
           <Spinner />
         ) : contractsQ.isError ? (
-          <ErrorState error={contractsQ.error} />
+          <ErrorState error={contractsQ.error} onRetry={() => void contractsQ.refetch()} />
         ) : !contractsQ.data?.length ? (
           <EmptyState>등록된 계약이 없습니다.</EmptyState>
         ) : (
@@ -582,7 +654,9 @@ function MemberDetail({
                     </TD>
                     <TD>
                       <Badge tone={contractStatusTone(c.status)}>
-                        {CONTRACT_STATUS_LABEL[c.status] ?? c.status}
+                        {CONTRACT_STATUS_LABEL[c.status] ?? (
+                          <span title={c.status}>{UNKNOWN_LABEL}</span>
+                        )}
                       </Badge>
                     </TD>
                     <TD
@@ -598,19 +672,16 @@ function MemberDetail({
                     </TD>
                     <TD>
                       {/* 백엔드 POST /v1/contracts/{id}/send는 draft→sent 최초 발송도 허용 — draft에도 노출.
-                          voided(환불 무효)·signed는 종단 상태 — 어떤 액션도 없다(재발송 400).
-                          P38: 탈퇴 회원은 발송·재발송도 숨긴다 — 서버가 400으로 막는(guardMemberNotWithdrawn)
-                          버튼을 남기지 않는다(위 수정 버튼 선례). 목록 자체는 5년 보존 열람으로 유지. */}
+                          voided(환불·탈퇴 무효)·signed는 종단 상태 — 어떤 액션도 없다(재발송 400).
+                          P40: 탈퇴는 남은 draft·sent 계약을 서버가 전부 void한다 — 탈퇴 회원의
+                          계약은 종단 상태뿐이라 상태 게이트만으로도 버튼이 안 뜬다. isWithdrawn
+                          숨김은 이중 방어(P38 선례). 목록 자체는 5년 보존 열람으로 유지. */}
                       {!isWithdrawn(member) && (c.status === "draft" || c.status === "sent") && (
                         <Button
                           size="sm"
                           variant="outline"
                           disabled={rowPending || justSent}
-                          onClick={() =>
-                            sendContract.mutate(c.id, {
-                              onSuccess: () => setSentMarkIds((prev) => new Set(prev).add(c.id)),
-                            })
-                          }
+                          onClick={() => sendContract.mutate(c.id)}
                         >
                           {justSent ? <Check className="h-3 w-3" /> : <Send className="h-3 w-3" />}{" "}
                           {rowPending
@@ -643,7 +714,7 @@ function MemberDetail({
         {paymentsQ.isLoading ? (
           <Spinner />
         ) : paymentsQ.isError ? (
-          <ErrorState error={paymentsQ.error} />
+          <ErrorState error={paymentsQ.error} onRetry={() => void paymentsQ.refetch()} />
         ) : !paymentsQ.data?.length ? (
           <EmptyState>결제 기록이 없습니다.</EmptyState>
         ) : (
@@ -780,7 +851,7 @@ function MemberDetail({
         {ledgerQ.isLoading ? (
           <Spinner />
         ) : ledgerQ.isError ? (
-          <ErrorState error={ledgerQ.error} />
+          <ErrorState error={ledgerQ.error} onRetry={() => void ledgerQ.refetch()} />
         ) : !ledgerQ.data?.length ? (
           <EmptyState>원장 기록이 없습니다.</EmptyState>
         ) : (
@@ -850,7 +921,7 @@ function WorkoutLogSection({
       {logsQ.isLoading ? (
         <Spinner />
       ) : logsQ.isError ? (
-        <ErrorState error={logsQ.error} />
+        <ErrorState error={logsQ.error} onRetry={() => void logsQ.refetch()} />
       ) : !logs.length ? (
         <EmptyState>수업 기록이 없습니다 — 예약 완료 처리 직후 30초 기록으로 남길 수 있어요.</EmptyState>
       ) : (
@@ -890,15 +961,18 @@ function WorkoutLogSection({
   );
 }
 
-const PASS_STATUS_LABEL: Record<Pass["status"], string> = {
+/// 미지 상태는 라벨을 지어내지 않되 원문을 배지에 박지도 않는다(UNKNOWN_LABEL + 툴팁).
+/// union 키(Record<Pass["status"], …>)로 좁혀 두면 서버가 새 상태를 먼저 배포한 구간에
+/// 빈 배지가 렌더되므로 키 타입은 string으로 열어 둔다.
+const PASS_STATUS_LABEL: Record<string, string> = {
   active: "활성",
   scheduled: "시작 예정",
   expired: "만료",
   refunded: "환불됨",
 };
 
-/// 미지 상태는 라벨을 지어내지 않고 원문을 그대로 띄운다(`?? c.status`) — MEMBER_STATUS_LABEL이
-/// v2.11 사고 후 세운 규약과 동일(P38). union 키로 좁히면 새 상태가 빈 배지로 렌더된다.
+/// 미지 상태는 라벨을 지어내지 않되 원문을 배지에 박지도 않는다(UNKNOWN_LABEL + 툴팁).
+/// union 키로 좁히면 새 상태가 빈 배지로 렌더되므로 키 타입은 string으로 열어 둔다.
 const CONTRACT_STATUS_LABEL: Record<string, string> = {
   draft: "초안",
   sent: "서명 대기",
@@ -993,8 +1067,10 @@ function RefundQuoteModal({ pass, onClose }: { pass: Pass; onClose: () => void }
             <b className="text-brand">{formatCurrency(refundPass.data.quote.refund)}</b>
             <br />
             <span className="text-[11px] text-muted">
-              원장에 refund 기록이 남았습니다 — 세션 원장에서 확인할 수 있어요. 미납 회차는 청구
-              종결, 미서명 계약은 무효 처리됐어요.
+              {/* 원장에 실제로 찍히는 글자는 LEDGER_LABEL.refund = "환불"이다 — 화면에 없는
+                  영어 단어("refund")를 찾으라고 하면 대표는 없는 줄을 뒤지게 된다. */}
+              아래 세션 원장에 <b>환불</b> 기록이 남았습니다. 미납 회차는 청구 종결, 미서명 계약은
+              무효 처리됐어요.
               {refundPass.data.quote.cancelled_bookings > 0 && (
                 <>
                   {" "}
@@ -1077,7 +1153,7 @@ function RefundQuoteModal({ pass, onClose }: { pass: Pass; onClose: () => void }
         {confirming && !quoteStale && (
           <div className="rounded-[10px] border border-danger/40 bg-danger/[0.08] p-3">
             <p className="text-[11.5px] leading-relaxed text-danger">
-              이 회원권을 환불 처리합니다. 원장에 refund 기록이 남고 되돌릴 수 없어요.
+              이 회원권을 환불 처리합니다. 세션 원장에 <b>환불</b> 기록이 남고 되돌릴 수 없어요.
               {/*
                 환불은 **앞으로 잡힌 수업도 함께 지운다**. 종전 문구는 그 사실을 말하지
                 않았고(서버에 푸시가 없어 회원은 앱을 열어야 안다), 완료 화면도 부수효과
@@ -1114,8 +1190,11 @@ function RefundQuoteModal({ pass, onClose }: { pass: Pass; onClose: () => void }
         {refundPass.isError && <p className="text-[11px] text-danger">{refundPass.error.message}</p>}
 
         <p className="text-[10.5px] text-muted">
-          단가·위약금은 계약가(정가 아님 — 법원·소비자원 공통 기준, P5), 환불액은 실수납에서만
-          나갑니다(v1.5).
+          {/* 내부 티켓·버전 표기(P5·v1.5)는 코드 주석에만 남긴다 — 화면에서는 대표가 확인할
+              수 없는 기호다. P5 = 정가 공제 금지(법원·소비자원 공통 기준), v1.5 = 실수납 정산. */}
+          회당 단가와 위약금은 <b>계약가</b>(정가가 아니라 할인 후 실제 거래가 — 법원·소비자원
+          공통 기준)로 계산하고, 돌려드리는 돈은 <b>지금까지 실제로 받은 금액</b> 안에서만
+          나갑니다.
         </p>
       </div>
     </Modal>
@@ -1143,6 +1222,9 @@ function MemberFormModal({
   );
   const [general, setGeneral] = useState(initial?.consent.general ?? false);
   const [sensitive, setSensitive] = useState(initial?.consent.sensitive ?? false);
+  // 회원이 철회한 민감정보 동의(Consent.revoked_at). 이 폼에서 다시 켜지 못하게 한다 —
+  // 아래 체크박스 자리 참고. 신규 등록에는 없는 상태(initial 없음)라 항상 null이다.
+  const sensitiveRevokedAt = initial?.consent.revoked_at ?? null;
 
   // 신규 배정은 재직자만(v2.0) · 현재 값이 퇴사자면 그 항목만 별도로 붙여 값 유실을 막는다.
   const assignableStaff = staff.filter((s) => isStaffActive(s));
@@ -1232,7 +1314,7 @@ function MemberFormModal({
 
         <div className="flex items-center gap-2 text-[12.5px]">
           <input type="checkbox" checked={hasInjury} onChange={(e) => setHasInjury(e.target.checked)} id="injury" />
-          <label htmlFor="injury">부상 플래그 (Home Work 자동 제외 대상)</label>
+          <label htmlFor="injury">부상 표시 (Home Work 자동 제외 대상)</label>
         </div>
         {hasInjury && (
           <Textarea
@@ -1248,10 +1330,28 @@ function MemberFormModal({
             <input type="checkbox" checked={general} onChange={(e) => setGeneral(e.target.checked)} />
             일반 개인정보 처리 동의
           </label>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={sensitive} onChange={(e) => setSensitive(e.target.checked)} />
-            민감정보(체형사진 등) 처리 동의
-          </label>
+          {/* **철회된 동의는 이 폼에서 다시 켤 수 없다.** 종전엔 체크박스가 이미 켜진 채로
+              열리고, 저장해도 철회 기록(revoked_at)은 그대로 보존돼(아래 submit) 화면만
+              "동의됨"으로 보이고 체형 분석은 계속 잠긴 상태였다 — 대표는 뭔가 했다고 믿는데
+              아무것도 바뀌지 않는 자리였다. 민감정보 동의는 회원 본인만 줄 수 있으므로
+              여기서 대신 켜 주는 것 자체가 잘못된 동선이다. 체크박스 대신 사실을 적는다. */}
+          {sensitiveRevokedAt ? (
+            <div className="rounded-[10px] border border-danger/35 bg-danger/[0.08] px-2.5 py-2">
+              <div className="font-bold text-danger">
+                민감정보(체형사진 등) 처리 동의 — 회원이 철회함 ({sensitiveRevokedAt.slice(0, 10)})
+              </div>
+              <p className="mt-0.5 text-[10.5px] leading-relaxed text-danger">
+                체형사진 촬영·열람이 잠겨 있어요. <b>회원이 앱 마이 탭의 "민감정보(인바디·체형사진)
+                동의"에서 다시 동의하면 바로 열려요 — 여기서는 켤 수 없어요.</b> 이미 찍어 둔 사진은
+                지워지지 않아요.
+              </p>
+            </div>
+          ) : (
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={sensitive} onChange={(e) => setSensitive(e.target.checked)} />
+              민감정보(체형사진 등) 처리 동의
+            </label>
+          )}
         </div>
 
         {error && <p className="text-[11px] text-danger">{error.message}</p>}
@@ -1260,7 +1360,8 @@ function MemberFormModal({
           <UserPlus className="h-4 w-4" /> {initial ? "저장" : "등록"}
         </Button>
         <p className="text-[10.5px] text-muted">
-          등록 후 회원이 앱에서 같은 번호로 인증하면 자동 매칭 + 이름 확인 1탭으로 연결됩니다(P48).
+          {/* 내부 티켓 표기(P48 = 번호 기반 자동 매칭)는 코드 주석에만 남긴다. */}
+          등록 후 회원이 앱에서 같은 번호로 인증하면 자동으로 연결됩니다 — 이름 확인 1탭이면 끝이에요.
         </p>
       </div>
     </Modal>
@@ -1346,6 +1447,31 @@ function AddContractModal({
       paidAmount > 0 &&
       !!validUntil &&
       (!split || (!!due1 && !!due2));
+
+  // **잠긴 버튼은 이유를 말한다.** 종전엔 "계약 등록"이 회색으로 죽어 있기만 해서 어느 칸이
+  // 비었는지 알 수 없었고, 특히 재직 트레이너가 하나도 없으면(전원 퇴사 처리) 담당 셀렉트에
+  // 고를 값이 없어 **이 폼 안에서는 영원히 풀리지 않는 잠금**이 된다 — 그 경우의 다음 행동은
+  // 이 화면 밖(설정 · 직원)에 있으므로 그것부터 말한다.
+  // canSubmit이 거짓인 동안만 띄운다 — 눌리는 버튼 옆에 "왜 안 눌리는지"가 붙는 모순 방지.
+  const disabledReason = !canSubmit
+    ? payOnlyPass
+      ? paidAmount <= 0
+        ? "결제 금액을 입력해주세요."
+        : "분할 납부 날짜(1차·2차)를 모두 골라주세요."
+      : staffOptions.length === 0
+        ? "지금 회원권을 맡길 수 있는 트레이너가 없어요 — 설정 · 직원에서 트레이너를 초대한 뒤 다시 시도해주세요."
+        : !product.trim()
+          ? "상품명을 입력해주세요."
+          : !trainerId
+            ? "담당 트레이너를 골라주세요."
+            : totalSessions <= 0
+              ? "총 세션 수를 1회 이상으로 입력해주세요."
+              : paidAmount <= 0
+                ? "계약가를 입력해주세요."
+                : !validUntil
+                  ? "이용 만료일을 골라주세요."
+                  : "분할 납부 날짜(1차·2차)를 모두 골라주세요."
+    : null;
 
   function submitPayment(passId: string) {
     // 실결제 전액을 등록 시점에 즉시 수납한다고 가정(비분할). 분할 시 1차는 즉시 완납,
@@ -1579,14 +1705,19 @@ function AddContractModal({
           </p>
         )}
 
+        {disabledReason && !pending && (
+          <p className="text-[10.5px] leading-relaxed text-warn">{disabledReason}</p>
+        )}
         <Button className="w-full" disabled={!canSubmit || pending} onClick={submit}>
           <FileSignature className="h-4 w-4" />{" "}
           {pending ? "등록 중…" : payOnlyPass ? "결제만 기록" : "계약 등록"}
         </Button>
         <p className="text-[10.5px] text-muted">
+          {/* 내부 버전 표기(v1.1 추가결제 플로우)와 상태 코드(sent)는 코드 주석에만 남긴다 —
+              화면에는 대표가 실제로 보게 될 말("서명 대기")로 쓴다. */}
           {payOnlyPass
-            ? "기존 회원권에 결제 기록만 추가합니다 — 발급·계약 발송은 일어나지 않아요. 분할 결제의 2차 납부는 \"결제 목록\"에서 납부 처리로 완결하세요."
-            : "회원권 발급 → 계약 발송(sent) → 결제 기록까지 한 번에 처리합니다(v1.1 추가결제 플로우). 분할 결제의 2차 납부는 등록 후 \"결제 목록\"에서 납부 처리로 완결하세요."}
+            ? "기존 회원권에 결제 기록만 추가합니다 — 발급·계약서 발송은 일어나지 않아요. 분할 결제의 2차 납부는 \"결제 목록\"에서 납부 처리로 완결하세요."
+            : "회원권 발급 → 계약서 발송(서명 대기) → 결제 기록까지 한 번에 처리합니다. 분할 결제의 2차 납부는 등록 후 \"결제 목록\"에서 납부 처리로 완결하세요."}
         </p>
       </div>
     </Modal>

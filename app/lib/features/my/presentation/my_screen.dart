@@ -18,6 +18,7 @@ import 'package:rise_member/features/auth/presentation/auth_view_model.dart';
 import 'package:rise_member/features/my/domain/my_models.dart';
 import 'package:rise_member/features/my/presentation/account_deletion_screen.dart';
 import 'package:rise_member/features/my/presentation/my_view_model.dart';
+import 'package:rise_member/features/my/presentation/widgets/center_coaches_sheet.dart';
 import 'package:rise_member/features/my/presentation/widgets/consent_toggles.dart';
 import 'package:rise_member/features/my/presentation/widgets/contract_detail_sheet.dart';
 import 'package:rise_member/features/my/presentation/widgets/contract_sign_sheet.dart';
@@ -128,7 +129,18 @@ class MyScreen extends ConsumerWidget {
                     // 기본값 저장이 실제 동의를 철회한다(consent_toggles 주석).
                     consentUnknown: summary.consentFailed,
                   ),
-                  onSignTap: (contract) => showContractSignSheet(context, contract: contract),
+                  onSignTap: (contract) => showContractSignSheet(
+                    context,
+                    contract: contract,
+                    // 체결 완료 단계의 [계약서 보기](P44) — 서명 시트가 닫힌 **뒤**
+                    // 살아 있는 이 화면의 context로 상세를 연다(시트 자신의 context는
+                    // pop과 함께 죽는다). 인자는 재조회 반영본(서명 이미지·체결 정보).
+                    onViewSigned: (updated) => showContractDetailSheet(
+                      context,
+                      contract: updated,
+                      penaltyRate: updated.penaltyRate,
+                    ),
+                  ),
                   onDetailTap: (contract) => showContractDetailSheet(
                     context,
                     contract: contract,
@@ -187,6 +199,19 @@ class _CenterCard extends ConsumerWidget {
           const RiseRow(
             child: Text(AppConfig.centerFullName),
             trailing: RiseBadge('현재', variant: RiseBadgeVariant.red),
+          ),
+          // 코치 소개(P40) — 담당 코치 프로필은 홈·예약에서 열리지만, "이 센터에
+          // 어떤 코치들이 있는지"는 여기가 유일한 진입점이다(데이터는 staffMap 캐시).
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => showCenterCoachesSheet(context),
+            child: const RiseRow(
+              minHeight: 44,
+              // "센터" 접두 — 예약 탭의 "코치 소개"(담당 코치 1명 프로필)와 대상이
+              // 달라서, 같은 라벨이면 "다른 코치들은 어디 갔지"가 된다.
+              child: Text('센터 코치 소개'),
+              trailing: RiseIcon(RiseIcons.chevronRight, size: 14, color: AppColors.muted),
+            ),
           ),
           GestureDetector(
             behavior: HitTestBehavior.opaque,

@@ -301,7 +301,15 @@ mixin _$CenterPolicyDto {
 
 @JsonKey(name: 'slot_capacity') int get slotCapacity;@JsonKey(name: 'cancel_cutoff_hours') int get cancelCutoffHours;@JsonKey(name: 'grace_once') bool get graceOnce;@JsonKey(name: 'penalty_rate') double get penaltyRate;/// 만료임박 기준일(대표가 설정 화면에서 정한다). 서버는 v1부터 이 값을 내려주는데
 /// 앱이 파싱하지 않아, 홈의 "연장 상담 가능" 배지가 **조건 없이 항상** 켜져 있었다.
-@JsonKey(name: 'expiring_days') int get expiringDays;@JsonKey(name: 'max_holds_per_pass') int get maxHoldsPerPass;@JsonKey(name: 'max_hold_total_days') int get maxHoldTotalDays;
+@JsonKey(name: 'expiring_days') int get expiringDays;@JsonKey(name: 'max_holds_per_pass') int get maxHoldsPerPass;@JsonKey(name: 'max_hold_total_days') int get maxHoldTotalDays;/// 센터 운영시간 — **슬롯 시작 시각, 양끝 포함**(9·21 → 09시 시작 ~ 21시 시작 13칸).
+///
+/// **이웃 필드와 달리 nullable이고 `@Default`가 없다.** 여기에 `@Default(9)`를
+/// 박으면 같은 숫자가 DTO와 `CenterPolicy.fallback` 두 군데에 살면서 따로 움직일
+/// 수 있는데, 이 두 자리는 반드시 같아야 한다 — "서버가 필드를 안 준 구버전"과
+/// "정책 조회 자체가 실패"는 회원에게 **똑같이 오늘의 09~21시**로 보여야 한다.
+/// 그래서 "서버가 안 줬다"를 null 그대로 넘기고, 기본값과 유효성(open ≤ close,
+/// 0..23)은 정책을 읽는 경계 한 곳(`CenterPolicy.resolveHours`)이 전담한다.
+@JsonKey(name: 'open_hour', fromJson: _hourOrNull) int? get openHour;@JsonKey(name: 'close_hour', fromJson: _hourOrNull) int? get closeHour;
 /// Create a copy of CenterPolicyDto
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -314,16 +322,16 @@ $CenterPolicyDtoCopyWith<CenterPolicyDto> get copyWith => _$CenterPolicyDtoCopyW
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is CenterPolicyDto&&(identical(other.slotCapacity, slotCapacity) || other.slotCapacity == slotCapacity)&&(identical(other.cancelCutoffHours, cancelCutoffHours) || other.cancelCutoffHours == cancelCutoffHours)&&(identical(other.graceOnce, graceOnce) || other.graceOnce == graceOnce)&&(identical(other.penaltyRate, penaltyRate) || other.penaltyRate == penaltyRate)&&(identical(other.expiringDays, expiringDays) || other.expiringDays == expiringDays)&&(identical(other.maxHoldsPerPass, maxHoldsPerPass) || other.maxHoldsPerPass == maxHoldsPerPass)&&(identical(other.maxHoldTotalDays, maxHoldTotalDays) || other.maxHoldTotalDays == maxHoldTotalDays));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CenterPolicyDto&&(identical(other.slotCapacity, slotCapacity) || other.slotCapacity == slotCapacity)&&(identical(other.cancelCutoffHours, cancelCutoffHours) || other.cancelCutoffHours == cancelCutoffHours)&&(identical(other.graceOnce, graceOnce) || other.graceOnce == graceOnce)&&(identical(other.penaltyRate, penaltyRate) || other.penaltyRate == penaltyRate)&&(identical(other.expiringDays, expiringDays) || other.expiringDays == expiringDays)&&(identical(other.maxHoldsPerPass, maxHoldsPerPass) || other.maxHoldsPerPass == maxHoldsPerPass)&&(identical(other.maxHoldTotalDays, maxHoldTotalDays) || other.maxHoldTotalDays == maxHoldTotalDays)&&(identical(other.openHour, openHour) || other.openHour == openHour)&&(identical(other.closeHour, closeHour) || other.closeHour == closeHour));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,slotCapacity,cancelCutoffHours,graceOnce,penaltyRate,expiringDays,maxHoldsPerPass,maxHoldTotalDays);
+int get hashCode => Object.hash(runtimeType,slotCapacity,cancelCutoffHours,graceOnce,penaltyRate,expiringDays,maxHoldsPerPass,maxHoldTotalDays,openHour,closeHour);
 
 @override
 String toString() {
-  return 'CenterPolicyDto(slotCapacity: $slotCapacity, cancelCutoffHours: $cancelCutoffHours, graceOnce: $graceOnce, penaltyRate: $penaltyRate, expiringDays: $expiringDays, maxHoldsPerPass: $maxHoldsPerPass, maxHoldTotalDays: $maxHoldTotalDays)';
+  return 'CenterPolicyDto(slotCapacity: $slotCapacity, cancelCutoffHours: $cancelCutoffHours, graceOnce: $graceOnce, penaltyRate: $penaltyRate, expiringDays: $expiringDays, maxHoldsPerPass: $maxHoldsPerPass, maxHoldTotalDays: $maxHoldTotalDays, openHour: $openHour, closeHour: $closeHour)';
 }
 
 
@@ -334,7 +342,7 @@ abstract mixin class $CenterPolicyDtoCopyWith<$Res>  {
   factory $CenterPolicyDtoCopyWith(CenterPolicyDto value, $Res Function(CenterPolicyDto) _then) = _$CenterPolicyDtoCopyWithImpl;
 @useResult
 $Res call({
-@JsonKey(name: 'slot_capacity') int slotCapacity,@JsonKey(name: 'cancel_cutoff_hours') int cancelCutoffHours,@JsonKey(name: 'grace_once') bool graceOnce,@JsonKey(name: 'penalty_rate') double penaltyRate,@JsonKey(name: 'expiring_days') int expiringDays,@JsonKey(name: 'max_holds_per_pass') int maxHoldsPerPass,@JsonKey(name: 'max_hold_total_days') int maxHoldTotalDays
+@JsonKey(name: 'slot_capacity') int slotCapacity,@JsonKey(name: 'cancel_cutoff_hours') int cancelCutoffHours,@JsonKey(name: 'grace_once') bool graceOnce,@JsonKey(name: 'penalty_rate') double penaltyRate,@JsonKey(name: 'expiring_days') int expiringDays,@JsonKey(name: 'max_holds_per_pass') int maxHoldsPerPass,@JsonKey(name: 'max_hold_total_days') int maxHoldTotalDays,@JsonKey(name: 'open_hour', fromJson: _hourOrNull) int? openHour,@JsonKey(name: 'close_hour', fromJson: _hourOrNull) int? closeHour
 });
 
 
@@ -351,7 +359,7 @@ class _$CenterPolicyDtoCopyWithImpl<$Res>
 
 /// Create a copy of CenterPolicyDto
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? slotCapacity = null,Object? cancelCutoffHours = null,Object? graceOnce = null,Object? penaltyRate = null,Object? expiringDays = null,Object? maxHoldsPerPass = null,Object? maxHoldTotalDays = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? slotCapacity = null,Object? cancelCutoffHours = null,Object? graceOnce = null,Object? penaltyRate = null,Object? expiringDays = null,Object? maxHoldsPerPass = null,Object? maxHoldTotalDays = null,Object? openHour = freezed,Object? closeHour = freezed,}) {
   return _then(_self.copyWith(
 slotCapacity: null == slotCapacity ? _self.slotCapacity : slotCapacity // ignore: cast_nullable_to_non_nullable
 as int,cancelCutoffHours: null == cancelCutoffHours ? _self.cancelCutoffHours : cancelCutoffHours // ignore: cast_nullable_to_non_nullable
@@ -360,7 +368,9 @@ as bool,penaltyRate: null == penaltyRate ? _self.penaltyRate : penaltyRate // ig
 as double,expiringDays: null == expiringDays ? _self.expiringDays : expiringDays // ignore: cast_nullable_to_non_nullable
 as int,maxHoldsPerPass: null == maxHoldsPerPass ? _self.maxHoldsPerPass : maxHoldsPerPass // ignore: cast_nullable_to_non_nullable
 as int,maxHoldTotalDays: null == maxHoldTotalDays ? _self.maxHoldTotalDays : maxHoldTotalDays // ignore: cast_nullable_to_non_nullable
-as int,
+as int,openHour: freezed == openHour ? _self.openHour : openHour // ignore: cast_nullable_to_non_nullable
+as int?,closeHour: freezed == closeHour ? _self.closeHour : closeHour // ignore: cast_nullable_to_non_nullable
+as int?,
   ));
 }
 
@@ -445,10 +455,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(name: 'slot_capacity')  int slotCapacity, @JsonKey(name: 'cancel_cutoff_hours')  int cancelCutoffHours, @JsonKey(name: 'grace_once')  bool graceOnce, @JsonKey(name: 'penalty_rate')  double penaltyRate, @JsonKey(name: 'expiring_days')  int expiringDays, @JsonKey(name: 'max_holds_per_pass')  int maxHoldsPerPass, @JsonKey(name: 'max_hold_total_days')  int maxHoldTotalDays)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function(@JsonKey(name: 'slot_capacity')  int slotCapacity, @JsonKey(name: 'cancel_cutoff_hours')  int cancelCutoffHours, @JsonKey(name: 'grace_once')  bool graceOnce, @JsonKey(name: 'penalty_rate')  double penaltyRate, @JsonKey(name: 'expiring_days')  int expiringDays, @JsonKey(name: 'max_holds_per_pass')  int maxHoldsPerPass, @JsonKey(name: 'max_hold_total_days')  int maxHoldTotalDays, @JsonKey(name: 'open_hour', fromJson: _hourOrNull)  int? openHour, @JsonKey(name: 'close_hour', fromJson: _hourOrNull)  int? closeHour)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _CenterPolicyDto() when $default != null:
-return $default(_that.slotCapacity,_that.cancelCutoffHours,_that.graceOnce,_that.penaltyRate,_that.expiringDays,_that.maxHoldsPerPass,_that.maxHoldTotalDays);case _:
+return $default(_that.slotCapacity,_that.cancelCutoffHours,_that.graceOnce,_that.penaltyRate,_that.expiringDays,_that.maxHoldsPerPass,_that.maxHoldTotalDays,_that.openHour,_that.closeHour);case _:
   return orElse();
 
 }
@@ -466,10 +476,10 @@ return $default(_that.slotCapacity,_that.cancelCutoffHours,_that.graceOnce,_that
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(name: 'slot_capacity')  int slotCapacity, @JsonKey(name: 'cancel_cutoff_hours')  int cancelCutoffHours, @JsonKey(name: 'grace_once')  bool graceOnce, @JsonKey(name: 'penalty_rate')  double penaltyRate, @JsonKey(name: 'expiring_days')  int expiringDays, @JsonKey(name: 'max_holds_per_pass')  int maxHoldsPerPass, @JsonKey(name: 'max_hold_total_days')  int maxHoldTotalDays)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function(@JsonKey(name: 'slot_capacity')  int slotCapacity, @JsonKey(name: 'cancel_cutoff_hours')  int cancelCutoffHours, @JsonKey(name: 'grace_once')  bool graceOnce, @JsonKey(name: 'penalty_rate')  double penaltyRate, @JsonKey(name: 'expiring_days')  int expiringDays, @JsonKey(name: 'max_holds_per_pass')  int maxHoldsPerPass, @JsonKey(name: 'max_hold_total_days')  int maxHoldTotalDays, @JsonKey(name: 'open_hour', fromJson: _hourOrNull)  int? openHour, @JsonKey(name: 'close_hour', fromJson: _hourOrNull)  int? closeHour)  $default,) {final _that = this;
 switch (_that) {
 case _CenterPolicyDto():
-return $default(_that.slotCapacity,_that.cancelCutoffHours,_that.graceOnce,_that.penaltyRate,_that.expiringDays,_that.maxHoldsPerPass,_that.maxHoldTotalDays);case _:
+return $default(_that.slotCapacity,_that.cancelCutoffHours,_that.graceOnce,_that.penaltyRate,_that.expiringDays,_that.maxHoldsPerPass,_that.maxHoldTotalDays,_that.openHour,_that.closeHour);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -486,10 +496,10 @@ return $default(_that.slotCapacity,_that.cancelCutoffHours,_that.graceOnce,_that
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(name: 'slot_capacity')  int slotCapacity, @JsonKey(name: 'cancel_cutoff_hours')  int cancelCutoffHours, @JsonKey(name: 'grace_once')  bool graceOnce, @JsonKey(name: 'penalty_rate')  double penaltyRate, @JsonKey(name: 'expiring_days')  int expiringDays, @JsonKey(name: 'max_holds_per_pass')  int maxHoldsPerPass, @JsonKey(name: 'max_hold_total_days')  int maxHoldTotalDays)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function(@JsonKey(name: 'slot_capacity')  int slotCapacity, @JsonKey(name: 'cancel_cutoff_hours')  int cancelCutoffHours, @JsonKey(name: 'grace_once')  bool graceOnce, @JsonKey(name: 'penalty_rate')  double penaltyRate, @JsonKey(name: 'expiring_days')  int expiringDays, @JsonKey(name: 'max_holds_per_pass')  int maxHoldsPerPass, @JsonKey(name: 'max_hold_total_days')  int maxHoldTotalDays, @JsonKey(name: 'open_hour', fromJson: _hourOrNull)  int? openHour, @JsonKey(name: 'close_hour', fromJson: _hourOrNull)  int? closeHour)?  $default,) {final _that = this;
 switch (_that) {
 case _CenterPolicyDto() when $default != null:
-return $default(_that.slotCapacity,_that.cancelCutoffHours,_that.graceOnce,_that.penaltyRate,_that.expiringDays,_that.maxHoldsPerPass,_that.maxHoldTotalDays);case _:
+return $default(_that.slotCapacity,_that.cancelCutoffHours,_that.graceOnce,_that.penaltyRate,_that.expiringDays,_that.maxHoldsPerPass,_that.maxHoldTotalDays,_that.openHour,_that.closeHour);case _:
   return null;
 
 }
@@ -501,7 +511,7 @@ return $default(_that.slotCapacity,_that.cancelCutoffHours,_that.graceOnce,_that
 @JsonSerializable()
 
 class _CenterPolicyDto implements CenterPolicyDto {
-  const _CenterPolicyDto({@JsonKey(name: 'slot_capacity') this.slotCapacity = 3, @JsonKey(name: 'cancel_cutoff_hours') this.cancelCutoffHours = 24, @JsonKey(name: 'grace_once') this.graceOnce = true, @JsonKey(name: 'penalty_rate') this.penaltyRate = 0.10, @JsonKey(name: 'expiring_days') this.expiringDays = 7, @JsonKey(name: 'max_holds_per_pass') this.maxHoldsPerPass = 2, @JsonKey(name: 'max_hold_total_days') this.maxHoldTotalDays = 30});
+  const _CenterPolicyDto({@JsonKey(name: 'slot_capacity') this.slotCapacity = 3, @JsonKey(name: 'cancel_cutoff_hours') this.cancelCutoffHours = 24, @JsonKey(name: 'grace_once') this.graceOnce = true, @JsonKey(name: 'penalty_rate') this.penaltyRate = 0.10, @JsonKey(name: 'expiring_days') this.expiringDays = 7, @JsonKey(name: 'max_holds_per_pass') this.maxHoldsPerPass = 2, @JsonKey(name: 'max_hold_total_days') this.maxHoldTotalDays = 30, @JsonKey(name: 'open_hour', fromJson: _hourOrNull) this.openHour, @JsonKey(name: 'close_hour', fromJson: _hourOrNull) this.closeHour});
   factory _CenterPolicyDto.fromJson(Map<String, dynamic> json) => _$CenterPolicyDtoFromJson(json);
 
 @override@JsonKey(name: 'slot_capacity') final  int slotCapacity;
@@ -513,6 +523,16 @@ class _CenterPolicyDto implements CenterPolicyDto {
 @override@JsonKey(name: 'expiring_days') final  int expiringDays;
 @override@JsonKey(name: 'max_holds_per_pass') final  int maxHoldsPerPass;
 @override@JsonKey(name: 'max_hold_total_days') final  int maxHoldTotalDays;
+/// 센터 운영시간 — **슬롯 시작 시각, 양끝 포함**(9·21 → 09시 시작 ~ 21시 시작 13칸).
+///
+/// **이웃 필드와 달리 nullable이고 `@Default`가 없다.** 여기에 `@Default(9)`를
+/// 박으면 같은 숫자가 DTO와 `CenterPolicy.fallback` 두 군데에 살면서 따로 움직일
+/// 수 있는데, 이 두 자리는 반드시 같아야 한다 — "서버가 필드를 안 준 구버전"과
+/// "정책 조회 자체가 실패"는 회원에게 **똑같이 오늘의 09~21시**로 보여야 한다.
+/// 그래서 "서버가 안 줬다"를 null 그대로 넘기고, 기본값과 유효성(open ≤ close,
+/// 0..23)은 정책을 읽는 경계 한 곳(`CenterPolicy.resolveHours`)이 전담한다.
+@override@JsonKey(name: 'open_hour', fromJson: _hourOrNull) final  int? openHour;
+@override@JsonKey(name: 'close_hour', fromJson: _hourOrNull) final  int? closeHour;
 
 /// Create a copy of CenterPolicyDto
 /// with the given fields replaced by the non-null parameter values.
@@ -527,16 +547,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _CenterPolicyDto&&(identical(other.slotCapacity, slotCapacity) || other.slotCapacity == slotCapacity)&&(identical(other.cancelCutoffHours, cancelCutoffHours) || other.cancelCutoffHours == cancelCutoffHours)&&(identical(other.graceOnce, graceOnce) || other.graceOnce == graceOnce)&&(identical(other.penaltyRate, penaltyRate) || other.penaltyRate == penaltyRate)&&(identical(other.expiringDays, expiringDays) || other.expiringDays == expiringDays)&&(identical(other.maxHoldsPerPass, maxHoldsPerPass) || other.maxHoldsPerPass == maxHoldsPerPass)&&(identical(other.maxHoldTotalDays, maxHoldTotalDays) || other.maxHoldTotalDays == maxHoldTotalDays));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _CenterPolicyDto&&(identical(other.slotCapacity, slotCapacity) || other.slotCapacity == slotCapacity)&&(identical(other.cancelCutoffHours, cancelCutoffHours) || other.cancelCutoffHours == cancelCutoffHours)&&(identical(other.graceOnce, graceOnce) || other.graceOnce == graceOnce)&&(identical(other.penaltyRate, penaltyRate) || other.penaltyRate == penaltyRate)&&(identical(other.expiringDays, expiringDays) || other.expiringDays == expiringDays)&&(identical(other.maxHoldsPerPass, maxHoldsPerPass) || other.maxHoldsPerPass == maxHoldsPerPass)&&(identical(other.maxHoldTotalDays, maxHoldTotalDays) || other.maxHoldTotalDays == maxHoldTotalDays)&&(identical(other.openHour, openHour) || other.openHour == openHour)&&(identical(other.closeHour, closeHour) || other.closeHour == closeHour));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,slotCapacity,cancelCutoffHours,graceOnce,penaltyRate,expiringDays,maxHoldsPerPass,maxHoldTotalDays);
+int get hashCode => Object.hash(runtimeType,slotCapacity,cancelCutoffHours,graceOnce,penaltyRate,expiringDays,maxHoldsPerPass,maxHoldTotalDays,openHour,closeHour);
 
 @override
 String toString() {
-  return 'CenterPolicyDto(slotCapacity: $slotCapacity, cancelCutoffHours: $cancelCutoffHours, graceOnce: $graceOnce, penaltyRate: $penaltyRate, expiringDays: $expiringDays, maxHoldsPerPass: $maxHoldsPerPass, maxHoldTotalDays: $maxHoldTotalDays)';
+  return 'CenterPolicyDto(slotCapacity: $slotCapacity, cancelCutoffHours: $cancelCutoffHours, graceOnce: $graceOnce, penaltyRate: $penaltyRate, expiringDays: $expiringDays, maxHoldsPerPass: $maxHoldsPerPass, maxHoldTotalDays: $maxHoldTotalDays, openHour: $openHour, closeHour: $closeHour)';
 }
 
 
@@ -547,7 +567,7 @@ abstract mixin class _$CenterPolicyDtoCopyWith<$Res> implements $CenterPolicyDto
   factory _$CenterPolicyDtoCopyWith(_CenterPolicyDto value, $Res Function(_CenterPolicyDto) _then) = __$CenterPolicyDtoCopyWithImpl;
 @override @useResult
 $Res call({
-@JsonKey(name: 'slot_capacity') int slotCapacity,@JsonKey(name: 'cancel_cutoff_hours') int cancelCutoffHours,@JsonKey(name: 'grace_once') bool graceOnce,@JsonKey(name: 'penalty_rate') double penaltyRate,@JsonKey(name: 'expiring_days') int expiringDays,@JsonKey(name: 'max_holds_per_pass') int maxHoldsPerPass,@JsonKey(name: 'max_hold_total_days') int maxHoldTotalDays
+@JsonKey(name: 'slot_capacity') int slotCapacity,@JsonKey(name: 'cancel_cutoff_hours') int cancelCutoffHours,@JsonKey(name: 'grace_once') bool graceOnce,@JsonKey(name: 'penalty_rate') double penaltyRate,@JsonKey(name: 'expiring_days') int expiringDays,@JsonKey(name: 'max_holds_per_pass') int maxHoldsPerPass,@JsonKey(name: 'max_hold_total_days') int maxHoldTotalDays,@JsonKey(name: 'open_hour', fromJson: _hourOrNull) int? openHour,@JsonKey(name: 'close_hour', fromJson: _hourOrNull) int? closeHour
 });
 
 
@@ -564,7 +584,7 @@ class __$CenterPolicyDtoCopyWithImpl<$Res>
 
 /// Create a copy of CenterPolicyDto
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? slotCapacity = null,Object? cancelCutoffHours = null,Object? graceOnce = null,Object? penaltyRate = null,Object? expiringDays = null,Object? maxHoldsPerPass = null,Object? maxHoldTotalDays = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? slotCapacity = null,Object? cancelCutoffHours = null,Object? graceOnce = null,Object? penaltyRate = null,Object? expiringDays = null,Object? maxHoldsPerPass = null,Object? maxHoldTotalDays = null,Object? openHour = freezed,Object? closeHour = freezed,}) {
   return _then(_CenterPolicyDto(
 slotCapacity: null == slotCapacity ? _self.slotCapacity : slotCapacity // ignore: cast_nullable_to_non_nullable
 as int,cancelCutoffHours: null == cancelCutoffHours ? _self.cancelCutoffHours : cancelCutoffHours // ignore: cast_nullable_to_non_nullable
@@ -573,7 +593,9 @@ as bool,penaltyRate: null == penaltyRate ? _self.penaltyRate : penaltyRate // ig
 as double,expiringDays: null == expiringDays ? _self.expiringDays : expiringDays // ignore: cast_nullable_to_non_nullable
 as int,maxHoldsPerPass: null == maxHoldsPerPass ? _self.maxHoldsPerPass : maxHoldsPerPass // ignore: cast_nullable_to_non_nullable
 as int,maxHoldTotalDays: null == maxHoldTotalDays ? _self.maxHoldTotalDays : maxHoldTotalDays // ignore: cast_nullable_to_non_nullable
-as int,
+as int,openHour: freezed == openHour ? _self.openHour : openHour // ignore: cast_nullable_to_non_nullable
+as int?,closeHour: freezed == closeHour ? _self.closeHour : closeHour // ignore: cast_nullable_to_non_nullable
+as int?,
   ));
 }
 

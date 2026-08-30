@@ -11,22 +11,39 @@ import { auth } from "@/lib/firebase";
 
 // Firebase Auth 오류 코드 → 한국어. invalid-credential은 이메일 열거 보호(기본 ON)로
 // "없는 계정"과 "비번 틀림"을 구분해주지 않는다 — 메시지도 묶어서 안내한다.
+//
+// 이 표의 원칙: "관리자에게 문의하세요"라고 쓰지 않는다. 이 제품에 관리자는 없다 —
+// 최상위 사용자가 센터 대표 본인이라, 문의하라는 말은 아무 데도 가지 않는 막다른 길이다.
+// 제품 안에 해결 경로가 있으면 그 경로를, 없으면 없다는 사실을 그대로 쓴다.
 const FB_ERROR_KO: Record<string, string> = {
   "auth/invalid-credential": "이메일 또는 비밀번호가 맞지 않아요",
   "auth/user-not-found": "이메일 또는 비밀번호가 맞지 않아요",
   "auth/wrong-password": "이메일 또는 비밀번호가 맞지 않아요",
   "auth/invalid-email": "이메일 형식이 올바르지 않아요",
-  "auth/user-disabled": "비활성화된 계정이에요 — 관리자에게 문의하세요",
+  // 퇴사 처리가 Firebase 계정을 잠그므로 일상적으로 도달하는 상태다(설정·직원 → 퇴사).
+  // 되돌리는 실물 버튼이 제품 안에 있다: [설정 · 직원] 직원 표의 "재입사" → 재입사 처리.
+  "auth/user-disabled": "퇴사 처리된 계정이에요 — 센터 대표가 [설정 · 직원]에서 재입사 처리하면 다시 로그인할 수 있어요",
   "auth/too-many-requests": "로그인 시도가 너무 많았어요 — 잠시 후 다시 시도해주세요",
-  "auth/network-request-failed": "네트워크 오류가 발생했어요 — 연결을 확인해주세요",
-  "auth/operation-not-allowed": "이메일 로그인이 비활성화돼 있어요 — 관리자에게 문의하세요",
+  // api.ts의 오프라인 문구와 같은 말로 맞춘다 — 같은 사고(와이파이 끊김)를 화면마다
+  // 다른 말로 부르면 대표는 서로 다른 문제로 읽는다.
+  "auth/network-request-failed": "인터넷 연결이 끊긴 것 같아요 — 연결을 확인하고 다시 시도해주세요",
+  // 이건 센터에서 손댈 수 있는 스위치가 아니다(Firebase 콘솔 설정). 고칠 수 없는 일을
+  // "문의하세요"로 떠넘기지 말고, 센터 밖 문제라는 사실을 그대로 알린다.
+  "auth/operation-not-allowed": "이메일 로그인이 꺼져 있어요 — 센터에서 켤 수 있는 설정이 아니라 PT데스크에 알려야 해요",
 };
 
 function toKoMessage(e: unknown): string {
+  // 표에 없는 코드(auth/internal-error 등)와 Firebase 밖 예외(브라우저 영문 메시지)를
+  // 그대로 흘리면 로그인 카드에 생 enum·영문이 찍힌다 — 대표에게는 읽을 수 없는 글자다.
+  // 화면에는 고정 한국어 한 줄만, 원문은 콘솔로.
   if (e instanceof FirebaseError) {
-    return FB_ERROR_KO[e.code] ?? `로그인에 실패했어요 (${e.code})`;
+    const known = FB_ERROR_KO[e.code];
+    if (known) return known;
+    console.error("[login] 매핑되지 않은 Firebase 오류:", e.code, e);
+  } else {
+    console.error("[login] 로그인 중 예외:", e);
   }
-  return e instanceof Error ? e.message : "로그인에 실패했어요";
+  return "로그인에 실패했어요 — 잠시 후 다시 시도해주세요";
 }
 
 export function Login() {
@@ -177,8 +194,10 @@ export function Login() {
           <div className="mt-3 text-left">
             {/* /v1/me 실패 — 자격 문제가 아니라 서버 도달 문제인 경우가 대부분이다.
                 개발 빌드에서만 로컬 백엔드 힌트를 덧붙인다(운영 사용자에게는 무의미한 안내). */}
-            <p className="text-[11px] text-danger">
-              로그인에 실패했어요: {error}
+            {/* {error}는 api.ts가 한국어 완결 문장으로 정규화해 넘긴다(오프라인 포함) —
+                종전 "로그인에 실패했어요: " 접두사를 그대로 두면 문장이 두 번 겹쳐 읽혔다. */}
+            <p className="text-[11px] leading-relaxed text-danger">
+              로그인을 마치지 못했어요. {error}
               {import.meta.env.DEV && " — 백엔드가 :8080에서 실행 중인지 확인하세요."}
             </p>
             {/* 탈출구. Firebase 로그인은 성공했는데 /v1/me가 실패하면(권한 미부여·서버 오류)
@@ -195,7 +214,9 @@ export function Login() {
         )}
 
         <p className="mt-3.5 text-left text-[10.5px] leading-relaxed text-muted">
-          로그인 시 역할(owner/trainer)에 따라 보이는 메뉴·데이터가 다릅니다. 매출·통계는 대표
+          {/* 종전 "역할(owner/trainer)" — 화면 어디에도 없는 영문 코드값이라 그대로 두면
+              대표가 자기 역할을 이 표기로 찾게 된다. 화면에 쓰는 말과 같게 맞춘다. */}
+          로그인 시 역할(대표·트레이너)에 따라 보이는 메뉴·데이터가 다릅니다. 매출·통계는 대표
           전용입니다.
           {import.meta.env.DEV && (
             <>

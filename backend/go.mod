@@ -15,6 +15,11 @@ require (
 
 require (
 	cloud.google.com/go/storage v1.62.1
+	// golang.org/x/image — webp DecodeConfig 전용(v2.25 트레이너 사진 업로드).
+	// stdlib image에는 webp 디코더가 없어 치수 위생 검사를 할 수 없다. 디코더만 쓰고
+	// 픽셀은 풀지 않는다(DecodeConfig = 헤더만) — 디코드 폭탄 표면이 늘지 않는다.
+	// 2026-08 기준 최신 stable(`go list -m -versions golang.org/x/image`로 확인).
+	golang.org/x/image v0.45.0
 	google.golang.org/grpc v1.82.1
 )
 
@@ -59,9 +64,9 @@ require (
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/text v0.38.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/appengine/v2 v2.0.6 // indirect
 	google.golang.org/genproto v0.0.0-20260511170946-3700d4141b60 // indirect

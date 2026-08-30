@@ -5,6 +5,10 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -29,6 +33,10 @@ type Service struct {
 	users UserProvisioner
 	// media — 회원탈퇴 시 Cloud Storage 원본 파일을 파기하는 경계(provision.go, v2.11).
 	media MediaPurger
+	// uploader — 트레이너 프로필 사진을 Storage에 올리는 경계(provision.go, v2.25).
+	// 기본값이 **no-op이 아니라 503 구현**인 것이 media와의 차이다: 업로드가 조용히
+	// 성공하면 "저장했어요"가 거짓말이 된다(MediaUploader 주석).
+	uploader MediaUploader
 }
 
 // NewService — users가 nil이면 dev 합성 uid 구현으로 폴백한다(테스트·로컬이 SDK 없이 돌아야 한다).
@@ -36,7 +44,12 @@ func NewService(st store.Store, cfg config.Config, users UserProvisioner) *Servi
 	if users == nil {
 		users = devUserProvisioner{}
 	}
-	return &Service{store: st, cfg: cfg, users: users, media: devMediaPurger{}}
+	return &Service{
+		store: st, cfg: cfg, users: users, media: devMediaPurger{},
+		// 주입되지 않으면 업로드는 503이다 — 테스트·로컬이 SDK 없이 도는 것과, 미구성
+		// 서버가 가짜 URL을 돌려주지 않는 것을 **같은 기본값**으로 만족시킨다.
+		uploader: unconfiguredUploader{reason: "사진 업로드 저장소가 설정되지 않았어요(관리자에게 STORAGE_BUCKET 설정을 요청해주세요)"},
+	}
 }
 
 // WithMediaPurger — Storage 파기 경계를 주입한다(기본은 dev no-op). NewService의 인자로 넣지
@@ -45,6 +58,16 @@ func NewService(st store.Store, cfg config.Config, users UserProvisioner) *Servi
 func (s *Service) WithMediaPurger(m MediaPurger) *Service {
 	if m != nil {
 		s.media = m
+	}
+	return s
+}
+
+// WithMediaUploader — Storage 업로드 경계를 주입한다(v2.25). WithMediaPurger와 같은 이유로
+// 생성자가 아니라 옵션이다. nil을 넘기면 기본값(503 구현)이 유지된다 — **no-op으로
+// 되돌아가지 않는다**는 것이 이 가드의 요점이다.
+func (s *Service) WithMediaUploader(u MediaUploader) *Service {
+	if u != nil {
+		s.uploader = u
 	}
 	return s
 }
@@ -1605,6 +1628,12 @@ func (s *Service) CreateRecurring(ctx context.Context, p Principal, req Recurrin
 	if p.IsTrainer() && pass.TrainerID != p.UID {
 		return nil, ErrForbidden
 	}
+	// 슬롯키 위생 검사이지 **운영시간 검사가 아니다**(계약 v2.24 명시). Policy.open_hour/
+	// close_hour로 시간대를 강제하지 않는 것은 의도다: 강제하면 대표가 close_hour를 21→20으로
+	// 줄이는 순간 이미 잡힌 21시 규칙·예약을 취소·이동조차 못 하게 잠긴다(그 레코드를 만지는
+	// 모든 경로가 400). 정책 변경이 과거를 소급 파괴하지 않는다는 규칙(v2.0)과 같은 근거다 —
+	// 운영시간은 클라이언트가 그리드를 그리는 값이고, 데스크가 특별히 잡아 주는 영업시간 외
+	// 수업은 실재하는 정상 영업이다.
 	if req.Hour < 0 || req.Hour > 23 {
 		return nil, errors.Join(errBadRequest, errors.New("hour는 0~23 사이여야 해요")) // 유령 규칙 방지(P04 M5)
 	}
@@ -1848,7 +1877,25 @@ func (s *Service) Checkin(ctx context.Context, p Principal, req CheckinRequest) 
 		if !p.IsMember() || p.MemberID == "" {
 			return nil, ErrForbidden
 		}
-		if req.QRToken != s.cfg.CheckinQRToken {
+		// 대조값의 출처는 **센터 문서에 저장된 토큰**이다(P49, v2.23). 종전엔 환경변수
+		// (CHECKIN_QR_TOKEN)였는데, 그 값은 대표가 알 수 없는 곳(Cloud Run 설정)에 있으면서
+		// 동시에 대표가 어드민에 손으로 옮겨 적어야 QR이 나오는 구조였다 — 알 수 없는 값을
+		// 옮겨 적으라는 요구라 실사용이 불가능했고, 미설정 시 저장소에 적힌 **공개 기본값**
+		// 으로 조용히 떨어지는 fail-open이 함께 있었다(그래서 기동 검증이 필요했다).
+		qr, err := s.store.GetCheckinQR(ctx, p.CenterID)
+		if err != nil {
+			return nil, err
+		}
+		// 미발급은 결측이 아니라 상태다 — 폴백 없이 거부하고, 무엇을 해야 하는지 말한다.
+		// 여기에 어떤 폴백(환경변수·기본값)이라도 두는 순간 "발급 안 한 센터가 사실은 열려
+		// 있다"는 조용한 구멍이 생긴다. 잠긴 문은 잠긴 것으로 보여야 한다.
+		if !qr.Issued() {
+			return nil, errors.Join(errBadRequest, errors.New("데스크 체크인 QR이 아직 발급되지 않았습니다 — 어드민 설정에서 발급해 주세요"))
+		}
+		// 상수 시간 비교 — 값 자체는 192비트라 타이밍으로 캘 물건이 아니지만, 비밀을 `!=`로
+		// 비교하는 코드는 다음 사람이 복사해 가는 본보기가 된다. 길이가 다르면 0을 돌려주므로
+		// 판정 의미는 바이트 비교 그대로다.
+		if subtle.ConstantTimeCompare([]byte(req.QRToken), []byte(qr.Token)) != 1 {
 			return nil, errors.Join(errBadRequest, errors.New("qr_token이 유효하지 않음"))
 		}
 		booking, err = s.findUpcomingBooking(ctx, p)
@@ -2551,11 +2598,39 @@ func (s *Service) buildContractForPass(ctx context.Context, p Principal, pass *d
 	// 그대로 스냅샷했는데 환불은 RefundQuote가 상한으로 캡해, 30% 조항에 서명하고 10%만
 	// 공제되는 계약서가 발행됐다.
 	rate := policy.EffectivePenaltyRate()
-	return &domain.Contract{
+	c := &domain.Contract{
 		MemberID: pass.MemberID, PassID: pass.ID, Product: pass.Product,
 		PaidAmount: pass.PaidAmount, Status: domain.ContractStatusSent, SentAt: &now, FirstSentAt: &now,
 		PenaltyRate: &rate,
-	}, nil
+	}
+	// P39(계약 v2.18): 발행 래치가 켜져 있으면 발급(=자동 send)도 Vars 스탬프를 시도한다.
+	// 다만 확정 플로우상 결제 기록은 발급 **뒤**라(발급 → Payment 기록) 여기서는 결제 2키
+	// (결제방법·납부일정)가 비어 전부-아니면-전무 가드가 통상 스킵을 고른다 — **첫 완전
+	// 스탬프는 결제 기록 후 운영자의 (재)발송(SendContract)에서 찍히는 것이 정상 경로다.**
+	// 그래도 구현해 두는 이유: "발급이 곧 send"인 이 경로만 스탬프에서 빼면 두 send 경로가
+	// 다른 규칙을 갖게 되고, 스킵은 가드의 판정(정직하게 찍을 수 없음)이지 경로의 예외가
+	// 아니어야 한다. 래치를 되돌리면 추가 스토어 읽기 없이 종전 경로 그대로다(latch-off
+	// 불변 — 롤백 구성 픽스처로 고정. 배포 상태는 P48/v2.22부터 래치 ON).
+	//
+	// P42: 래치를 통과해도 버전은 시설 신고 상태가 고른다(reported/exempt 2종). unknown이면
+	// 세 번째 스킵(contractSkipFacilityUnknown) — 모르는 상태로 문서를 만들지 않는다. 선택
+	// 때 읽은 facility를 조립에 재사용한다(같은 문서 2회 읽기 사이에 저장이 끼는 창 제거).
+	if contractStampLatchOn() {
+		fac, err := s.store.GetFacility(ctx, p.CenterID)
+		if err != nil {
+			return nil, err
+		}
+		if ver, tpl, skip := contractTemplateForStatus(fac.ReportStatus); skip == contractSkipNone {
+			vars, _, err := s.gatherContractVars(ctx, p.CenterID, c, pass, policy, fac, tpl.requiredVarKeys)
+			if err != nil {
+				return nil, err
+			}
+			if vars != nil {
+				c.TemplateVersion, c.Vars = ver, vars
+			}
+		}
+	}
+	return c, nil
 }
 
 // CreateContract — POST /v1/contracts {member_id, pass_id}(수동 생성, 초안 draft). 발급과 동시에
@@ -2576,6 +2651,18 @@ func (s *Service) CreateContract(ctx context.Context, p Principal, req ContractC
 	}
 	if pass.Status == domain.PassStatusRefunded {
 		return nil, errors.Join(errBadRequest, errors.New("환불 처리된 패스에는 계약을 만들 수 없어요"))
+	}
+	// 탈퇴 회원 차단(v2.11 후속 차단 목록의 누락 자리 — v2.17, P40). 탈퇴가 미서명 계약을
+	// 전부 voided로 종결하는 순간, 아래 "패스당 유효 계약 1건" 가드는 voided를 세지 않으므로
+	// 같은 패스에 새 draft를 다시 만들 수 있게 된다 — 서명 주체가 파기돼 영원히 미서명인
+	// 계약이 방금 닫은 자리에서 재생산된다. send/sign은 가드가 필요 없다: 탈퇴 회원의 잔여
+	// 계약은 전부 종단 상태(signed/voided)라 전이 규칙이 이미 막는다.
+	mem, err := s.store.GetMember(ctx, p.CenterID, req.MemberID)
+	if err != nil {
+		return nil, err
+	}
+	if err := guardMemberNotWithdrawn(*mem, "계약을 만들 수 없어요"); err != nil {
+		return nil, err
 	}
 	policy, err := s.store.GetPolicy(ctx, p.CenterID)
 	if err != nil {
@@ -2661,6 +2748,35 @@ func (s *Service) SendContract(ctx context.Context, p Principal, id string) (*do
 			return nil, ErrForbidden
 		}
 	}
+	// P39(계약 v2.18): 발행 래치가 켜져 있으면 send가 Vars를 **(재)확정**한다 — §D ⑤ "send
+	// 시점에 Vars를 채워 두고, 서명은 그것을 확정". 재발송도 매번 재확정한다(P39 결정 2):
+	// 회원이 서명 화면에서 보는 것은 저장된 Vars 렌더이므로 재확정이어야 "본 것 = 서명한 것"
+	// (D-4)이 유지되고, 배포 전 sent 잔존 계약도 재발송으로 Vars를 얻는다. 조립(스토어 읽기)은
+	// 전부 트랜잭션 **밖**이다(ContractMutator 순수성 — mutate 안 Store 재호출 금지). 조립
+	// 재료 중 계약 필드(Product·PaidAmount·PenaltyRate)는 생성 후 불변이라 스냅샷 c로 충분하다.
+	// P42: 버전 선택은 발급 경로와 같은 2중 게이트다 — 래치(읽기 없음) → 시설 신고 상태
+	// (reported/exempt → 각 변형, unknown → 스킵). buildContractForPass의 게이트 주석 참고.
+	var stampVersion string
+	var stampVars map[string]string
+	if contractStampLatchOn() {
+		fac, err := s.store.GetFacility(ctx, p.CenterID)
+		if err != nil {
+			return nil, err
+		}
+		if ver, tpl, skip := contractTemplateForStatus(fac.ReportStatus); skip == contractSkipNone {
+			pass, err := s.store.GetPass(ctx, p.CenterID, c.PassID)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return nil, err // NotFound는 패스 없는 레거시·픽스처 — 패스 유래 키만 결측으로 진행
+			}
+			vars, _, err := s.gatherContractVars(ctx, p.CenterID, c, pass, nil, fac, tpl.requiredVarKeys)
+			if err != nil {
+				return nil, err
+			}
+			if vars != nil {
+				stampVersion, stampVars = ver, vars
+			}
+		}
+	}
 	now := time.Now().UTC()
 	return s.store.TransitionContract(ctx, p.CenterID, id,
 		func(fresh *domain.Contract, pass *domain.Pass) error {
@@ -2675,18 +2791,36 @@ func (s *Service) SendContract(ctx context.Context, p Principal, id string) (*do
 			if fresh.FirstSentAt == nil {
 				fresh.FirstSentAt = &now // 최초 고지 시각은 한 번만(v1.5 — 재발송이 증적을 지우지 않게)
 			}
+			if stampVars != nil {
+				// 재할당만 한다(ContractMutator 규약 — 포인터와 같은 이유로 맵도 제자리
+				// 쓰기 금지: Memory의 얕은 사본 롤백이 오염된다). 캡처만 읽으므로
+				// 트랜잭션 재시도에도 순수하다.
+				fresh.TemplateVersion = stampVersion
+				fresh.Vars = stampVars
+			}
+			// stampVars가 nil이면(시설 미선언·조립 불완전, 또는 래치를 되돌린 구성) 기존
+			// 스탬프를 **건드리지 않는다**:
+			// 이미 완전한 문서를 받아 본 회원의 열람물을, 나중의 조립 불가능해진 재발송이
+			// 파괴하면 안 된다 — 마지막 완전 스탬프가 살아남는 것이 규약이다(계약 v2.18.
+			// 이때 회원이 보는 문서는 그 마지막 스탬프 그대로이고, 서명도 그것을 봉인한다).
 			return nil
 		})
 }
 
 // SignContract — POST /v1/contracts/{id}/sign(v1.4, member 본인 전용). 자체서명(P27):
 // 회원 앱에서 계약 내용 확인 + 동의 탭 → sent→signed 전이, signed_at·signer_ip는 서버가 기록.
-// sha256·pdf_path는 실PDF 생성 연동 시 채워질 자리(README 갭 유지). 미서명 카운트(어드민
-// "해야 할 일")가 실제로 줄어들 수 있게 하는 여정의 종착 단계.
+// send가 확정해 둔 문서 스냅샷(template_version·vars)이 있으면 같은 트랜잭션에서 sha256으로
+// 봉인한다(v2.18, P39 — §D ②). pdf_path는 §D (나) PDF 연동 시 채워질 자리로 남는다. 미서명
+// 카운트(어드민 "해야 할 일")가 실제로 줄어들 수 있게 하는 여정의 종착 단계.
 // 전이 판정·환불 패스 가드는 트랜잭션 안이다(v2.15, P37 — SendContract와 동일 구조): 환불
 // 마감이 커밋된 뒤에는 어떤 서명도 성립하지 않고(해지된 거래의 사후 법적 서명 차단, P04 감사
 // 실증), 반대로 서명이 먼저 커밋되면 환불의 무효화 스윕이 signed를 보존한다(CanVoidContract).
-func (s *Service) SignContract(ctx context.Context, p Principal, id, signerIP string) (*domain.Contract, error) {
+//
+// signaturePNG(v2.21, P44) — 핸들러가 검증을 마친 자필 서명 PNG **원본 바이트**(없으면 nil —
+// 구버전 클릭 동의 서명, 계속 유효). 있으면 signed_at·signer_ip와 같은 트랜잭션에서
+// signature_png(정규 base64)·signature_sha256(원본 바이트의 해시)을 함께 기록한다. 내용 봉인
+// SHA256과는 끝까지 분리된다(P44 결정 3) — 서명 이미지는 contractSeal 입력에 절대 안 들어간다.
+func (s *Service) SignContract(ctx context.Context, p Principal, id, signerIP string, signaturePNG []byte) (*domain.Contract, error) {
 	if !p.IsMember() || p.MemberID == "" {
 		return nil, ErrForbidden
 	}
@@ -2696,6 +2830,16 @@ func (s *Service) SignContract(ctx context.Context, p Principal, id, signerIP st
 	}
 	if c.MemberID != p.MemberID {
 		return nil, ErrForbidden
+	}
+	// P44: 서명 이미지의 해시·정규 base64는 트랜잭션 **밖**에서 계산해 캡처한다(ContractMutator
+	// 순수성 — 재시도에도 같은 값). 해시 입력은 원본 PNG 바이트다(클라이언트 base64 문자열이
+	// 아니라) — 저장하는 base64도 수신 문자열 재사용이 아닌 바이트 재인코딩 정규형이라, 패딩·
+	// 공백 변형이 저장값·해시를 흔들 수 없다.
+	var sigB64, sigHash string
+	if len(signaturePNG) > 0 {
+		sum := sha256.Sum256(signaturePNG)
+		sigHash = hex.EncodeToString(sum[:])
+		sigB64 = base64.StdEncoding.EncodeToString(signaturePNG)
 	}
 	now := time.Now().UTC()
 	return s.store.TransitionContract(ctx, p.CenterID, id,
@@ -2709,6 +2853,22 @@ func (s *Service) SignContract(ctx context.Context, p Principal, id, signerIP st
 			fresh.Status = domain.ContractStatusSigned
 			fresh.SignedAt = &now
 			fresh.SignerIP = signerIP
+			// P44(계약 v2.21): 자필 서명이 있으면 서명 증적과 같은 트랜잭션에서 기록한다.
+			// 재할당만 한다(ContractMutator 규약 — 캡처값 대입, 제자리 쓰기 없음). 없으면
+			// 필드를 **건드리지 않는다** — 빈 값 덮어쓰기가 잔존값(손시딩·레거시)을 지우면
+			// 안 된다(불완전 재발송이 마지막 스탬프를 보존하는 v2.18 규약과 같은 철학).
+			if sigB64 != "" {
+				fresh.SignaturePNG = sigB64
+				fresh.SignatureSHA256 = sigHash
+			}
+			// P39(계약 v2.18): send가 확정해 둔 스냅샷을 서명과 **같은 트랜잭션**에서 봉인한다
+			// (§D ② — 그래야 "서명된 순간의 내용"이다. {{계약 체결일}}이 Vars 밖(P39 결정 3)
+			// 이라 signed_at 기록과 봉인 사이에 끼어들 보강 단계도 없다). Vars 없는 계약
+			// (래치 OFF·레거시 — 요약 고지 서명)은 봉인하지 않는다: sha256 비어 있음 ⟺ 본문
+			// 렌더 없이 진행된 서명이라는 정직한 신호(P39). 거짓 신호를 만들지 않는다.
+			if fresh.TemplateVersion != "" && len(fresh.Vars) > 0 {
+				fresh.SHA256 = contractSeal(fresh.TemplateVersion, fresh.Vars)
+			}
 			return nil
 		})
 }
@@ -2883,20 +3043,29 @@ const bodyPhotoPurgeBatch = 25
 // 정식 스케줄러가 붙으면 `POST /v1/maintenance/purge`가 같은 일을 한다 — 그때
 // 이 호출을 빼는 게 아니라 **둘 다 두는 게 맞다**(스케줄러가 죽어도 바닥이 남는다).
 func (s *Service) sweepBodyPhotoPurge(ctx context.Context, centerID string) {
-	// 읽기 요청에 얹힌 부수 작업이 요청의 인질이 되면 안 된다 — GCS가 느려지면 사진 목록을
-	// 보는 전원의 응답이 30초 요청 타임아웃까지 끌려간다(P35 M-3). 스윕은 자기 예산만 쓴다.
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	// 읽기 요청에 얹힌 부수 작업이 요청의 **인질이 되지도, 인질로 잡지도** 않게 한다.
+	// - WithoutCancel: 호출한 조회가 끝나거나 클라이언트가 끊어도 스윕은 완주한다. 요청 ctx에
+	//   묶어두면 파기가 매번 중도 취소되고, 그 취소 에러가 실제 장애와 구분 안 되는 ERROR
+	//   로그로 쌓인다(조회 하나 끊길 때마다 로그 오염).
+	// - 3초 자체 예산: GCS가 느려도 여기서 끝난다.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	due, err := s.store.ListBodyPhotosPendingPurge(
 		ctx, centerID, time.Now().UTC().Add(-domain.BodyPhotoPurgeAfter), bodyPhotoPurgeBatch)
 	if err != nil {
 		// 실패를 삼키면 30일 파기 약속이 조용히 안 지켜진다 — 조회는 막지 않되 로그는 남긴다.
-		log.Printf("body photo purge sweep: list failed: center=%s: %v", centerID, err)
+		// 예산 소진(DeadlineExceeded)은 장애가 아니라 설계된 중단이라 로그를 아낀다.
+		if !errors.Is(err, context.DeadlineExceeded) {
+			log.Printf("body photo purge sweep: list failed: center=%s: %v", centerID, err)
+		}
 		return
 	}
 	for _, bp := range due {
 		// 한 건이 실패해도 나머지는 지운다 — Storage 권한 문제로 전부 막히면 안 된다.
 		if err := s.purgeBodyPhoto(ctx, centerID, bp); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return // 예산 소진 — 남은 건은 다음 조회가 이어서 처리한다(멱등).
+			}
 			log.Printf("body photo purge sweep: purge failed: center=%s photo=%s: %v", centerID, bp.ID, err)
 		}
 	}
@@ -3130,11 +3299,18 @@ func (s *Service) CreateStaff(ctx context.Context, p Principal, req domain.Staff
 	}
 	// 회원으로 연결된 계정을 스태프로 승격하면 한 uid가 두 역할을 갖는다 — UserIndex는 uid당
 	// 1건이라 role이 덮이는 순간 그 사람의 회원 앱(내 패스·예약)이 통째로 잠긴다. 계정 분리를
-	// 요구하고 여기서 막는다. (다른 센터의 스태프 uid는 v1 단일 센터 전제상 발생하지 않는다 —
-	// store.UserIndex 주석의 멀티센터 한계와 같은 자리.)
+	// 요구하고 여기서 막는다.
 	if idx, err := s.store.GetUserIndex(ctx, uid); err == nil {
 		if idx.Role == domain.RoleMember {
 			return nil, errors.Join(ErrConflict, errors.New("이미 회원으로 연결된 계정이에요"))
+		}
+		// 교차 센터 가드(Phase A) — 종전 주석은 "다른 센터의 스태프 uid는 v1 단일 센터
+		// 전제상 발생하지 않는다"였다. 센터 생성 API가 생긴 순간 그 전제가 깨진다: 다른
+		// 센터에 연결된 이메일을 초대하면 인덱스가 이 센터로 덮여 **그 사람의 원래 센터
+		// 접근이 통째로 사라진다**(로그인은 되는데 남의 센터로 떨어지는 사고).
+		if idx.CenterID != p.CenterID {
+			return nil, errors.Join(ErrConflict,
+				errors.New("이미 다른 센터에 연결된 계정이에요 — 센터마다 다른 이메일을 써주세요"))
 		}
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return nil, err
@@ -3301,9 +3477,17 @@ func (s *Service) SetOffdays(ctx context.Context, p Principal, uid string, offda
 // 운영 다이얼과 법적 신원은 바뀌는 이유·주기·권한·공개 범위가 전부 다르고, 특히 **무인증 공개
 // 응답에서 정책을 걷어내는 일**을 매번 손으로 하게 만들면 언젠가 연 매출 목표가 익명에게 나간다.
 type CenterResponse struct {
-	CenterID string        `json:"center_id"`
+	CenterID string `json:"center_id"`
+	// Name — 센터 상호(멀티센터 Phase A). 미등록(기존 rise처럼 신원 없는 센터)이면 빈 문자열 —
+	// 클라이언트는 빈 값이면 기존 하드코딩 상호로 폴백한다(하위호환: 서버 먼저 배포).
+	Name     string        `json:"name"`
 	Policy   domain.Policy `json:"policy"`
 	Business BusinessView  `json:"business"`
+	// Facility — 시설 신고 상태 선언(P42, v2.19). 역할별로 가리지 않는다(Business와 같은
+	// 이유 — 계약서에 그대로 인쇄되는 값이라 민감 정보가 아니다). 미선언이면 기본값
+	// {unknown,"",""} — 스토어 읽기 규약이 보장한다. 공개 응답(GET /v1/public/business)
+	// 에는 싣지 않는다 — 그쪽 키 집합은 전용 타입(BusinessView)으로 고정돼 있다.
+	Facility domain.Facility `json:"facility"`
 }
 
 // BusinessView — 사업자 정보 응답. domain.Business 12칸을 그대로 펼치고 파생값 complete를 얹는다.
@@ -3345,7 +3529,15 @@ func (s *Service) GetCenter(ctx context.Context, p Principal) (CenterResponse, e
 	if err != nil {
 		return CenterResponse{}, err
 	}
-	return CenterResponse{CenterID: p.CenterID, Policy: pol, Business: businessView(*biz)}, nil
+	center, err := s.store.GetCenter(ctx, p.CenterID)
+	if err != nil {
+		return CenterResponse{}, err
+	}
+	fac, err := s.store.GetFacility(ctx, p.CenterID)
+	if err != nil {
+		return CenterResponse{}, err
+	}
+	return CenterResponse{CenterID: p.CenterID, Name: center.Name, Policy: pol, Business: businessView(*biz), Facility: *fac}, nil
 }
 
 // UpdateCenterPolicy — PUT /v1/center {policy}(v1.4, owner 전용). 설계00 §3.1 "정책은 설정값
@@ -3370,7 +3562,13 @@ func (s *Service) UpdateCenterPolicy(ctx context.Context, p Principal, rawPolicy
 	if err := s.store.SavePolicy(ctx, p.CenterID, &pol); err != nil {
 		return CenterResponse{}, err
 	}
-	return CenterResponse{CenterID: p.CenterID, Policy: pol}, nil
+	// name을 여기서도 채운다 — GetCenter 응답에만 있으면 정책 저장 응답이 화면의 상호를
+	// 빈 값으로 되돌려 깜빡인다(응답으로 캐시를 갱신하는 클라이언트 패턴 전제).
+	center, err := s.store.GetCenter(ctx, p.CenterID)
+	if err != nil {
+		return CenterResponse{}, err
+	}
+	return CenterResponse{CenterID: p.CenterID, Name: center.Name, Policy: pol}, nil
 }
 
 // UpdateCenterBusiness — PUT /v1/center {business}(v2.13, owner 전용). 법정 고지 기재사항 등록.

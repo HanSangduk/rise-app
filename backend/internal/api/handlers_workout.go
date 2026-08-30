@@ -17,7 +17,7 @@ func (h *Handlers) ListWorkoutLogs(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) CreateWorkoutLog(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var req WorkoutLogCreateRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}

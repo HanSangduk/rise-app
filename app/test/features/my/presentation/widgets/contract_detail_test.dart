@@ -239,4 +239,111 @@ void main() {
       expect(find.textContaining('아직 앱에 올라와 있지 않아요'), findsOneWidget);
     });
   });
+
+  group('체결 정보(P44 결정 7) — signed 전용, 있는 것만, 정직 캡션', () {
+    // P44 서명 반영본 — 감사추적 실보유분 전부가 실린 계약.
+    final full = ContractItem(
+      id: 'c-full',
+      passId: 'p1',
+      product: 'PT 20회',
+      paidAmount: 1200000,
+      status: 'signed',
+      penaltyRate: 0.1,
+      signedAt: DateTime.utc(2026, 8, 25, 5, 3), // KST 2026-08-25 14:03
+      firstSentAt: DateTime.utc(2026, 8, 19, 16, 0), // KST 2026-08-20
+      signerIp: '211.36.132.7',
+      sha256: 'a1b2c3d4e5f6${'0' * 52}',
+      signaturePng: 'aGk=', // 유무 판정용 — 본문을 안 여는 테스트라 디코드 결과는 무관
+      signatureSha256: 'f6e5d4c3b2a1${'0' * 52}',
+      templateVersion: 'pt-v1-reported',
+    );
+
+    Future<void> openTall(WidgetTester tester, ContractItem c) async {
+      // 체결 정보 7행이 실린 시트 — 기본 600dp 화면에서도 스크롤로 다 닿지만,
+      // 행 위치 단언이 뷰포트 밖 오프스테이지에 걸리지 않게 실기기 세로를 준다.
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showContractDetailSheet(context,
+                    contract: c, penaltyRate: c.penaltyRate),
+                child: const Text('열기'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('열기'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('전 행 — 일시(KST 분 단위)·인증 수단·IP·두 해시(12자)·버전·최초 발송일', (tester) async {
+      await openTall(tester, full);
+
+      expect(find.text('체결 정보'), findsOneWidget);
+      expect(find.text('서명 일시'), findsOneWidget);
+      expect(find.text('2026-08-25 14:03'), findsOneWidget);
+      expect(find.text('본인인증 수단'), findsOneWidget);
+      expect(find.text('휴대폰 본인인증 계정'), findsOneWidget);
+      expect(find.text('서명 IP'), findsOneWidget);
+      expect(find.text('211.36.132.7'), findsOneWidget);
+      // 두 해시의 역할 분리(결정 3)가 라벨로 보인다 — 값은 앞 12자 + 말줄임.
+      expect(find.text('문서 해시'), findsOneWidget);
+      expect(find.text('a1b2c3d4e5f6…'), findsOneWidget);
+      expect(find.text('서명 이미지 해시'), findsOneWidget);
+      expect(find.text('f6e5d4c3b2a1…'), findsOneWidget);
+      expect(find.text('계약서 버전'), findsOneWidget);
+      expect(find.text('pt-v1-reported'), findsOneWidget);
+      expect(find.text('최초 발송일'), findsOneWidget);
+      expect(find.text('2026-08-20'), findsOneWidget);
+      // 정직 캡션 — 입증 자료까지만. 법정 추정력 문구는 금지(결정 7).
+      expect(find.text('체결 사실의 입증 자료입니다'), findsOneWidget);
+      expect(find.textContaining('추정'), findsNothing,
+          reason: '현행법상 추정 조항이 없다 — 있는 척하는 문구는 금지');
+    });
+
+    testWidgets('레거시 signed(스냅샷·서명 이미지 없음) — 서명 일시·IP만, 지어내지 않는다', (tester) async {
+      final legacy = ContractItem(
+        id: 'c-legacy',
+        passId: 'p1',
+        product: 'PT 20회',
+        paidAmount: 1200000,
+        status: 'signed',
+        signedAt: DateTime.utc(2026, 8, 25, 5, 3),
+        signerIp: '10.0.0.9',
+      );
+      await openTall(tester, legacy);
+
+      expect(find.text('체결 정보'), findsOneWidget);
+      expect(find.text('서명 일시'), findsOneWidget);
+      expect(find.text('서명 IP'), findsOneWidget);
+      expect(find.text('10.0.0.9'), findsOneWidget);
+      expect(find.text('체결 사실의 입증 자료입니다'), findsOneWidget);
+      // 없는 것은 행 자체가 없다 — 빈 값·추정값으로 채우지 않는다.
+      expect(find.text('본인인증 수단'), findsNothing);
+      expect(find.text('문서 해시'), findsNothing);
+      expect(find.text('서명 이미지 해시'), findsNothing);
+      expect(find.text('계약서 버전'), findsNothing);
+      expect(find.text('최초 발송일'), findsNothing);
+    });
+
+    testWidgets('미서명(sent)에는 섹션이 없다 — 체결되지 않은 계약에 체결 정보를 말하지 않는다', (tester) async {
+      const sent = ContractItem(
+        id: 'c-sent',
+        passId: 'p1',
+        product: 'PT 20회',
+        paidAmount: 1200000,
+        status: 'sent',
+        penaltyRate: 0.1,
+      );
+      await openTall(tester, sent);
+
+      expect(find.text('체결 정보'), findsNothing);
+      expect(find.text('체결 사실의 입증 자료입니다'), findsNothing);
+    });
+  });
 }

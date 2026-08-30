@@ -15,6 +15,8 @@ package api
 //	       + 체형사진 원본 파일(MediaPurger) + 로그인 수단(UserIndex·Firebase 계정)
 //	보존 = Ledger·Pass·Payment·Contract·과거 Booking — 전자상거래법 시행령 §6①(계약 5년,
 //	       대금결제 5년). 이름·번호가 사라져 member_id라는 가명만 붙은 거래 기록으로 남는다.
+//	       단, 미서명(draft/sent) 계약은 **문서를 보존한 채 voided로 종결**한다(v2.17, P40) —
+//	       서명 주체가 파기된 뒤의 "서명 대기"는 사실이 아니다. signed는 불가침.
 //
 // 근거의 전문은 domain.Member.Anonymized 주석과 work_log/P22를 참고.
 
@@ -132,7 +134,23 @@ func (s *Service) DeleteMyAccount(ctx context.Context, p Principal) (AccountDele
 		return res, err
 	}
 
-	// ---- 4단계: 가명화 + 건강·이용 기록 파기(DB) ----
+	// ---- 4단계: 미서명 계약 종결(voided, v2.17 · P40) ----
+	// ②에서 서명 주체(Firebase 계정)가 파기됐다 — draft/sent의 "서명 대기"는 이 시점부터
+	// 사실이 아니고, 남겨두면 어드민 미서명 카운트에 영원히 행동 불가능한 항목으로 잡힌다
+	// (P37·P38 적대 리뷰 [H]). signed는 성립했던 거래의 법적 기록이라 불가침이고, 문서는
+	// 남고 상태만 바뀌므로 5년 보존과 비저촉 — 환불의 미서명 void(v1.5)와 같은 논리다.
+	//
+	// 자리가 왜 여기인가(P22 순서 규약): ②보다 **뒤**여야 한다 — 외부 파기가 실패해 탈퇴가
+	// 좌초되면 살아 있는 회원의 계약이 이유 없이 voided로 남는다. ⑤(가명화)보다 앞이라
+	// 여기서 실패하면 회원 문서가 멀쩡한 채 500으로 멈춰 미완료가 눈에 보이고, ⑥(UserIndex)
+	// 보다 앞이라 그 재시도가 같은 토큰으로 가능하다. 각 void는 TransitionContract(CAS)라
+	// 부분 성공 잔여도 해가 없다 — 재시도가 이미 voided를 스킵한다(멱등).
+	voidedContracts, err := s.voidContractsForWithdrawal(ctx, p.CenterID, mem.ID)
+	if err != nil {
+		return res, err
+	}
+
+	// ---- 5단계: 가명화 + 건강·이용 기록 파기(DB) ----
 	anon := mem.Anonymized(now)
 	purged, err := s.store.PurgeMemberPersonalData(ctx, p.CenterID, &anon)
 	if err != nil {
@@ -142,7 +160,7 @@ func (s *Service) DeleteMyAccount(ctx context.Context, p Principal) (AccountDele
 	// 그쪽 숫자를 믿으면 로컬·운영이 다른 말을 한다. 어차피 둘은 짝이다(경로가 메타에서 나온다).
 	purged.BodyPhotos = len(photos)
 
-	// ---- 5단계: 로그인 매핑 제거 ----
+	// ---- 6단계: 로그인 매핑 제거 ----
 	// 남으면 인증이 옛 member_id를 그대로 복원한다. 마지막에 두는 이유는 이것이 호출자의
 	// 권한 자체를 없애기 때문이다 — 앞 단계에서 이걸 지우면 뒤 단계가 자기 권한을 잃는다.
 	if err := s.store.DeleteUserIndex(ctx, p.UID); err != nil {
@@ -151,8 +169,10 @@ func (s *Service) DeleteMyAccount(ctx context.Context, p Principal) (AccountDele
 
 	// 감사 로그: 이 사건은 되돌릴 수 없고 응답은 클라이언트로만 나간다. 파기 사실과 건수를
 	// 서버 로그에 남겨야 나중에 "언제 무엇이 지워졌나"에 답할 수 있다(개인정보 파기 기록).
-	log.Printf("account deleted: member=%s uid=%s purged=%+v retained=%+v cancelled_bookings=%d remaining_sessions=%d",
-		mem.ID, p.UID, purged, retained, cancelled, remaining)
+	// voided_contracts는 응답에 없다(retained.contracts 수가 변하지 않아 와이어 무변경) —
+	// 로그가 유일한 관측 지점이다.
+	log.Printf("account deleted: member=%s uid=%s purged=%+v retained=%+v cancelled_bookings=%d remaining_sessions=%d voided_contracts=%d",
+		mem.ID, p.UID, purged, retained, cancelled, remaining, voidedContracts)
 
 	return AccountDeletionResult{
 		Deleted:           true,
@@ -255,6 +275,56 @@ func (s *Service) cancelFutureBookingsForWithdrawal(ctx context.Context, centerI
 			// 수집과 취소 사이에 이미 처리된 예약 — 정리할 것이 남아 있지 않다
 			// (TransferStaff가 같은 경합을 같은 방식으로 흡수한다).
 		default:
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+// errWithdrawalVoidSkip — void 스윕의 "판정만 하고 쓰지 않는다"를 나르는 내부 신호(P40).
+// ContractMutator는 에러만 반환할 수 있고, 에러는 두 스토어 모두 무쓰기 롤백이다(Memory는
+// 사본 폐기, Firestore는 트랜잭션 중단). 그래서 이 에러를 돌려주고 호출측이 삼키면
+// RefundPass 스윕의 save=false(ContractSweepMutator)와 같은 의미가 된다 — 스킵 한 번을
+// 위해 동사 계층에 변형을 늘리지 않는다. 서비스 밖으로 새면 안 되는 값이라 비공개다.
+var errWithdrawalVoidSkip = errors.New("withdrawal void sweep: contract not voidable — skip")
+
+// voidContractsForWithdrawal — 탈퇴 회원의 미서명(draft/sent) 계약을 voided로 종결한다(v2.17).
+//
+// 후보는 **여기서 다시 읽는다** — 0단계(retainedForMember)의 계약 스캔을 재사용하지 않는
+// 이유: 그 스냅샷과 이 스윕 사이에 외부 호출 두 번(Storage·Firebase)이 있어 목록이 낡는다.
+// cancelFutureBookingsForWithdrawal이 예약을 직접 읽는 것과 같은 자리다. 그래도 목록 조회
+// 자체는 트랜잭션 밖이므로(컬렉션 잠금 회피 — RefundPass 후보 선정과 같은 구조), 계약별
+// TransitionContract가 트랜잭션 안에서 다시 읽은 상태로 재판정한다: 그 사이 서명이
+// 끼어들었으면 스킵(보존)이 최종 판정이다 — signed는 성립했던 거래의 법적 기록이다(v1.5).
+//
+// 멱등성: 이미 voided인 계약은 사전 판정이 거르고(트랜잭션조차 열지 않는다), 경합 잔여는
+// 트랜잭션 안 재판정이 거른다 — 부분 실패 후 재시도가 몇 번을 다시 돌아도 결과가 같다.
+func (s *Service) voidContractsForWithdrawal(ctx context.Context, centerID, memberID string) (int, error) {
+	contracts, err := s.store.ListContracts(ctx, centerID, memberID, "")
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, c := range contracts {
+		if !domain.CanVoidContract(c.Status) {
+			continue // signed(불가침)·voided(재시도 잔여) — 스냅샷 판정으로 충분한 쪽은 여기서 끝낸다
+		}
+		_, err := s.store.TransitionContract(ctx, centerID, c.ID,
+			func(fresh *domain.Contract, _ *domain.Pass) error {
+				if !domain.CanVoidContract(fresh.Status) {
+					return errWithdrawalVoidSkip // 후보 선정 후 끼어든 서명 — 쓰지 않고 보존
+				}
+				fresh.Status = domain.ContractStatusVoided
+				return nil
+			})
+		switch {
+		case err == nil:
+			n++
+		case errors.Is(err, errWithdrawalVoidSkip):
+			// 보존이 최종 판정 — 탈퇴는 계속 진행한다(RefundPass 스윕의 스킵과 같은 취급).
+		default:
+			// ErrNotFound 포함 — 계약은 삭제되지 않는 문서라(PurgeMemberPersonalData 비접촉)
+			// 실제로는 일어나지 않고, 조용한 스킵보다 표면화를 고른다(스토어 인터페이스 규약).
 			return n, err
 		}
 	}

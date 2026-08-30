@@ -88,7 +88,7 @@ export function BodyPhotos() {
           <Label>회원 선택</Label>
           {/* 조회 실패를 빈 셀렉트("회원 0명")로 위장하지 않는다 — Members.tsx ErrorState 패턴. */}
           {membersQ.isError ? (
-            <ErrorState error={membersQ.error} />
+            <ErrorState error={membersQ.error} onRetry={() => void membersQ.refetch()} />
           ) : (
             <Select
               value={memberId}
@@ -126,11 +126,28 @@ export function BodyPhotos() {
         <Card className="mt-3 border-danger/30 bg-danger/[0.06]">
           <CardContent className="flex items-start gap-2 pt-3.5 text-[12.5px] text-danger">
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>
-              {member.consent.sensitive && member.consent.revoked_at
-                ? "민감정보(체형사진 등) 처리 동의가 철회돼 촬영·조회가 잠겨 있습니다. 회원 관리에서 동의 상태를 먼저 확인하세요."
-                : "민감정보(체형사진 등) 처리 동의가 없어 촬영·조회가 잠겨 있습니다. 회원 관리에서 동의 상태를 먼저 확인하세요."}
-            </span>
+            {/* **철회는 센터가 풀 수 없다.** 종전 문구는 두 경우 모두 "회원 관리에서 동의
+                상태를 먼저 확인하세요"라며 대표를 회원 관리로 보냈는데, 그 화면은 초록 체크
+                (동의됨)를 보여주고 수정 폼의 체크박스도 이미 켜져 있으며 저장해도 철회 기록은
+                그대로 남는다 — 시킨 대로 갔다가 아무것도 못 바꾸고 같은 잠금으로 돌아오는
+                닫힌 고리였다. 풀 수 있는 사람은 회원 본인뿐이라는 사실을 여기서 말한다.
+                판정을 sensitive가 아니라 **revoked_at 하나로** 가르는 이유: 철회하면서 동의
+                플래그까지 꺼진 응답(sensitive=false + revoked_at 있음)도 같은 고리에 빠지는데,
+                종전 조건(sensitive && revoked_at)은 그 경우를 "동의 없음"으로 보내 "체크하면
+                열린다"는 거짓 안내를 했다. */}
+            {member.consent.revoked_at ? (
+              <span>
+                회원이 민감정보(체형사진 등) 처리 동의를 철회해{" "}
+                {member.consent.revoked_at.slice(0, 10)}부터 촬영과 사진 열람이 잠겨 있어요.{" "}
+                <b>회원이 앱 마이 탭의 "민감정보(인바디·체형사진) 동의"에서 다시 동의하면 바로 열려요 — 센터에서는 풀 수 없어요.</b> 이미 찍어
+                둔 사진은 지워지지 않고 그대로 보관돼요.
+              </span>
+            ) : (
+              <span>
+                민감정보(체형사진 등) 처리 동의를 아직 받지 않아 촬영과 사진 열람이 잠겨 있어요.
+                회원에게 동의를 받으셨다면 <b>회원 관리 → 수정</b>에서 동의 항목을 체크해주세요.
+              </span>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -160,7 +177,7 @@ export function BodyPhotos() {
               {photosQ.isLoading ? (
                 <Spinner />
               ) : photosQ.isError ? (
-                <ErrorState error={photosQ.error} />
+                <ErrorState error={photosQ.error} onRetry={() => void photosQ.refetch()} />
               ) : !posePhotos.length ? (
                 <EmptyState>이 포즈로 촬영된 사진이 없습니다.</EmptyState>
               ) : (
@@ -201,7 +218,7 @@ export function BodyPhotos() {
                 {inbodyQ.isLoading ? (
                   <Spinner />
                 ) : inbodyQ.isError ? (
-                  <ErrorState error={inbodyQ.error} />
+                  <ErrorState error={inbodyQ.error} onRetry={() => void inbodyQ.refetch()} />
                 ) : !inbodyQ.data?.length ? (
                   <EmptyState>인바디 기록이 없습니다.</EmptyState>
                 ) : (
@@ -387,7 +404,7 @@ function InbodyForm({ memberId }: { memberId: string }) {
       )}
       {!allFilled && (
         <p className="mt-1.5 text-[10.5px] text-muted">
-          6개 지표를 모두 입력해야 저장할 수 있어요 — 빈 칸(0)은 서버가 거부해요.
+          6개 지표를 모두 입력해야 저장할 수 있어요 — 빈 칸은 0으로 기록돼 저장되지 않아요.
         </p>
       )}
       <Button size="sm" className="mt-2" onClick={submit} disabled={createInbody.isPending || !canSubmit}>

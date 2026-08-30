@@ -22,7 +22,12 @@ import (
 // 도달하지 못한 사고가 있었다(P34/P35). 캐시하고 싶은 극소수 경로(PublicBusiness)만 writeJSON
 // **호출 전에** 자기 값을 세팅해 이 기본값을 비켜간다.
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	if w.Header().Get("Cache-Control") == "" {
+	// 4xx·5xx는 기존 값이 있어도 **덮어써서** no-store로 만든다. 어떤 핸들러가 캐시 헤더를
+	// 먼저 세운 뒤 에러로 빠지면 그 헤더가 그대로 남아 에러 응답이 캐시 가능해진다 —
+	// 캐시된 에러가 복구를 무효화한 것이 P34 사고의 본체였다.
+	if status >= 400 {
+		w.Header().Set("Cache-Control", "no-store")
+	} else if w.Header().Get("Cache-Control") == "" {
 		w.Header().Set("Cache-Control", "no-store")
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -77,6 +82,10 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		errors.Is(err, domain.ErrTrainerBusy),
 		errors.Is(err, ErrConflict):
 		writeJSON(w, http.StatusConflict, errBody{Error: userMessage(err)})
+	case errors.Is(err, ErrUploadUnavailable):
+		// 503 — 요청은 옳고 **서버가 준비되지 않았다**(v2.25). 400으로 내리면 대표가
+		// 사진을 계속 바꿔 보며 원인을 찾지 못한다. 고칠 사람은 배포 설정을 쥔 쪽이다.
+		writeJSON(w, http.StatusServiceUnavailable, errBody{Error: userMessage(err)})
 	case errors.Is(err, store.ErrStateConflict):
 		writeJSON(w, http.StatusBadRequest, errBody{Error: "이미 처리된 예약이에요(새로고침 후 확인해주세요)"})
 	case errors.Is(err, domain.ErrOutsideCheckinWindow),
@@ -89,8 +98,10 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		errors.Is(err, domain.ErrInvalidContractTransition),
 		errors.Is(err, domain.ErrInvalidPolicy),
 		errors.Is(err, domain.ErrInvalidBusiness),
+		errors.Is(err, domain.ErrInvalidFacility),
 		errors.Is(err, domain.ErrInvalidProfile),
 		errors.Is(err, domain.ErrInvalidStaff),
+		errors.Is(err, domain.ErrInvalidCenter),
 		errors.Is(err, domain.ErrInvalidPassPeriod),
 		errors.Is(err, domain.ErrInvalidHwSchedule),
 		errors.Is(err, domain.ErrInvalidInbody),
@@ -177,9 +188,18 @@ func jsonErrMessage(err error) error {
 const maxBodyBytes = 1 << 20
 
 // decodeJSON — 요청 바디를 엄격 디코딩(알 수 없는 필드 거부 — 계약 필드명 오타를 조기에 드러낸다).
-func decodeJSON(r *http.Request, v any) error {
-	defer r.Body.Close()
-	r.Body = http.MaxBytesReader(nil, r.Body, maxBodyBytes)
+//
+// w를 받는 이유(보안): MaxBytesReader는 상한 초과 시 w를 통해 "이 커넥션은 재사용하지 말라"고
+// 서버에 알린다(Connection: close). nil을 넘기면 그 신호가 사라지고, 서버는 소켓에 남은
+// 미소비 바디를 그대로 둔 채 keep-alive를 재사용한다 — 남은 바이트가 **다음 요청으로 파싱되는**
+// 요청 스머글링/응답 desync 경로가 열린다(Cloud Run GFE처럼 백엔드 커넥션을 풀링하는 프론트
+// 뒤에서 특히 위험하다).
+//
+// r.Body를 Close하지 않는 이유: 핸들러가 바디를 닫으면 net/http의 미소비 바디 감지·드레인
+// 로직이 무력화된다(닫힌 바디 읽기를 "이미 소비됨"으로 오인한다). 바디는 서버가 닫는다 —
+// net/http 문서가 명시하는 계약이다.
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {

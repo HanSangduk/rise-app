@@ -187,7 +187,7 @@ export function Homework() {
                 전체"를 누르면 대상이 0명으로 보여 배정을 포기하게 된다(Members.tsx 패턴 재사용). */}
             {membersQ.isError && (
               <div className="mb-2">
-                <ErrorState error={membersQ.error} />
+                <ErrorState error={membersQ.error} onRetry={() => void membersQ.refetch()} />
               </div>
             )}
             <div className="mb-1 text-[11.5px] text-muted">배정 대상</div>
@@ -296,7 +296,7 @@ export function Homework() {
             {homeworksQ.isLoading ? (
               <Spinner />
             ) : homeworksQ.isError ? (
-              <ErrorState error={homeworksQ.error} />
+              <ErrorState error={homeworksQ.error} onRetry={() => void homeworksQ.refetch()} />
             ) : !homeworksQ.data?.length ? (
               <EmptyState>배정된 Home Work가 없습니다.</EmptyState>
             ) : (

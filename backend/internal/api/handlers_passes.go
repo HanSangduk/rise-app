@@ -10,7 +10,7 @@ import (
 func (h *Handlers) CreatePass(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var req PassCreateRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -27,7 +27,7 @@ func (h *Handlers) HoldPass(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	id := chi.URLParam(r, "id")
 	var req HoldRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -58,7 +58,7 @@ func (h *Handlers) RefundQuote(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Used int `json:"used"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -77,7 +77,7 @@ func (h *Handlers) RefundPass(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Used int `json:"used"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}

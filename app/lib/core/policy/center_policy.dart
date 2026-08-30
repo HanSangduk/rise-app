@@ -11,6 +11,8 @@ class CenterPolicy {
     required this.expiringDays,
     required this.maxHoldsPerPass,
     required this.maxHoldTotalDays,
+    this.openHour = defaultOpenHour,
+    this.closeHour = defaultCloseHour,
     this.isFallback = false,
   });
 
@@ -54,6 +56,44 @@ class CenterPolicy {
   /// 패스당 홀딩 총 일수 상한. -1 = 무제한.
   final int maxHoldTotalDays;
 
+  /// 센터 운영시간 — **슬롯 시작 시각, 양끝 포함**([openHour]..[closeHour]).
+  ///
+  /// 9·21이면 09시 시작부터 21시 시작까지 13칸이고 **마지막 수업은 21:00 시작**이다
+  /// (21시에 문을 닫는다는 뜻이 아니다). 백엔드 `policy.open_hour`/`close_hour`와
+  /// 같은 의미이고, 어드민 Schedule의 시간축도 같은 규약을 쓴다.
+  ///
+  /// 예전엔 이 두 값이 `BookingRules`의 상수(9·21)로 박혀 있었다 — 06시에 열거나
+  /// 23시에 닫는 센터는 그 시간대를 앱에서 표현할 방법이 없어, 실제로 영업 중인
+  /// 시간대를 회원이 예약할 수 없었다.
+  final int openHour;
+  final int closeHour;
+
+  /// 운영시간 기본값 — 서버가 두 필드를 주지 않는 구버전이면 이 값으로 동작한다.
+  /// **이 숫자가 곧 "필드가 생기기 전 앱"의 동작이다**(09~21시 13칸) — 바꾸면
+  /// 구버전 서버에 붙은 모든 회원의 예약 화면이 조용히 달라진다.
+  static const defaultOpenHour = 9;
+  static const defaultCloseHour = 21;
+
+  /// 와이어 값(널 가능) → 실제로 쓸 운영시간. **정책을 읽는 경계에서만 부른다**
+  /// (`center_policy_provider`) — 규칙·화면은 이미 정해진 [openHour]/[closeHour]를 받는다.
+  ///
+  /// 두 값을 **함께** 판정하는 이유: 하나만 유효한 조합은 뜻이 없다. `open=22,
+  /// close=6`을 그대로 통과시키면 합성 루프가 한 칸도 돌지 않아 그날 예약 화면이
+  /// 통째로 "열린 슬롯이 없어요"가 되고, `close=99`는 없는 영업시간 78칸을 만들어낸다.
+  /// 말이 안 되는 값은 [CenterPolicy.fallback]과 같은 태도로 처리한다 — 모르면
+  /// 기본값(오늘 동작)으로 돌아가되, 서버가 실제로 준 슬롯은 운영시간 밖이어도
+  /// 병합에서 그대로 살아남으므로(`BookingRules.mergeWithOpenHours`) 진짜 예약이
+  /// 사라지는 경우는 없다.
+  ///
+  /// 한쪽만 오는 경우(예: open만 6)는 섞어 쓴다 — 계약상 둘은 함께 추가되지만,
+  /// 한쪽이 빠졌다고 다른 쪽의 명시적 값까지 버리면 서버가 말한 사실을 무시하는 셈이다.
+  static (int, int) resolveHours(int? open, int? close) {
+    final o = open ?? defaultOpenHour;
+    final c = close ?? defaultCloseHour;
+    if (o < 0 || c > 23 || o > c) return (defaultOpenHour, defaultCloseHour);
+    return (o, c);
+  }
+
   /// 정책 미로드/조회 실패 시 기본값 — 백엔드 DefaultPolicy와 동일(24h/유예/10%/2회/30일).
   static const fallback = CenterPolicy(
     isFallback: true,
@@ -64,6 +104,8 @@ class CenterPolicy {
     expiringDays: 7,
     maxHoldsPerPass: 2,
     maxHoldTotalDays: 30,
+    openHour: defaultOpenHour,
+    closeHour: defaultCloseHour,
   );
 
   /// 홀딩 상한 표시 라벨 — "최대 2회/30일" 형태, 무제한은 "제한 없음"으로.

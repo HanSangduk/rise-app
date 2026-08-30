@@ -12,6 +12,7 @@ import 'package:rise_member/core/theme/app_typography.dart';
 import 'package:rise_member/core/utils/coach_label.dart';
 import 'package:rise_member/core/utils/date_format.dart';
 import 'package:rise_member/core/widgets/empty_passes_view.dart';
+import 'package:rise_member/features/consult/presentation/widgets/consult_request_cta.dart';
 import 'package:rise_member/core/widgets/rise_badge.dart';
 import 'package:rise_member/core/widgets/rise_card.dart';
 import 'package:rise_member/core/widgets/rise_error_view.dart';
@@ -86,6 +87,8 @@ class HomeScreen extends ConsumerWidget {
                       // 회원이 아는 사실("나 회원권 있었는데")과 화면이 말하는 것을
                       // 잇는다 — 이유를 말하지 않으면 앱이 고장 난 것으로 읽힌다.
                       message: '만료·환불된 회원권만 남아 있어요\n센터에서 재등록하면 다시 이용할 수 있어요',
+                      // 재등록 요청(v2.20) — 이 문구가 데드엔드였던 시절의 끝.
+                      action: const ConsultRequestCta(),
                       onRefresh: () {
                         ref.invalidate(centerPolicyProvider);
                         ref.invalidate(staffMapProvider);
@@ -228,13 +231,17 @@ class HomeScreen extends ConsumerWidget {
                                                 // 문제가 둘: ① 늘 노란 경고라 정작
                                                 // D-3에 아무 신호도 못 된다 ② "연장
                                                 // 상담 가능"은 회원이 앱에서 갈 경로가
-                                                // 없는 약속이다(재등록·상담 요청
-                                                // 엔드포인트가 서버에 없고
-                                                // `POST /v1/passes`는 회원 403).
+                                                // 없는 약속이었다. v2.20에서 그 경로
+                                                // (재등록 요청)가 생겨, 경고가 뜰 때만
+                                                // 옆에 손잡이를 함께 세운다 — 배지는
+                                                // 여전히 사실만 말하고, 행동은 CTA가
+                                                // 맡는다(상태/행동 분리).
                                                 if (_passAlert(summary.selectedPass, policy)
-                                                    case final alert?)
+                                                    case final alert?) ...[
                                                   RiseBadge(alert,
                                                       variant: RiseBadgeVariant.warn),
+                                                  const ConsultRequestCta(compact: true),
+                                                ],
                                               ],
                                             ),
                                           ],

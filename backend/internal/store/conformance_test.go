@@ -74,6 +74,21 @@ func runStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 	t.Run("BusinessAndPolicyDoNotClobberEachOther", func(t *testing.T) {
 		testBusinessPolicyCoexist(t, newStore(t))
 	})
+	t.Run("FacilityRoundTripAndCoexist", func(t *testing.T) {
+		testFacilityCoexist(t, newStore(t))
+	})
+	t.Run("PolicyHoursPromotedOnRead", func(t *testing.T) {
+		testPolicyHoursPromotion(t, newStore(t))
+	})
+	t.Run("CheckinQRRoundTripAndCoexist", func(t *testing.T) {
+		testCheckinQRCoexist(t, newStore(t))
+	})
+	t.Run("CenterIdentityRoundTripAndCoexist", func(t *testing.T) {
+		testCenterIdentity(t, newStore(t))
+	})
+	t.Run("ConsultRequestQueueOrderAndScope", func(t *testing.T) {
+		testConsultRequests(t, newStore(t))
+	})
 	t.Run("ConcurrentRefundOnlyOneWins", func(t *testing.T) {
 		testConcurrentRefund(t, newStore(t))
 	})
@@ -920,6 +935,10 @@ func testContractTransitionFresh(t *testing.T, st Store) {
 		c.Status = domain.ContractStatusSigned
 		c.SignedAt = &now
 		c.SignerIP = "9.9.9.9"
+		// v2.21(P44) 스팟체크: 자필 서명 2필드도 통문서 Set 왕복에서 무손실이어야 한다
+		// (omitempty 금지 규약이 지키는 것 — 전이 재적용이 자리를 잃지 않는다).
+		c.SignaturePNG = "aWNvbg=="
+		c.SignatureSHA256 = "3333333333333333333333333333333333333333333333333333333333333333"
 		return nil
 	})
 	if err != nil {
@@ -931,6 +950,9 @@ func testContractTransitionFresh(t *testing.T, st Store) {
 	if updated.Status != domain.ContractStatusSigned {
 		t.Errorf("반환 계약 = %s, want signed", updated.Status)
 	}
+	if updated.SignaturePNG != "aWNvbg==" || updated.SignatureSHA256 == "" {
+		t.Errorf("서명 2필드 왕복 실패: png=%q hash=%q (v2.21)", updated.SignaturePNG, updated.SignatureSHA256)
+	}
 
 	// ② 두 번째 호출은 **직전 커밋**(signed)을 봐야 하고, 에러 반환 시 아무것도 반영되지 않는다.
 	boom := errors.New("전이 거부")
@@ -940,6 +962,7 @@ func testContractTransitionFresh(t *testing.T, st Store) {
 		}
 		c.Status = domain.ContractStatusVoided // 여기까지 바꿔 놓고 실패한다
 		c.SignerIP = ""
+		c.SignaturePNG = "" // 서명 이미지 증적도 롤백 보호 대상(v2.21)
 		return boom
 	})
 	if !errors.Is(err, boom) {
@@ -952,6 +975,9 @@ func testContractTransitionFresh(t *testing.T, st Store) {
 	if saved.Status != domain.ContractStatusSigned || saved.SignedAt == nil || saved.SignerIP != "9.9.9.9" {
 		t.Errorf("롤백 후 저장본 = %s(signed_at=%v, ip=%q) — 실패한 전이가 증적을 건드렸다",
 			saved.Status, saved.SignedAt, saved.SignerIP)
+	}
+	if saved.SignaturePNG != "aWNvbg==" {
+		t.Errorf("롤백 후 서명 이미지 = %q, want 유지 — 실패한 전이가 서명 증적을 지웠다(v2.21)", saved.SignaturePNG)
 	}
 
 	// ③ 패스 문서가 없는 계약(레거시)은 pass=nil — 판정은 계약만으로 진행돼야 한다.
@@ -1109,8 +1135,11 @@ func testPassCloseWithContracts(t *testing.T, st Store) {
 	}
 
 	// ① 정상 마감: 미서명 2건 voided · signed 보존 · 패스 refunded · 원장 마감 — 전부 한 번에.
+	// sentID를 일부러 두 번 지목한다(P40 — P37 리뷰 권고): 중복 지목은 에러 없이 1회로 접혀야
+	// 한다. Firestore가 같은 문서를 한 트랜잭션에서 두 번 쓰지 않게 하는 dedup 가드의 규약이다
+	// (Memory는 맵 커밋이라 자연 흡수 — 두 구현이 같은 답을 내는지가 이 스위트의 존재 이유).
 	updated, err := st.UpdatePassWithLedgerAndContracts(ctx, center, pass.ID, closeMutate,
-		[]string{sentID, signedID, draftID}, voidSweep)
+		[]string{sentID, signedID, draftID, sentID}, voidSweep)
 	if err != nil {
 		t.Fatalf("마감: %v", err)
 	}
@@ -1222,6 +1251,235 @@ func seedConformancePass(t *testing.T, st Store, center string, sessions int) *d
 //
 // 미등록 조회가 **문서를 만들지 않는다**는 규약도 함께 고정한다 — 이 값을 읽는 경로에
 // 무인증 공개 엔드포인트가 있어서, 읽기가 쓰기를 유발하면 익명 요청으로 문서를 양산할 수 있다.
+// testCenterIdentity — 센터 신원(멀티센터 Phase A): 미등록 빈 값 · 라운드트립 · 같은 문서에
+// 동거하는 Policy/Business와의 3자 비덮어쓰기 · 유령 문서(정책만 시딩) 목록 제외.
+func testCenterIdentity(t *testing.T, st Store) {
+	ctx := context.Background()
+	center := conformanceCenter(t)
+
+	// ① 미등록 조회: 빈 값(ID만) + ErrNotFound 아님 + 문서 생성 없음.
+	empty, err := st.GetCenter(ctx, center)
+	if err != nil {
+		t.Fatalf("미등록 GetCenter: %v — 미등록은 오류가 아니다", err)
+	}
+	if empty.Name != "" || empty.ID != center {
+		t.Fatalf("미등록 GetCenter = %+v, want 빈 값(ID=%s)", empty, center)
+	}
+
+	// ② 정책만 지연 시딩된 유령 센터는 목록에 오르지 않는다(헬스체크·GetPolicy 산물).
+	if _, err := st.GetPolicy(ctx, center); err != nil {
+		t.Fatal(err)
+	}
+	list, err := st.ListCenters(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range list {
+		if c.ID == center {
+			t.Fatalf("정책만 있는 유령 센터가 목록에 올랐다: %+v", c)
+		}
+	}
+
+	// ③ 라운드트립 + 목록 포함.
+	saved := &domain.Center{ID: center, Name: "테스트 2호점", Phone: "02-000-0000",
+		Address: "서울", Status: domain.CenterStatusActive, CreatedAt: time.Now().UTC()}
+	if err := st.SaveCenter(ctx, saved); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetCenter(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "테스트 2호점" || got.ID != center {
+		t.Fatalf("GetCenter = %+v, want 저장값", got)
+	}
+	list, err = st.ListCenters(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range list {
+		if c.ID == center && c.Name == "테스트 2호점" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("ListCenters에 저장한 센터가 없다: %+v", list)
+	}
+
+	// ④ 3자 비덮어쓰기 — Center·Policy·Business가 같은 문서에 동거한다.
+	pol := domain.DefaultPolicy()
+	pol.SlotCapacity = 5
+	if err := st.SavePolicy(ctx, center, &pol); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveBusiness(ctx, center, &domain.Business{BizName: "테스트상호"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = st.GetCenter(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "테스트 2호점" {
+		t.Fatalf("정책·사업자 저장 후 센터 신원 = %+v — 같은 문서의 다른 필드가 지워졌다", got)
+	}
+	// 반대 방향 — 센터 신원 재저장이 정책·사업자 정보를 지우면 안 된다.
+	saved.Phone = "02-111-1111"
+	if err := st.SaveCenter(ctx, saved); err != nil {
+		t.Fatal(err)
+	}
+	polGot, err := st.GetPolicy(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if polGot.SlotCapacity != 5 {
+		t.Fatalf("센터 신원 저장 후 정책 = %+v — SaveCenter가 정책을 지웠다", polGot)
+	}
+	bizGot, err := st.GetBusiness(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bizGot.BizName != "테스트상호" {
+		t.Fatalf("센터 신원 저장 후 사업자 정보 = %+v — SaveCenter가 business를 지웠다", bizGot)
+	}
+}
+
+// testConsultRequests — 재등록/상담 요청(v2.20): 라운드트립 · 큐 정렬(오래된 순 → ID) ·
+// 회원 필터 · 없는 ID 갱신 404.
+func testConsultRequests(t *testing.T, st Store) {
+	ctx := context.Background()
+	center := conformanceCenter(t)
+
+	base := time.Date(2026, 8, 29, 10, 0, 0, 0, time.UTC)
+	ids := make([]string, 3)
+	for i, cr := range []ConsultRequest{
+		{MemberID: "m1", Kind: ConsultKindRenewal, CreatedAt: base.Add(2 * time.Hour)},
+		{MemberID: "m2", Kind: ConsultKindConsult, Note: "가격 문의", CreatedAt: base},
+		{MemberID: "m1", Kind: ConsultKindRenewal, CreatedAt: base.Add(time.Hour)},
+	} {
+		c := cr
+		id, err := st.CreateConsultRequest(ctx, center, &c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Status != ConsultPending {
+			t.Fatalf("기본 status = %q, want pending", c.Status)
+		}
+		ids[i] = id
+	}
+
+	// 큐 정렬 — 오래 기다린 요청이 위로.
+	all, err := st.ListConsultRequests(ctx, center, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 || all[0].ID != ids[1] || all[1].ID != ids[2] || all[2].ID != ids[0] {
+		t.Fatalf("정렬 = %+v, want 오래된 순(%s,%s,%s)", all, ids[1], ids[2], ids[0])
+	}
+
+	// 회원 필터.
+	mine, err := st.ListConsultRequests(ctx, center, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mine) != 2 {
+		t.Fatalf("m1 필터 = %d건, want 2", len(mine))
+	}
+
+	// 라운드트립 + done 갱신.
+	got, err := st.GetConsultRequest(ctx, center, ids[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Note != "가격 문의" || got.Kind != ConsultKindConsult {
+		t.Fatalf("GetConsultRequest = %+v", got)
+	}
+	got.Status = ConsultDone
+	if err := st.UpdateConsultRequest(ctx, center, got); err != nil {
+		t.Fatal(err)
+	}
+	after, err := st.GetConsultRequest(ctx, center, ids[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != ConsultDone {
+		t.Fatalf("done 갱신 후 = %+v", after)
+	}
+
+	// 없는 ID 갱신은 404 — 유령을 만들지 않는다.
+	if err := st.UpdateConsultRequest(ctx, center, &ConsultRequest{ID: "creq_missing"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("없는 ID 갱신 = %v, want ErrNotFound", err)
+	}
+}
+
+// 운영시간 승격(v2.24, P51) — **읽기 규약이 두 구현에서 같아야** 한다. 두 구현 모두
+// GetPolicy에서 domain.Policy.Normalize()를 부르지만, 그 호출이 한쪽에서 빠지면 증상이
+// 조용하다: Firestore를 쓰는 운영 센터만 open_hour=0·close_hour=0을 받아 어드민 시간
+// 그리드가 통째로 비고, 로컬(인메모리)에서는 재현되지 않는다.
+//
+// 부재 판정이 **(0,0) 쌍**이라는 것도 여기서 잠근다 — 자정 개점(0,22)이 승격에 먹히면
+// 24시간 헬스장의 여는 시각이 매 읽기마다 9시로 되돌아간다.
+func testPolicyHoursPromotion(t *testing.T, st Store) {
+	ctx := context.Background()
+	center := conformanceCenter(t)
+
+	// ① 지연 시딩(문서 없음) → 기본값 9·21. 종전 하드코딩(09~21)과 같은 값이어야 한다.
+	seeded, err := st.GetPolicy(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seeded.OpenHour != 9 || seeded.CloseHour != 21 {
+		t.Fatalf("최초 GetPolicy 운영시간 = %d~%d, want 9~21 — 기존 동작이 보존되지 않는다",
+			seeded.OpenHour, seeded.CloseHour)
+	}
+
+	// ② v2.24 이전 문서(필드 부재 = 제로값) → 읽을 때 9·21로 승격. 마이그레이션 없이 동작해야 한다.
+	legacy := domain.DefaultPolicy()
+	legacy.OpenHour, legacy.CloseHour = 0, 0
+	legacy.SlotCapacity = 4
+	if err := st.SavePolicy(ctx, center, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetPolicy(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.OpenHour != 9 || got.CloseHour != 21 {
+		t.Fatalf("구문서 운영시간 = %d~%d, want 9~21", got.OpenHour, got.CloseHour)
+	}
+	if got.SlotCapacity != 4 {
+		t.Fatalf("승격이 이웃 필드를 건드렸다: %+v", got)
+	}
+
+	// ③ 자정 개점(0시)은 살아남는다 — 0을 **필드 단위** 부재로 읽었다면 여기서 9로 되돌아간다.
+	midnight := domain.DefaultPolicy()
+	midnight.OpenHour, midnight.CloseHour = 0, 22
+	if err := st.SavePolicy(ctx, center, &midnight); err != nil {
+		t.Fatal(err)
+	}
+	got, err = st.GetPolicy(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.OpenHour != 0 || got.CloseHour != 22 {
+		t.Fatalf("자정 개점 왕복 = %d~%d, want 0~22 — 0시를 부재로 오독했다", got.OpenHour, got.CloseHour)
+	}
+
+	// ④ 일반 왕복 — 대표가 바꾼 값이 그대로 돌아온다.
+	early := domain.DefaultPolicy()
+	early.OpenHour, early.CloseHour = 6, 23
+	if err := st.SavePolicy(ctx, center, &early); err != nil {
+		t.Fatal(err)
+	}
+	got, err = st.GetPolicy(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.OpenHour != 6 || got.CloseHour != 23 {
+		t.Fatalf("왕복 = %d~%d, want 6~23", got.OpenHour, got.CloseHour)
+	}
+}
+
 func testBusinessPolicyCoexist(t *testing.T, st Store) {
 	ctx := context.Background()
 	center := conformanceCenter(t)
@@ -1279,6 +1537,217 @@ func testBusinessPolicyCoexist(t *testing.T, st Store) {
 	got, _ = st.GetBusiness(ctx, center)
 	if got.CeoName != "" || got.Email != "" {
 		t.Fatalf("빈 칸 저장이 반영되지 않았다: %+v — 잘못 적은 칸을 지울 방법이 없어진다", got)
+	}
+}
+
+// 시설 신고 상태(P42) — centers 문서의 `facility` 절. testBusinessPolicyCoexist와 같은 형태:
+// 미선언 기본값 / 왕복 / **동거 절 비덮어쓰기**(Policy·Business가 facility 저장에 살아남고,
+// 그 반대도 성립) / 절 단위 통 교체(비워서 지우기).
+func testFacilityCoexist(t *testing.T, st Store) {
+	ctx := context.Background()
+	center := conformanceCenter(t)
+
+	// ① 미선언 조회: unknown 기본값 + ErrNotFound 아님 + 문서 생성 없음(읽기 규약).
+	empty, err := st.GetFacility(ctx, center)
+	if err != nil {
+		t.Fatalf("미선언 GetFacility: %v — 미선언은 오류가 아니다", err)
+	}
+	if empty.ReportStatus != domain.FacilityStatusUnknown || empty.ReportNo != "" || empty.Insurance != "" {
+		t.Fatalf("미선언 GetFacility = %+v, want {unknown,\"\",\"\"}", empty)
+	}
+	if centers, err := st.ListCenters(ctx); err == nil {
+		for _, c := range centers {
+			if c.ID == center {
+				t.Fatal("GetFacility가 센터 문서를 만들었다 — 읽기가 상태를 만들면 안 된다")
+			}
+		}
+	}
+
+	// ② 왕복 + 이웃 절 선등록.
+	pol := domain.DefaultPolicy()
+	pol.SlotCapacity = 4
+	if err := st.SavePolicy(ctx, center, &pol); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveBusiness(ctx, center, &domain.Business{BizName: "라이즈 컨디셔닝"}); err != nil {
+		t.Fatal(err)
+	}
+	fac := &domain.Facility{
+		ReportStatus: domain.FacilityStatusReported,
+		ReportNo:     "제2026-강남-0001호",
+		Insurance:    "서울보증 인허가보증보험(계약이행), 보장한도 1억원",
+	}
+	if err := st.SaveFacility(ctx, center, fac); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetFacility(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReportStatus != domain.FacilityStatusReported || got.ReportNo != fac.ReportNo || got.Insurance != fac.Insurance {
+		t.Fatalf("왕복 = %+v, want %+v", got, fac)
+	}
+
+	// ③ facility 저장이 동거 절(Policy·Business)을 지우면 안 된다 — P27 SavePolicy 교훈의
+	// 세 번째 절 회귀. 통 Set이었다면 여기서 SlotCapacity=4·상호가 사라진다.
+	gotPol, err := st.GetPolicy(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPol.SlotCapacity != 4 {
+		t.Fatalf("facility 저장 후 정책 = %+v, want slot_capacity=4 — 머지 쓰기가 아니다", gotPol)
+	}
+	gotBiz, err := st.GetBusiness(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotBiz.BizName != "라이즈 컨디셔닝" {
+		t.Fatalf("facility 저장 후 사업자 정보 = %+v — 같은 문서의 다른 절이 지워졌다", gotBiz)
+	}
+
+	// ④ 반대 방향 — 정책·사업자 저장이 facility를 지우면 안 된다.
+	pol.SlotCapacity = 5
+	if err := st.SavePolicy(ctx, center, &pol); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveBusiness(ctx, center, &domain.Business{BizName: "라이즈 컨디셔닝", CeoName: "김대표"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = st.GetFacility(ctx, center)
+	if got.ReportStatus != domain.FacilityStatusReported || got.ReportNo == "" {
+		t.Fatalf("정책·사업자 저장 후 facility = %+v — 신고 선언이 지워지면 스탬프가 조용히 꺼진다", got)
+	}
+
+	// ⑤ 절 단위 통 교체: exempt로 되돌리며 번호·보험을 비운 재제출이 그대로 반영돼야 한다
+	// (toDoc이 빈 칸도 키로 포함 — 머지여도 절 안에서는 교체. 잘못 적은 선언을 지울 유일한 수단).
+	if err := st.SaveFacility(ctx, center, &domain.Facility{ReportStatus: domain.FacilityStatusExempt}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = st.GetFacility(ctx, center)
+	if got.ReportStatus != domain.FacilityStatusExempt || got.ReportNo != "" || got.Insurance != "" {
+		t.Fatalf("절 교체 = %+v, want {exempt,\"\",\"\"} — 이전 신고번호가 유령으로 남았다", got)
+	}
+}
+
+// 데스크 체크인 QR 토큰(P49) — centers 문서의 `checkin_qr` 절. testFacilityCoexist와 같은
+// 형태: 미발급 기본값 / 왕복 / **동거 절 비덮어쓰기** / 절 단위 통 교체(재발급).
+//
+// 이 절만 다른 점 하나: 여기 저장된 값은 **센터 비밀**이라, 두 구현이 어긋나면 증상이
+// "체크인이 안 돼요"가 아니라 "Firestore에서만 옛 토큰이 계속 통한다"로 나타날 수 있다 —
+// 재발급이 무효화에 실패하는 방향의 드리프트는 화면에 보이지 않는다.
+func testCheckinQRCoexist(t *testing.T, st Store) {
+	ctx := context.Background()
+	center := conformanceCenter(t)
+
+	// ① 미발급 조회: 빈 값 + ErrNotFound 아님 + **문서 생성 없음**.
+	// 읽기가 문서를 만들면 회원의 체크인 시도가 곧 발급이 된다(인쇄하지 않은 QR이 유효해진다).
+	empty, err := st.GetCheckinQR(ctx, center)
+	if err != nil {
+		t.Fatalf("미발급 GetCheckinQR: %v — 미발급은 오류가 아니다", err)
+	}
+	if empty.Issued() || empty.Token != "" || empty.IssuedAt != nil {
+		t.Fatalf("미발급 GetCheckinQR = %+v, want {\"\",nil}", empty)
+	}
+	if centers, err := st.ListCenters(ctx); err == nil {
+		for _, c := range centers {
+			if c.ID == center {
+				t.Fatal("GetCheckinQR가 센터 문서를 만들었다 — 읽기가 상태를 만들면 안 된다")
+			}
+		}
+	}
+
+	// ② 왕복 + 이웃 절 선등록.
+	pol := domain.DefaultPolicy()
+	pol.SlotCapacity = 4
+	if err := st.SavePolicy(ctx, center, &pol); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveBusiness(ctx, center, &domain.Business{BizName: "라이즈 컨디셔닝"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveFacility(ctx, center, &domain.Facility{
+		ReportStatus: domain.FacilityStatusReported, ReportNo: "제2026-강남-0001호",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := domain.NewCheckinQRToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuedAt := time.Now().UTC().Truncate(time.Second) // Firestore 타임스탬프 해상도에 맞춘 비교 기준
+	if err := st.SaveCheckinQR(ctx, center, &domain.CheckinQR{Token: first, IssuedAt: &issuedAt}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetCheckinQR(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Token != first {
+		t.Fatalf("왕복 토큰 = %q, want %q", got.Token, first)
+	}
+	if got.IssuedAt == nil || !got.IssuedAt.Equal(issuedAt) {
+		t.Fatalf("왕복 issued_at = %v, want %v — 어드민이 발급 시각을 못 읽는다", got.IssuedAt, issuedAt)
+	}
+
+	// ③ 토큰 저장이 동거 절(Policy·Business·Facility)을 지우면 안 된다 — P27 교훈의 네 번째 절.
+	gotPol, err := st.GetPolicy(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPol.SlotCapacity != 4 {
+		t.Fatalf("토큰 저장 후 정책 = %+v, want slot_capacity=4 — 머지 쓰기가 아니다", gotPol)
+	}
+	gotBiz, err := st.GetBusiness(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotBiz.BizName != "라이즈 컨디셔닝" {
+		t.Fatalf("토큰 저장 후 사업자 정보 = %+v — 같은 문서의 다른 절이 지워졌다", gotBiz)
+	}
+	gotFac, err := st.GetFacility(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotFac.ReportStatus != domain.FacilityStatusReported {
+		t.Fatalf("토큰 저장 후 facility = %+v — 신고 선언이 지워졌다", gotFac)
+	}
+
+	// ④ 반대 방향 — 이웃 절 저장이 토큰을 지우면 데스크 QR이 조용히 죽는다(증상은 "체크인이
+	// 안 돼요"뿐이라 원인에 도달하지 못한다).
+	pol.SlotCapacity = 5
+	if err := st.SavePolicy(ctx, center, &pol); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveBusiness(ctx, center, &domain.Business{BizName: "라이즈 컨디셔닝", CeoName: "김대표"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveFacility(ctx, center, &domain.Facility{ReportStatus: domain.FacilityStatusExempt}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = st.GetCheckinQR(ctx, center)
+	if got.Token != first {
+		t.Fatalf("이웃 절 저장 후 토큰 = %q, want %q — 데스크 QR이 지워졌다", got.Token, first)
+	}
+
+	// ⑤ 절 단위 통 교체(재발급): 이전 토큰이 유령으로 남으면 옛 인쇄물이 계속 통과해
+	// "재발급하면 무효"라는 약속이 두 구현 중 한쪽에서만 거짓이 된다.
+	second, err := domain.NewCheckinQRToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second == first {
+		t.Fatal("난수 토큰이 중복 — 난수원이 죽었다")
+	}
+	rotatedAt := issuedAt.Add(time.Hour)
+	if err := st.SaveCheckinQR(ctx, center, &domain.CheckinQR{Token: second, IssuedAt: &rotatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = st.GetCheckinQR(ctx, center)
+	if got.Token != second {
+		t.Fatalf("재발급 후 = %q, want %q — 이전 토큰이 남았다", got.Token, second)
+	}
+	if got.IssuedAt == nil || !got.IssuedAt.Equal(rotatedAt) {
+		t.Fatalf("재발급 issued_at = %v, want %v", got.IssuedAt, rotatedAt)
 	}
 }
 

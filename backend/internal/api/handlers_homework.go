@@ -18,7 +18,7 @@ func (h *Handlers) ListHomeworks(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) CreateHomework(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var req HomeworkCreateRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -34,7 +34,7 @@ func (h *Handlers) CreateHomework(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) CreateHwCheck(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var req HwCheckRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}

@@ -127,6 +127,15 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
 
+  # 계약서 템플릿 번들(P39, 계약서doc §D-④). 서버에서 내려받지 않는 이유: 오프라인
+  # 열람(계약서 제18조 제4항 "언제든지")이 돼야 하고, 서버가 템플릿을 바꾸면 과거
+  # 계약의 렌더가 함께 바뀌는 문제로 되돌아간다. 버전 파일은 지우지 않고 쌓는다 —
+  # pt-v2가 생겨도 pt-v1을 남겨야 서명 당시 문서가 재현된다(전자문서법 §5①2).
+  # 이 프로젝트 최초의 assets: 키다. 종전 자산(assets/brand PNG)은 런처 아이콘
+  # 생성 도구의 입력일 뿐이라 런타임 미번들이 맞았고(P32), 여기 등록하지 않는다.
+  assets:
+    - assets/legal/
+
   # Pretendard — 목업이 전제한 본문 서체(P09). 종전엔 ThemeData.fontFamily로 'Pretendard'를
   # 선언만 하고 파일이 없어, 앱의 모든 글자가 iOS는 SF Pro·안드로이드는 Roboto+Noto로
   # 떨어졌다. 10.5·11.5처럼 0.5pt 단위로 맞춘 타입 스케일이 Pretendard의 x-height와 한글

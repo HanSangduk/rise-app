@@ -5,7 +5,12 @@ package store
 // 화면(대시보드 KPI·해야 할 일·미수금·예약 그리드·회원 상세·통계)과 회원 앱 전 탭이 의미 있는
 // 상태로 보이도록 스태프·회원·패스·예약·홈워크·결제(미납 포함)·계약·수업기록을 심는다.
 //
-// 데모 계정: 어드민 X-Dev-Uid owner1(대표)·t1(정혜린)·t2(김태오) / 회원 앱 X-Dev-Uid member1(김민지).
+// 데모 계정: 어드민 X-Dev-Uid owner1(대표)·t1(정혜린)·t2(김태오)·t3(이수민) / 회원 앱 X-Dev-Uid member1(김민지).
+//
+// 프로필 사진(P40): t1·t2·t3는 외부 photo_url을 넣는다 — 회원 앱의 사진 아바타·
+// 프로필 시트·코치 소개 목록이 실사진으로 테스트되는 자리다. owner1은 일부러
+// 비워 둔다(이니셜 폴백 경로도 시드 상태에서 재현). 오프라인 데모에선 이미지
+// 로드가 실패해도 TrainerAvatar가 색 배경+이니셜로 폴백하므로 화면이 깨지지 않는다.
 
 import (
 	"context"
@@ -14,6 +19,14 @@ import (
 
 	"github.com/ramsang/rise-backend/internal/domain"
 )
+
+// DemoCheckinQRToken — 데모·로컬 전용 고정 체크인 토큰(P49). 앱의 `CHECKIN_QR_TOKEN`
+// dart-define 기본값과 **같은 문자열이어야 한다**(app/lib/core/network/api_config.dart) —
+// 카메라 없는 시뮬레이터·CI가 셀프 체크인을 끝까지 돌려보는 유일한 통로다.
+//
+// 공개된 값이지만 위험하지 않다: SeedDemo는 인메모리 스토어에서만 돌고(cmd/server/main.go의
+// `DevSeed && !UseFirestore`), 운영 Firestore에는 발급 API로만 토큰이 들어간다.
+const DemoCheckinQRToken = "rise-desk-checkin"
 
 // SeedDemo — 멱등이 아니다(빈 스토어 전제). main이 인메모리 첫 구동에서만 호출한다.
 func SeedDemo(ctx context.Context, st Store, centerID string) error {
@@ -25,7 +38,7 @@ func SeedDemo(ctx context.Context, st Store, centerID string) error {
 	}
 	at := func(hoursAgo int) time.Time { return now.Add(-time.Duration(hoursAgo) * time.Hour).UTC() }
 
-	// ---- 스태프(대표 1 + 트레이너 2) + 인증 인덱스 ----
+	// ---- 스태프(대표 1 + 트레이너 3) + 인증 인덱스 ----
 	staff := []domain.Staff{
 		{UID: "owner1", Role: domain.RoleOwner, Name: "박관장", Color: "#60a5fa",
 			Payout: domain.Payout{}, Offdays: []string{},
@@ -39,7 +52,8 @@ func SeedDemo(ctx context.Context, st Store, centerID string) error {
 		{UID: "t1", Role: domain.RoleTrainer, Name: "정혜린", Color: "#f43f5e",
 			Payout: domain.Payout{Type: "rate", Value: 0.5}, Offdays: []string{day(6)},
 			Profile: domain.StaffProfile{
-				Title: "퍼포먼스 트레이너", CareerYears: 7,
+				PhotoURL: "https://randomuser.me/api/portraits/women/44.jpg",
+				Title:    "퍼포먼스 트레이너", CareerYears: 7,
 				Specialties:    []string{"여성 근력", "체형 교정", "산전·산후"},
 				Certifications: []string{"NASM-CPT", "NASM-CES(교정운동)"},
 				Awards:         []string{"피트니스 모델 그랑프리 2023 TOP5"},
@@ -48,11 +62,22 @@ func SeedDemo(ctx context.Context, st Store, centerID string) error {
 		{UID: "t2", Role: domain.RoleTrainer, Name: "김태오", Color: "#34d399",
 			Payout: domain.Payout{Type: "per_session", Value: 35000}, Offdays: []string{},
 			Profile: domain.StaffProfile{
-				Title: "컨디셔닝 코치", CareerYears: 5,
+				PhotoURL: "https://randomuser.me/api/portraits/men/32.jpg",
+				Title:    "컨디셔닝 코치", CareerYears: 5,
 				Specialties:    []string{"그룹 컨디셔닝", "체력 강화", "크로스핏 기초"},
 				Certifications: []string{"ACSM-CPT", "CrossFit Level 1"},
 				Awards:         []string{},
 				Bio:            "그룹 수업 전문. 운동이 처음인 분도 5회 안에 기본 패턴을 잡아드립니다.",
+			}},
+		{UID: "t3", Role: domain.RoleTrainer, Name: "이수민", Color: "#a78bfa",
+			Payout: domain.Payout{Type: "rate", Value: 0.45}, Offdays: []string{},
+			Profile: domain.StaffProfile{
+				PhotoURL: "https://randomuser.me/api/portraits/women/68.jpg",
+				Title:    "모빌리티 코치", CareerYears: 4,
+				Specialties:    []string{"모빌리티", "자세 교정", "폼롤러 리커버리"},
+				Certifications: []string{"FRC Mobility Specialist", "생활스포츠지도사 2급"},
+				Awards:         []string{},
+				Bio:            "관절 가동범위가 운동의 시작입니다. 뻣뻣한 몸도 8회 안에 달라지는 걸 느끼게 해드려요.",
 			}},
 	}
 	for i := range staff {
@@ -99,6 +124,45 @@ func SeedDemo(ctx context.Context, st Store, centerID string) error {
 		return err
 	}
 
+	// ---- 사업자·시설 신원(P43) — 계약서 본문·법정 문서 렌더용 데모 값 ----
+	// 전부 **명백한 테스트 값**이다(등록번호 123-45-67890 · .example 도메인 · 신고번호
+	// 제2026-…호). 실제 발행 전 어드민 설정에서 실값으로 교체하는 것이 계약서doc §F
+	// 체크리스트다. 상호·대표자는 시드 페르소나(라이즈 컨디셔닝·박관장)와 일치시켰고,
+	// 12칸을 전부 채워 legal 4문서의 초안 배너가 내려간 상태(IsComplete)까지 시연된다.
+	// Insurance는 일부러 비운다 — {{보증보험 종류·보장내용}}의 "가입하지 않았습니다"
+	// 폴백(제20조③ 자체 설계)이 데모에서 실제로 렌더되는 표본.
+	if err := st.SaveBusiness(ctx, centerID, &domain.Business{
+		BizName: "라이즈 컨디셔닝", CeoName: "박관장", BizRegNo: "123-45-67890",
+		Address: "서울특별시 강남구 테헤란로 1, 2층", Phone: "02-1234-5678", Email: "hello@rize.example",
+		PrivacyOfficerName: "박관장", PrivacyOfficerTitle: "대표", PrivacyOfficerEmail: "hello@rize.example",
+		PrivacyDept: "운영팀", PrivacyManager: "박관장", EffectiveDate: day(0),
+	}); err != nil {
+		return err
+	}
+	if err := st.SaveFacility(ctx, centerID, &domain.Facility{
+		ReportStatus: domain.FacilityStatusReported, ReportNo: "제2026-서울강남-0001호", Insurance: "",
+	}); err != nil {
+		return err
+	}
+
+	// ---- 데스크 체크인 QR 토큰(P49) ----
+	//
+	// 데모·로컬은 **고정 토큰**을 심는다. 실발급(crypto/rand)이면 매 구동마다 값이 달라져
+	// 앱의 dart-define 폴백(`CHECKIN_QR_TOKEN`, 기본값 DemoCheckinQRToken)이 맞을 수가 없고,
+	// 카메라 없는 시뮬레이터·CI에서 셀프 체크인 흐름을 끝까지 돌려볼 통로가 사라진다.
+	//
+	// 이 값이 공개돼 있어도 안전한 이유는 **범위**다: SeedDemo는 `DEV_SEED=true`이고
+	// **인메모리 스토어일 때만** 호출된다(cmd/server/main.go). Firestore 모드에는 절대
+	// 들어가지 않으므로, 실회원이 있는 저장소에서 이 문자열이 통과하는 경우가 없다.
+	// 종전 구조의 위험은 "문자열이 알려졌다"가 아니라 "알려진 문자열이 **실 DB에 붙은 서버**
+	// 에서 통했다"는 것이었고(그래서 기동 검증이 있었다), 그 조합이 여기서는 성립하지 않는다.
+	seededAt := at(24 * 7)
+	if err := st.SaveCheckinQR(ctx, centerID, &domain.CheckinQR{
+		Token: DemoCheckinQRToken, IssuedAt: &seededAt,
+	}); err != nil {
+		return err
+	}
+
 	// ---- 패스 + 원장(issue) ----
 	newPass := func(memberID, trainerID, product string, paid, total int, from, until string) (*domain.Pass, error) {
 		p := &domain.Pass{MemberID: memberID, TrainerID: trainerID, Product: product,
@@ -114,6 +178,16 @@ func SeedDemo(ctx context.Context, st Store, centerID string) error {
 		return p, err
 	}
 	passMinji, err := newPass(minji, "t1", "PT 20회", 1_000_000, 20, day(-30), day(60))
+	if err != nil {
+		return err
+	}
+	// 김민지 두 번째 패스(담당 t3) — 회원 앱의 패스 전환 칩·코치 카드 전환·
+	// "내 회원권 전체" 예약 모드가 코치 2명(사진 있는 t1·t3)으로 테스트되는 자리(P40).
+	// P43: 이 패스에 결제+sent 계약을 붙인다 — 데모 앱 계정(member1)의 유일한 sent 계약
+	// 자리라, main의 데모 재발송이 여기에 Vars를 스탬프해 계약서 본문·끝-스크롤 서명
+	// 게이트를 앱에서 곧장 시연할 수 있다(김민지의 PT 20회 계약은 signed 종단 — 레거시
+	// 요약 열람 분기 시연용으로 그대로 둔다).
+	passMinjiMob, err := newPass(minji, "t3", "모빌리티 8회", 320_000, 8, day(-10), day(80))
 	if err != nil {
 		return err
 	}
@@ -195,7 +269,7 @@ func SeedDemo(ctx context.Context, st Store, centerID string) error {
 			{Name: "스쿼트", Sets: 3, Reps: "15", Note: "무릎 정렬 유지"},
 			{Name: "플랭크", Sets: 3, Reps: "40초", Note: ""},
 		},
-		Schedule: domain.HwSchedule{Type: "weekly", Days: []string{"mon", "wed", "fri"}, From: day(-14), To: day(28)}}
+		Schedule: domain.HwSchedule{Type: "weekly", Days: []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}, From: day(-14), To: day(28)}}
 	hwID, err := st.CreateHomework(ctx, centerID, hw)
 	if err != nil {
 		return err
@@ -221,12 +295,26 @@ func SeedDemo(ctx context.Context, st Store, centerID string) error {
 		Channel: "지인소개"}); err != nil {
 		return err
 	}
+	// P43: 모빌리티 패스 결제 — 완납 1회차 + **미도래** 2회차(연체 아님: 미수금 KPI는 가을의
+	// 250,000원 하나로 유지). {{납부일정}}이 "납부완료"와 "납부예정"을 섞어 렌더되는 표본.
+	if _, err := st.CreatePayment(ctx, centerID, &domain.Payment{
+		MemberID: minji, PassID: passMinjiMob.ID, Method: "card", Total: 320_000,
+		Installments: []domain.Installment{
+			{Due: day(-10), Amount: 200_000, PaidAt: ptrTime(at(24 * 9))},
+			{Due: day(20), Amount: 120_000},
+		},
+		Channel: "재등록"}); err != nil {
+		return err
+	}
 	for _, c := range []domain.Contract{
 		{MemberID: minji, PassID: passMinji.ID, Product: "PT 20회", PaidAmount: 1_000_000, PenaltyRate: ptrF(0.10),
 			Status: domain.ContractStatusSigned, SentAt: ptrTime(at(24 * 30)), FirstSentAt: ptrTime(at(24 * 30)),
 			SignedAt: ptrTime(at(24*30 - 2)), SignerIP: "127.0.0.1"},
 		{MemberID: gaeul, PassID: passGaeul.ID, Product: "PT 10회", PaidAmount: 550_000, PenaltyRate: ptrF(0.10),
 			Status: domain.ContractStatusSent, SentAt: ptrTime(at(24 * 85)), FirstSentAt: ptrTime(at(24 * 85))},
+		// P43: member1(김민지)의 sent 계약 — 데모 래치 ON 재발송이 Vars를 스탬프하는 자리.
+		{MemberID: minji, PassID: passMinjiMob.ID, Product: "모빌리티 8회", PaidAmount: 320_000, PenaltyRate: ptrF(0.10),
+			Status: domain.ContractStatusSent, SentAt: ptrTime(at(24 * 9)), FirstSentAt: ptrTime(at(24 * 9))},
 	} {
 		cc := c
 		if _, err := st.CreateContract(ctx, centerID, &cc); err != nil {
@@ -251,6 +339,24 @@ func SeedDemo(ctx context.Context, st Store, centerID string) error {
 	} {
 		w := wl
 		if _, err := st.CreateWorkoutLog(ctx, centerID, &w); err != nil {
+			return err
+		}
+	}
+
+	// ---- 체형 사진 4장(비교 시연, P46) ----
+	// StoragePath가 demo/ 접두면 실파일은 Storage가 아니라 스토어 캡처 하네스가
+	// 로컬 HTTP로 준다(app integration_test의 데모 로더 오버라이드). 실기기 일반
+	// 실행에선 Storage 조회가 실패해 타일이 "다시 시도"로 뜰 뿐 크래시는 없다.
+	for _, bp := range []domain.BodyPhoto{
+		{MemberID: minji, Pose: "stand", Direction: "front", Date: day(-30), StoragePath: "demo/stand-front-before.jpg"},
+		// 측면 쌍은 중간 날짜 — 최신(비교 기본 선택)이 정면이 되어 스크러버 기본 화면이
+		// 정면 vs 정면 비교로 열린다(P46 스토어 캡처 실측: 섞이면 정면 vs 측면으로 보임).
+		{MemberID: minji, Pose: "stand", Direction: "side", Date: day(-28), StoragePath: "demo/stand-side-before.jpg"},
+		{MemberID: minji, Pose: "stand", Direction: "side", Date: day(-14), StoragePath: "demo/stand-side-after.jpg"},
+		{MemberID: minji, Pose: "stand", Direction: "front", Date: day(-2), StoragePath: "demo/stand-front-after.jpg"},
+	} {
+		b := bp
+		if _, err := st.CreateBodyPhoto(ctx, centerID, &b); err != nil {
 			return err
 		}
 	}

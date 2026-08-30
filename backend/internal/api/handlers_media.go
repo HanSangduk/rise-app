@@ -21,7 +21,7 @@ func (h *Handlers) ListBodyPhotos(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) CreateBodyPhoto(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var req BodyPhotoCreateRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -48,7 +48,7 @@ func (h *Handlers) ListInbody(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) CreateInbody(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var req InbodyCreateRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}

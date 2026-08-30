@@ -45,12 +45,13 @@ void main() {
   Future<BookingScreenData> load({
     required List<PassOption> passes,
     required List<MyBooking> bookings,
+    CenterPolicy policy = CenterPolicy.fallback,
   }) async {
     final container = ProviderContainer.test(
       overrides: [
         homeRepositoryProvider.overrideWithValue(_FakeHomeRepository(passes)),
         bookingRepositoryProvider.overrideWithValue(_FakeBookingRepository(bookings)),
-        centerPolicyProvider.overrideWithValue(const AsyncValue.data(CenterPolicy.fallback)),
+        centerPolicyProvider.overrideWithValue(AsyncValue.data(policy)),
       ],
     );
     container.read(sessionProvider.notifier).set(
@@ -98,6 +99,50 @@ void main() {
 
     expect(data.myPasses.single.openBookings, 0);
     expect(data.myPasses.single.bookingBudget, 2);
+  });
+
+  // 운영시간 배선 — 규칙 함수가 아니라 **뷰모델이 정책값을 실제로 넘기는지**를 본다.
+  // 규칙 쪽 단언(booking_rules_test)이 다 통과해도 여기서 상수를 넘기면 회원 화면은
+  // 그대로 09~21시에 갇힌다.
+  group('센터 운영시간이 슬롯 목록에 반영된다', () {
+    CenterPolicy hours(int open, int close) => CenterPolicy(
+          slotCapacity: 3,
+          cancelCutoffHours: 24,
+          graceOnce: true,
+          penaltyRate: 0.10,
+          expiringDays: 7,
+          maxHoldsPerPass: 2,
+          maxHoldTotalDays: 30,
+          openHour: open,
+          closeHour: close,
+        );
+
+    Future<List<String>> slotKeys(CenterPolicy policy) async {
+      final data = await load(
+        passes: [passOption('p1', trainerId: 't1', remaining: 5)],
+        bookings: const [],
+        policy: policy,
+      );
+      return data.slots.map((s) => s.slotKey).toList();
+    }
+
+    test('06시 개장·23시 마지막 수업 → 18칸(첫 06시 · 마지막 23시)', () async {
+      final today = DateFmt.todayKst();
+      final keys = await slotKeys(hours(6, 23));
+
+      expect(keys, hasLength(18));
+      expect(keys.first, DateFmt.toSlotKey(today, 6));
+      expect(keys.last, DateFmt.toSlotKey(today, 23));
+    });
+
+    test('폴백 정책(구버전 서버·조회 실패) → 09~21시 13칸 그대로', () async {
+      final today = DateFmt.todayKst();
+      final keys = await slotKeys(CenterPolicy.fallback);
+
+      expect(keys, hasLength(13));
+      expect(keys.first, DateFmt.toSlotKey(today, 9));
+      expect(keys.last, DateFmt.toSlotKey(today, 21));
+    });
   });
 }
 

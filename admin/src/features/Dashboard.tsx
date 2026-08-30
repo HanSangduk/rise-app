@@ -25,6 +25,8 @@ import {
   useCenter,
   useCheckin,
   useContracts,
+  useConsultDone,
+  useConsultRequests,
   useJoinRequests,
   useMembers,
   usePayments,
@@ -75,6 +77,8 @@ export function Dashboard({
   // v1.1: 서명 대기(sent) 계약 — "계약서 미서명" 실데이터. 역할 스코프는 다른 GET처럼 서버가 자동 처리.
   // v1.5: 환불로 무효(voided)된 계약은 status=sent 서버 필터에서 자동 제외. 다만 그 전이가 닿지
   // 못한 refunded 패스의 잔존 sent는 그대로 온다 — 아래 pendingContracts가 거른다(P38).
+  // P40: 탈퇴도 남은 draft·sent를 서버가 void한다 — 탈퇴 회원의 잔존 sent 역시 이 필터에서
+  // 사라지므로, 이름이 안 풀리는 계약으로 남는 건 담당 이관 드리프트뿐이다(카드 렌더 참조).
   const pendingContractsQ = useContracts(undefined, "sent");
   // v1.5: 결제 기록 없는 회원권 감시(owner 전용) — 전체 결제 목록 + 회원 임베드 passes 조인.
   // 트레이너에겐 null로 조회 자체를 끈다(undefined = 전체 조회, null = 비활성 — usePayments 규약).
@@ -83,10 +87,21 @@ export function Dashboard({
   // 설정 탭을 직접 열어야 보이는 배지뿐이었다(두 화면의 약속이 어긋남). 해야 할 일로 끌어올린다.
   // owner 전용 API라 트레이너에겐 조회 자체를 끈다(403 → "조회 실패" 노출 방지).
   const joinReqQ = useJoinRequests(isOwner);
-  const checkin = useCheckin();
+  // 재등록 요청(계약 v2.20, P42) — 앱 CTA가 "센터에서 연락드릴 거예요"라고 약속한다.
+  // 가입 요청과 같은 이유로 해야 할 일에 놓는다. owner 게이트 없음 — 서버가 역할 스코프를
+  // 정한다(owner 전체 / trainer 담당 회원만).
+  const consultQ = useConsultRequests();
+  const consultDone = useConsultDone();
   // 체크인 성공한 예약 — 서버에 조회 API가 없어(체크인은 출석 기록만) 세션 로컬로 표시 상태를 든다.
   // 새로고침하면 초기화되지만 "눌렀는데 반응 없음 → 중복 탭" 혼선은 막는다.
+  // P40: 마킹은 훅-레벨 콜백으로 — mutate-레벨 onSuccess는 다음 mutate()가 옵저버를 떼는
+  // 순간 실행되지 않아(react-query v5) 연속 체크인에서 앞선 건의 "체크인됨"이 유실됐다
+  // (isPending 전체 잠금이 창을 좁히긴 하나 리렌더 전 연속 클릭은 못 막는다). 발송 마킹
+  // (Members.tsx sentMarkIds)의 원조 패턴이라 같은 수리를 함께 받는다.
   const [checkedInIds, setCheckedInIds] = useState<Set<string>>(new Set());
+  const checkin = useCheckin((bookingId) =>
+    setCheckedInIds((prev) => new Set(prev).add(bookingId)),
+  );
   // 기준일(재등록 인정·장기 미출석·만료 임박)은 센터 정책 실값 — 하드코딩 카피가 정책 편집(v1.4)과
   // 어긋나지 않게 한다. 정책 로딩 전엔 시드 기본값(90/60/7) 폴백.
   const centerQ = useCenter();
@@ -156,6 +171,8 @@ export function Dashboard({
   const pendingContractsCount = pendingContracts.length;
   // GET /v1/join/requests는 승인 대기분만 반환한다(승인 시 목록에서 사라짐) — 길이가 곧 대기 건수.
   const pendingJoinCount = joinReqQ.data?.length ?? 0;
+  // 재등록 요청은 done 이력도 응답에 남는다 — 할 일은 pending만.
+  const pendingConsults = (consultQ.data ?? []).filter((r) => r.status === "pending");
   // 빈 센터 온보딩 판정 — data가 실제로 도착해 "0명"임을 확인했을 때만 참이다. isLoading으로
   // 판정하면 첫 렌더의 undefined를 0명으로 오독해 카드가 번쩍였다 사라진다(로딩·에러 중엔 undefined).
   const isEmptyCenter = isOwner && membersQ.data?.length === 0;
@@ -197,6 +214,13 @@ export function Dashboard({
             // "해야 할 일"(회원·계약 파생)도 함께 갱신 — stats/slots만 갱신하면 반쪽 새로고침이 된다.
             void membersQ.refetch();
             void pendingContractsQ.refetch();
+            // **이 화면이 그리는 것은 전부 다시 불러온다.** 종전엔 재등록 요청·정책·직원이 빠져
+            // 있었는데, 정작 재등록 요청 조회 실패 문구가 "새로고침 후 확인해주세요"라고 이
+            // 버튼을 가리켰다 — 눌러도 그 조회는 다시 시도되지 않는 막다른 안내였다.
+            // 정책(기준일 카피)·직원(담당 이름)도 이 화면의 표시 내용이라 함께 맞춘다.
+            void consultQ.refetch();
+            void centerQ.refetch();
+            void staffQ.refetch();
             // 결제 기록 없는 회원권(결제 파생)·가입 요청 — refetch()는 enabled를 우회하므로 owner만.
             if (isOwner) {
               void allPaymentsQ.refetch();
@@ -256,7 +280,7 @@ export function Dashboard({
             </div>
           ) : centerStats.isError ? (
             <div className="col-span-full">
-              <ErrorState error={centerStats.error} />
+              <ErrorState error={centerStats.error} onRetry={() => void centerStats.refetch()} />
             </div>
           ) : (
             centerStats.data && (
@@ -295,7 +319,7 @@ export function Dashboard({
             {slotsQ.isLoading ? (
               <Spinner />
             ) : slotsQ.isError ? (
-              <ErrorState error={slotsQ.error} />
+              <ErrorState error={slotsQ.error} onRetry={() => void slotsQ.refetch()} />
             ) : !todayTeams.length ? (
               <EmptyState>오늘 예정된 일정이 없습니다.</EmptyState>
             ) : (
@@ -334,13 +358,7 @@ export function Dashboard({
                               variant={isCheckedIn ? "outline" : "default"}
                               disabled={isCheckedIn || checkin.isPending}
                               onClick={() =>
-                                checkin.mutate(
-                                  { source: "tap", booking_id: team.booking_id },
-                                  {
-                                    onSuccess: () =>
-                                      setCheckedInIds((prev) => new Set(prev).add(team.booking_id)),
-                                  },
-                                )
+                                checkin.mutate({ source: "tap", booking_id: team.booking_id })
                               }
                             >
                               <Check className="h-3 w-3" /> {isCheckedIn ? "체크인됨" : "체크인"}
@@ -378,7 +396,7 @@ export function Dashboard({
               <Spinner />
             ) : membersQ.isError || pendingContractsQ.isError ? (
               // 에러를 "처리할 항목 없음"으로 위장하지 않는다 — 리텐션 액션 누락은 매출 손실.
-              <ErrorState error={membersQ.error ?? pendingContractsQ.error} />
+              <ErrorState error={membersQ.error ?? pendingContractsQ.error} onRetry={() => { void membersQ.refetch(); void pendingContractsQ.refetch(); }} />
             ) : (
               <div className="space-y-2 text-xs leading-relaxed">
                 {/* 앱 회원이 "센터에서 승인하면 연결돼요" 안내를 받고 기다리는 중 — 가장 먼저 놓는다. */}
@@ -388,9 +406,74 @@ export function Dashboard({
                     <NameLink name="설정 탭에서 승인" onClick={onOpenSettings} />
                   </div>
                 )}
-                {/* 가입 요청 조회 실패를 "대기 없음"으로 위장하지 않는다 — 앱에서 기다리는 회원이 있다. */}
+                {/* 가입 요청 조회 실패를 "대기 없음"으로 위장하지 않는다 — 앱에서 기다리는 회원이 있다.
+                    종전엔 "설정 탭에서 직접 확인해주세요"라고 보냈는데, 설정 탭의 가입 요청 목록은
+                    **같은 조회**를 쓴다(useJoinRequests) — 가서 봐도 똑같이 실패한다. 갈 데가 없는
+                    안내 대신 이 화면에서 할 수 있는 한 가지(위 새로고침)만 말한다. */}
                 {isOwner && joinReqQ.isError && (
-                  <div className="text-muted">가입 요청 조회 실패 — 설정 탭에서 직접 확인해주세요</div>
+                  <div className="text-muted">
+                    가입 요청을 불러오지 못했어요 — 기다리는 회원이 있는지 지금은 알 수 없어요.
+                    위 <b>새로고침</b>을 눌러 다시 시도해주세요.
+                  </div>
+                )}
+                {/* 재등록 요청(v2.20) — 회원이 앱에서 직접 손든 목록. 아래 "잔여 부족 — 재계약
+                    상담"이 센터가 찍은 후보라면 이쪽은 이미 의사가 확인된 사람이라 우선순위가
+                    높다(가입 요청 바로 다음). 상담을 마치면 [완료]로 큐에서 내린다 — 발급·결제는
+                    회원 상세의 기존 수기 플로우가 담당한다. */}
+                {pendingConsults.length > 0 && (
+                  <div className="text-brand">
+                    재등록 요청 <b>{pendingConsults.length}건</b> —{" "}
+                    {pendingConsults.slice(0, 3).map((r, i) => {
+                      // 진행·실패는 **이 요청 행**만 본다(Members.tsx 계약 발송·회차 납부와 같은
+                      // variables 식별 패턴). 종전엔 isPending 하나로 세 줄의 버튼이 함께 잠기고,
+                      // 실패는 **어디에도 그려지지 않았다** — 버튼이 다시 살아나고 줄도 그대로라
+                      // 대표에게는 "안 눌렸다"로 보였고, 눌러도 같은 실패가 조용히 반복됐다.
+                      const isThis = consultDone.variables === r.id;
+                      const rowPending = consultDone.isPending && isThis;
+                      const rowFailed = consultDone.isError && isThis;
+                      return (
+                        <span key={r.id}>
+                          {i > 0 && " · "}
+                          {r.member_name ? (
+                            <NameLink
+                              name={r.member_name}
+                              onClick={onOpenMember && (() => onOpenMember(r.member_id))}
+                            />
+                          ) : (
+                            // 탈퇴 등으로 이름을 못 푸는 요청(owner 응답에만 잔존) — 죽은 링크를
+                            // 만들지 않는다(계약서 미서명 줄과 같은 규약).
+                            <span className="text-muted">(조회 불가)</span>
+                          )}
+                          {r.note && <span className="text-muted"> “{r.note}”</span>}{" "}
+                          <button
+                            type="button"
+                            className="text-muted underline disabled:opacity-50"
+                            disabled={rowPending}
+                            onClick={() => consultDone.mutate(r.id)}
+                          >
+                            {rowPending ? "처리 중…" : "완료"}
+                          </button>
+                          {/* 실패해도 버튼은 살아 있다 — 같은 자리에서 바로 다시 누를 수 있다. */}
+                          {rowFailed && (
+                            <span className="block text-danger">
+                              {r.member_name ? `${r.member_name} 님 ` : ""}완료 처리를 못 했어요:{" "}
+                              {consultDone.error.message} — 위 <b>완료</b>를 다시 눌러주세요.
+                            </span>
+                          )}
+                        </span>
+                      );
+                    })}
+                    {pendingConsults.length > 3 && ` 외 ${pendingConsults.length - 3}건`}
+                  </div>
+                )}
+                {/* 요청 조회 실패를 "대기 없음"으로 위장하지 않는다 — 앱은 "연락드릴 거예요"라고 약속했다.
+                    이제 위 새로고침 버튼이 이 조회도 실제로 다시 부른다(refetch 목록 참고) — 문구가
+                    가리키는 행동이 실제로 작동하는 행동과 같아야 한다. */}
+                {consultQ.isError && (
+                  <div className="text-muted">
+                    재등록 요청을 불러오지 못했어요 — 앱에서 연락을 기다리는 회원이 있는지 지금은 알
+                    수 없어요. 위 <b>새로고침</b>을 눌러 다시 시도해주세요.
+                  </div>
                 )}
                 {/* P38(P36 H): 건수만 말하고 끊기던 여정 — 이웃 "결제 기록 없는 회원권"과 같은
                     NameLink로 회원 상세 직행. 한 회원의 계약 여러 건은 건별로 반복 표기한다
@@ -398,15 +481,32 @@ export function Dashboard({
                 {pendingContractsCount > 0 && (
                   <div>
                     계약서 미서명 <b>{pendingContractsCount}건</b> (
-                    {pendingContracts.slice(0, 3).map((c, i) => (
-                      <span key={c.id}>
-                        {i > 0 && "·"}
-                        <NameLink
-                          name={memberName.get(c.member_id) ?? c.member_id}
-                          onClick={onOpenMember && (() => onOpenMember(c.member_id))}
-                        />
-                      </span>
-                    ))}
+                    {pendingContracts.slice(0, 3).map((c, i) => {
+                      // P40: 이름이 안 풀리는 계약은 링크를 만들지 않는다. 회원 목록은
+                      // member.trainer_id축, 계약은 pass.trainer_id축이라 회원만 타 담당으로
+                      // 이관되면 여기서 이름이 안 풀린다 — 종전엔 원시 member_id가 NameLink로
+                      // 떠서 눌러도 회원 관리에서 찾을 수 없는 죽은 링크였고, id 원문은 운영자에게
+                      // 아무 정보도 아니다. 건수는 그대로 센다 — 이름을 못 푼다고 할 일이
+                      // 사라지는 게 아니다(이 목록은 이 화면이 뜰 때 membersQ 로딩이 이미 끝난
+                      // 분기 안이라 "로딩 중이라 안 풀림"은 없다).
+                      const name = memberName.get(c.member_id);
+                      return (
+                        <span key={c.id}>
+                          {i > 0 && "·"}
+                          {name ? (
+                            <NameLink
+                              name={name}
+                              onClick={onOpenMember && (() => onOpenMember(c.member_id))}
+                            />
+                          ) : (
+                            <span className="text-muted">(조회 불가)</span>
+                          )}
+                        </span>
+                      );
+                    })}
+                    {/* P40: 3건까지만 보여주던 목록이 초과분을 조용히 삼켰다 — 굵은 건수와
+                        괄호 안 이름 수가 어긋나면 숫자를 못 믿게 된다. 잘린 만큼을 말한다. */}
+                    {pendingContractsCount > 3 && ` 외 ${pendingContractsCount - 3}건`}
                     ) — 회원 상세에서 재발송 처리
                   </div>
                 )}
@@ -487,6 +587,9 @@ export function Dashboard({
                 {!(isOwner && pendingJoinCount > 0) &&
                   // 가입 요청 조회 실패 중엔 "항목 없음"을 단정하지 않는다(대기 건수를 모름).
                   !(isOwner && joinReqQ.isError) &&
+                  !pendingConsults.length &&
+                  // 재등록 요청 조회 실패 중에도 "항목 없음"을 단정하지 않는다.
+                  !consultQ.isError &&
                   !pendingContractsCount &&
                   !(isOwner && unpaidCount > 0) &&
                   // 결제 조회 실패 중엔 "항목 없음"을 단정하지 않는다(무결제 감시 결과를 모름).
@@ -554,7 +657,7 @@ export function Dashboard({
                     {meStats.isLoading || centerStats.isLoading ? (
                       <Spinner />
                     ) : meStats.isError || centerStats.isError ? (
-                      <ErrorState error={meStats.error ?? centerStats.error} />
+                      <ErrorState error={meStats.error ?? centerStats.error} onRetry={() => { void meStats.refetch(); void centerStats.refetch(); }} />
                     ) : (
                       <Table>
                         <tbody>
@@ -840,16 +943,23 @@ function computeTodo(
   members: MemberWithPasses[],
   { expiringDays, longAbsentDays }: { expiringDays: number; longAbsentDays: number },
 ) {
-  const consentPending = members.filter((m) => !m.consent.general || !m.consent.sensitive);
-  const expiringSoon = members.filter((m) =>
+  // P40: 네 버킷(동의 미완·만료 임박·재계약 상담·장기 미출석) 모두 탈퇴 회원 제외 — 가명화가
+  // Consent를 리셋해 "동의 미완료"에 영원히 남고(계정 파기로 재동의 자체가 불가능), 연장 제안·
+  // 재계약 상담·안부 메시지도 보낼 상대가 없다(탈퇴는 패스를 안 건드려 active 패스·last_visit_at이
+  // 그대로 남는다). 탈퇴 회원 잔여 회차의 실제 남은 행동은 환불 정산인데 그건 이 버킷들의
+  // 문구가 아니다. 장부 의무가 탈퇴와 무관하게 남는 "결제 기록 없는 회원권" 감시(unrecordedPasses
+  // — 이 함수 밖)는 계속 탈퇴 포함으로 센다(P40 결정).
+  const actionable = members.filter((m) => m.status !== "withdrawn");
+  const consentPending = actionable.filter((m) => !m.consent.general || !m.consent.sensitive);
+  const expiringSoon = actionable.filter((m) =>
     m.passes.some((p) => p.status === "active" && withinDays(p.valid_until, expiringDays)),
   );
-  const lowRemaining = members.flatMap((m) =>
+  const lowRemaining = actionable.flatMap((m) =>
     m.passes
       .filter((p) => p.status === "active" && p.remaining > 0 && p.remaining < 3)
       .map((pass) => ({ member: m, pass })),
   );
-  const longAbsent = members.filter(
+  const longAbsent = actionable.filter(
     (m) => m.last_visit_at && daysSinceSafe(m.last_visit_at) >= longAbsentDays,
   );
   return { consentPending, expiringSoon, lowRemaining, longAbsent };

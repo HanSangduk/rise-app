@@ -37,6 +37,10 @@ type Memory struct {
 	checkins   map[string]*CheckinRecord     // key: center/booking-{bookingID} — 예약당 1건 upsert(멱등)
 	policies   map[string]*domain.Policy     // key: centerID
 	businesses map[string]*domain.Business   // key: centerID (v2.13 법정 고지 기재사항)
+	facilities map[string]*domain.Facility   // key: centerID (P42 시설 신고 상태)
+	checkinQRs map[string]*domain.CheckinQR  // key: centerID (P49 데스크 체크인 QR 토큰 — 센터 비밀)
+	centers    map[string]*domain.Center     // key: centerID (멀티센터 Phase A 센터 신원)
+	consults   map[string]*ConsultRequest    // key: centerID/id (재등록/상담 요청, v2.20)
 	workouts   map[string]*domain.WorkoutLog // key: centerID/id (v1.4 수업 기록)
 }
 
@@ -61,6 +65,10 @@ func NewMemory() *Memory {
 		checkins:   map[string]*CheckinRecord{},
 		policies:   map[string]*domain.Policy{},
 		businesses: map[string]*domain.Business{},
+		facilities: map[string]*domain.Facility{},
+		checkinQRs: map[string]*domain.CheckinQR{},
+		centers:    map[string]*domain.Center{},
+		consults:   map[string]*ConsultRequest{},
 		workouts:   map[string]*domain.WorkoutLog{},
 	}
 }
@@ -227,6 +235,70 @@ func (m *Memory) UpdateJoinRequest(_ context.Context, jr *JoinRequest) error {
 	cp := *jr
 	m.joinReqs[jr.ID] = &cp
 	return nil
+}
+
+// ---- 재등록/상담 요청(계약 v2.20, P42) ----
+
+func (m *Memory) CreateConsultRequest(_ context.Context, centerID string, cr *ConsultRequest) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cr.ID == "" {
+		cr.ID = m.nextID("creq")
+	}
+	if cr.CreatedAt.IsZero() {
+		cr.CreatedAt = time.Now().UTC()
+	}
+	if cr.Status == "" {
+		cr.Status = ConsultPending
+	}
+	cp := *cr
+	m.consults[scoped(centerID, cr.ID)] = &cp
+	return cr.ID, nil
+}
+
+func (m *Memory) GetConsultRequest(_ context.Context, centerID, id string) (*ConsultRequest, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if cr, ok := m.consults[scoped(centerID, id)]; ok {
+		cp := *cr
+		return &cp, nil
+	}
+	return nil, ErrNotFound
+}
+
+func (m *Memory) UpdateConsultRequest(_ context.Context, centerID string, cr *ConsultRequest) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.consults[scoped(centerID, cr.ID)]; !ok {
+		return ErrNotFound
+	}
+	cp := *cr
+	m.consults[scoped(centerID, cr.ID)] = &cp
+	return nil
+}
+
+func (m *Memory) ListConsultRequests(_ context.Context, centerID, memberID string) ([]ConsultRequest, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []ConsultRequest{}
+	prefix := centerID + "/"
+	for key, cr := range m.consults {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if memberID != "" && cr.MemberID != memberID {
+			continue
+		}
+		out = append(out, *cr)
+	}
+	// 오래 기다린 요청이 위로(데스크 큐) — 동률은 ID로 안정화(Firestore 구현과 같은 규약).
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
 }
 
 func (m *Memory) ListJoinRequests(_ context.Context, centerID string) ([]JoinRequest, error) {
@@ -1261,6 +1333,43 @@ func (m *Memory) SaveCheckinRecord(_ context.Context, centerID string, c *Checki
 	return nil
 }
 
+// ---- 센터 신원(멀티센터 Phase A) ----
+
+// GetCenter — 미등록이면 빈 값(Firestore 구현과 같은 규약 — 읽기가 상태를 만들지 않는다).
+func (m *Memory) GetCenter(_ context.Context, centerID string) (*domain.Center, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if c, ok := m.centers[centerID]; ok {
+		cp := *c
+		return &cp, nil
+	}
+	return &domain.Center{ID: centerID}, nil
+}
+
+func (m *Memory) SaveCenter(_ context.Context, c *domain.Center) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := *c
+	m.centers[c.ID] = &cp
+	return nil
+}
+
+// ListCenters — 신원이 등록된 센터만, ID 오름차순(Firestore 구현과 같은 규약 — 정책만 있는
+// 유령 센터는 오르지 않는다).
+func (m *Memory) ListCenters(_ context.Context) ([]domain.Center, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []domain.Center{}
+	for _, c := range m.centers {
+		if c.Name == "" {
+			continue
+		}
+		out = append(out, *c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
 // ---- 센터 정책 ----
 
 // GetPolicy — 최초 조회 시 DefaultPolicy()를 지연 시딩한다(센터 생성 API가 없는 v1의 부트스트랩,
@@ -1308,6 +1417,64 @@ func (m *Memory) SaveBusiness(_ context.Context, centerID string, b *domain.Busi
 	defer m.mu.Unlock()
 	cp := *b
 	m.businesses[centerID] = &cp
+	return nil
+}
+
+// ---- 시설 신고 상태(체육시설업, P42) ----
+
+// GetFacility — 미선언이면 기본값(report_status="unknown", ErrNotFound 아님 — GetBusiness와
+// 같은 "읽기가 문서를 만들지 않는다" 규약). Normalize를 읽기에 태워 구 문서·손편집 값도
+// 늘 3값 중 하나로 나간다(Firestore 구현과 같은 읽기 규약).
+func (m *Memory) GetFacility(_ context.Context, centerID string) (*domain.Facility, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if f, ok := m.facilities[centerID]; ok {
+		cp := *f
+		cp.Normalize()
+		return &cp, nil
+	}
+	return &domain.Facility{ReportStatus: domain.FacilityStatusUnknown}, nil
+}
+
+func (m *Memory) SaveFacility(_ context.Context, centerID string, f *domain.Facility) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := *f
+	m.facilities[centerID] = &cp
+	return nil
+}
+
+// ---- 데스크 체크인 QR 토큰(센터 비밀, P49) ----
+
+// GetCheckinQR — 미발급이면 빈 값(ErrNotFound 아님 — GetFacility와 같은 "읽기가 문서를 만들지
+// 않는다" 규약). Normalize를 읽기에 태워 손편집 공백이 바이트 비교를 깨지 않게 한다
+// (Firestore 구현과 같은 읽기 규약).
+func (m *Memory) GetCheckinQR(_ context.Context, centerID string) (*domain.CheckinQR, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if q, ok := m.checkinQRs[centerID]; ok {
+		cp := *q
+		cp.Normalize()
+		return &cp, nil
+	}
+	return &domain.CheckinQR{}, nil
+}
+
+// SaveCheckinQR — 절 통 교체(재발급이 이전 토큰을 남기지 않는다 — 남으면 옛 인쇄물이 계속
+// 통과해 "재발급하면 무효"라는 약속이 거짓이 된다).
+//
+// IssuedAt 포인터를 **깊은 사본**으로 끊는다: 얕은 구조체 복사만 하면 저장본과 호출측이 같은
+// time.Time을 가리켜, 호출측이 경유 쓰기를 하면 저장본이 함께 바뀐다(ContractMutator 주석과
+// 같은 계열의 함정 — Firestore는 json 왕복이라 애초에 값이 끊긴다).
+func (m *Memory) SaveCheckinQR(_ context.Context, centerID string, q *domain.CheckinQR) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := *q
+	if q.IssuedAt != nil {
+		at := *q.IssuedAt
+		cp.IssuedAt = &at
+	}
+	m.checkinQRs[centerID] = &cp
 	return nil
 }
 

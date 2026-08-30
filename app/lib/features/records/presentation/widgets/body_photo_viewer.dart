@@ -8,6 +8,8 @@ import 'package:rise_member/core/result/result.dart';
 import 'package:rise_member/core/widgets/rise_snack_bar.dart';
 import 'package:rise_member/features/bodycheck/data/body_check_repository_provider.dart';
 import 'package:rise_member/features/bodycheck/domain/bodycheck_models.dart';
+import 'package:rise_member/features/bodycheck/presentation/widgets/grid_overlay.dart';
+import 'package:rise_member/features/records/presentation/widgets/photo_measure_grid.dart';
 
 /// 체형 사진 전체화면 뷰어 — 타일을 누르면 열린다.
 ///
@@ -41,6 +43,9 @@ Future<void> showBodyPhotoViewer(
   required String poseLabel,
   required String heroTag,
   required VoidCallback? onDeleted,
+  bool showGrid = false,
+  GridDensity gridDensity = GridDensity.coarse,
+  double? refLine,
 }) {
   return Navigator.of(context, rootNavigator: true).push<void>(
     PageRouteBuilder(
@@ -55,6 +60,9 @@ Future<void> showBodyPhotoViewer(
         poseLabel: poseLabel,
         heroTag: heroTag,
         onDeleted: onDeleted,
+        showGrid: showGrid,
+        gridDensity: gridDensity,
+        refLine: refLine,
       ),
     ),
   );
@@ -67,6 +75,9 @@ class _BodyPhotoViewer extends ConsumerStatefulWidget {
     required this.poseLabel,
     required this.heroTag,
     required this.onDeleted,
+    required this.showGrid,
+    required this.gridDensity,
+    required this.refLine,
   });
 
   final BodyPhotoEntry entry;
@@ -74,6 +85,12 @@ class _BodyPhotoViewer extends ConsumerStatefulWidget {
   final String poseLabel;
   final String heroTag;
   final VoidCallback? onDeleted;
+
+  /// 타일에서 맞춰 둔 눈금을 그대로 이어받는다 — 확대해서 볼 때가 정작 정밀하게
+  /// 재는 순간이라, 여기서 눈금이 사라지면 비교 도구가 반쪽이 된다.
+  final bool showGrid;
+  final GridDensity gridDensity;
+  final double? refLine;
 
   @override
   ConsumerState<_BodyPhotoViewer> createState() => _BodyPhotoViewerState();
@@ -197,13 +214,16 @@ class _BodyPhotoViewerState extends ConsumerState<_BodyPhotoViewer> {
                   transformationController: _zoom,
                   minScale: 1,
                   maxScale: 4,
-                  child: Image.memory(
-                    widget.bytes,
-                    fit: BoxFit.contain,
+                  // 격자를 **InteractiveViewer 안**에 둔다 — 밖에 두면 확대·이동할 때
+                  // 눈금만 제자리에 남아 사진과 어긋난다(그 순간 눈금은 거짓말이 된다).
+                  child: MeasureGridPhoto(
+                    bytes: widget.bytes,
+                    showGrid: widget.showGrid,
+                    density: widget.gridDensity,
+                    refLine: widget.refLine,
                     // 타임라인 타일과 달리 여기선 원본 해상도로 그린다 —
                     // 확대해서 보는 게 이 화면의 존재 이유라 `cacheWidth`를 걸면
                     // 확대할수록 뭉개진다.
-                    gaplessPlayback: true,
                   ),
                 ),
               ),

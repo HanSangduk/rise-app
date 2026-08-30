@@ -5,7 +5,9 @@
 // 처리할 경로가 없어 잘못 초대하면 영구히 남았다.
 // 운영 정책은 v1.4(PUT /v1/center)로 실제 편집 폼이 됐다 — 하드코딩 금지 원칙(설계00 §3.1)의
 // 마지막 조각.
-import { useEffect, useId, useRef, useState } from "react";
+// DragEvent는 React 합성 이벤트와 DOM 전역이 같은 이름이라 별칭으로 가른다 — 창 전체에 거는
+// 리스너(TrainerPhotoField)는 DOM 쪽 타입이어야 한다.
+import { useEffect, useId, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 import { FirebaseError } from "firebase/app";
 import { sendPasswordResetEmail } from "firebase/auth";
 import {
@@ -13,9 +15,11 @@ import {
   CalendarOff,
   Check,
   IdCard,
+  ImagePlus,
   Pencil,
   Plus,
   Save,
+  Trash2,
   TriangleAlert,
   UserCheck,
   UserMinus,
@@ -46,8 +50,8 @@ import {
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { auth } from "@/lib/firebase";
-// 데스크 체크인 QR(P11) — 토큰 입력·QR 렌더·A4 인쇄 시트가 한 덩어리라 별 파일로 뺀다
-// (인쇄 포털·print 전용 CSS·지문 계산이 이 화면의 다른 섹션과 공유하는 게 하나도 없다).
+// 데스크 체크인 QR(P11 → P49) — 발급·QR 렌더·A4 인쇄 시트가 한 덩어리라 별 파일로 뺀다
+// (인쇄 포털·print 전용 CSS가 이 화면의 다른 섹션과 공유하는 게 하나도 없다).
 import { CheckinQrCard } from "@/features/CheckinQr";
 import {
   useApproveJoin,
@@ -59,6 +63,7 @@ import {
   useMembers,
   useReactivateStaff,
   useRecurrings,
+  useSaveFacility,
   useSetOffdays,
   useStaff,
   useTransferStaff,
@@ -66,7 +71,10 @@ import {
   useUpdateCenterPolicy,
   useUpdateStaff,
   useUpdateStaffProfile,
+  useUploadStaffPhoto,
 } from "@/lib/queries";
+// 업로드 전 축소(캔버스) — 폰 사진 3~5MB를 서버 상한(2MB) 아래로 줄인다. 상세는 그 파일 머리주석.
+import { PHOTO_MAX_SIDE, formatBytes, preparePhoto } from "@/lib/imageDownscale";
 import {
   formatCurrency,
   formatPercent,
@@ -86,15 +94,21 @@ import {
   BUSINESS_PHONE_MAX,
   BUSINESS_REG_NO_DIGITS,
   EMPTY_BUSINESS,
+  EMPTY_FACILITY,
   MAX_PENALTY_PCT,
   WEEKDAY_LABEL,
   businessMissingFields,
+  centerHours,
+  hourLabel,
+  hoursValid,
   toBookingRef,
   type BookingRef,
   type Center,
   type CenterBusiness,
   type CenterBusinessView,
+  type CenterFacility,
   type CenterPolicy,
+  type FacilityReportStatus,
   type JoinRequest,
   type Payout,
   type PayoutType,
@@ -268,7 +282,7 @@ export function Settings() {
             {staffQ.isLoading ? (
               <Spinner />
             ) : staffQ.isError ? (
-              <ErrorState error={staffQ.error} />
+              <ErrorState error={staffQ.error} onRetry={() => void staffQ.refetch()} />
             ) : !staffQ.data?.length ? (
               <EmptyState>등록된 직원이 없습니다.</EmptyState>
             ) : (
@@ -313,7 +327,7 @@ export function Settings() {
             {centerQ.isLoading ? (
               <Spinner />
             ) : centerQ.isError ? (
-              <ErrorState error={centerQ.error} />
+              <ErrorState error={centerQ.error} onRetry={() => void centerQ.refetch()} />
             ) : !centerQ.data ? (
               <EmptyState>정책 정보가 없습니다.</EmptyState>
             ) : (
@@ -339,11 +353,40 @@ export function Settings() {
             {centerQ.isLoading ? (
               <Spinner />
             ) : centerQ.isError ? (
-              <ErrorState error={centerQ.error} />
+              <ErrorState error={centerQ.error} onRetry={() => void centerQ.refetch()} />
             ) : !centerQ.data ? (
               <EmptyState>사업자 정보를 불러오지 못했습니다.</EmptyState>
             ) : (
               <BusinessEditForm initial={businessOf(centerQ.data)} />
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 체육시설업 신고(P42) — 사업자 정보 옆자리. 계약서 템플릿 2종(신고/비대상)을 가르는
+            상태 선언이라 법적 신원(사업자 정보)과 같은 구역에 둔다. */}
+        <Card>
+          <CardHeader>
+            <CardTitle>체육시설업 신고</CardTitle>
+            {/* 사업자 정보 배지와 같은 규약 — 배지는 **저장된** 상태만 말한다(편집 중 값은 폼 몫).
+                미확인만 warn인 이유: 그 상태로는 계약서 본문이 발행되지 않는다(P42). */}
+            {centerQ.data &&
+              (facilityOf(centerQ.data).report_status === "unknown" ? (
+                <Badge tone="warn">미확인</Badge>
+              ) : facilityOf(centerQ.data).report_status === "reported" ? (
+                <Badge tone="ok">신고함</Badge>
+              ) : (
+                <Badge tone="ok">신고 대상 아님</Badge>
+              ))}
+          </CardHeader>
+          <CardContent>
+            {centerQ.isLoading ? (
+              <Spinner />
+            ) : centerQ.isError ? (
+              <ErrorState error={centerQ.error} onRetry={() => void centerQ.refetch()} />
+            ) : !centerQ.data ? (
+              <EmptyState>시설 신고 정보를 불러오지 못했습니다.</EmptyState>
+            ) : (
+              <FacilityEditForm initial={facilityOf(centerQ.data)} />
             )}
           </CardContent>
         </Card>
@@ -357,7 +400,7 @@ export function Settings() {
             {joinReqQ.isLoading ? (
               <Spinner />
             ) : joinReqQ.isError ? (
-              <ErrorState error={joinReqQ.error} />
+              <ErrorState error={joinReqQ.error} onRetry={() => void joinReqQ.refetch()} />
             ) : !joinRequests.length ? (
               <EmptyState>대기 중인 가입 요청이 없습니다.</EmptyState>
             ) : (
@@ -386,9 +429,9 @@ export function Settings() {
             )}
             {/* 승인 실패 문구는 확인 창 안에 있다(창이 열린 채로 남아 재시도가 그 자리에서 된다). */}
             <p className="mt-2.5 text-[10.5px] text-muted">
-              전화번호가 자동 매칭되지 않은 회원의 "센터 찾기" 요청만 여기 쌓입니다(폴백 경로,
-              P48). 목록은 1분마다 자동 갱신되고, 먼저 온 순으로 고정돼 새 요청이 끼어들어도 기존
-              줄이 밀리지 않습니다.
+              {/* 내부 티켓 번호(P48)·"폴백 경로" 같은 개발 용어는 화면에서 뺀다(어드민 UX 감사). */}
+              전화번호가 자동으로 맞지 않은 회원의 "센터 찾기" 요청만 여기 쌓입니다. 목록은 1분마다
+              자동 갱신되고, 먼저 온 순으로 고정돼 새 요청이 끼어들어도 기존 줄이 밀리지 않습니다.
             </p>
           </CardContent>
         </Card>
@@ -420,14 +463,18 @@ export function Settings() {
               </tbody>
             </Table>
             <p className="mt-2.5 text-[10.5px] text-muted">
+              {/* 내부 티켓 번호(P48) 제거 — 대표에게 의미 없는 문자열이다(어드민 UX 감사). */}
               초대코드 입력은 없습니다. 이름 확인은 오타 번호로 남의 기록에 연결되는 사고를 막는
-              안전장치입니다(P48).
+              안전장치입니다.
             </p>
           </CardContent>
         </Card>
 
         {/* 데스크 체크인 QR — 대표 전용. 이 화면 자체가 App.tsx owner 게이트 뒤에 있지만,
-            운영 토큰을 다루는 자리라 이 화면의 관례대로 한 겹 더 잠근다(초대 버튼과 같은 조건). */}
+            운영 토큰(owner 전용 API)을 다루는 자리라 이 화면의 관례대로 한 겹 더 잠근다
+            (초대 버튼과 같은 조건). **이 두 겹이 useCheckinQr에 enabled 인자가 없는 근거다**
+            — 트레이너 세션에서는 카드가 마운트되지 않아 조회 자체가 일어나지 않는다
+            (queries.ts useCheckinQr 주석). 이 줄에서 게이트를 빼면 그 훅이 403을 받는다. */}
         {isOwner && <CheckinQrCard />}
 
         <Card>
@@ -629,6 +676,10 @@ function PolicyEditForm({ initial }: { initial: CenterPolicy }) {
   // -1(무제한) 입력 자체가 불가능했다. 저장 시 파싱하고, 빈/불량이면 저장을 잠근다.
   const [maxHolds, setMaxHolds] = useState(String(initial.max_holds_per_pass));
   const [maxHoldDays, setMaxHoldDays] = useState(String(initial.max_hold_total_days));
+  // 운영시간 — 필드가 없는 응답(구서버·미저장 센터)은 centerHours가 9/21로 접는다. 그 상태에서
+  // 대표가 값을 바꾸면 그때 처음으로 patch에 실려 나간다(그전까지 서버는 계속 기본값을 쓴다).
+  const [openHour, setOpenHour] = useState(centerHours(initial).open);
+  const [closeHour, setCloseHour] = useState(centerHours(initial).close);
   // 저장 성공 문구는 이후 입력이 바뀌면 숨긴다 — "저장됐어요"가 미저장 수정 위에 남지 않게.
   const [touched, setTouched] = useState(false);
   // 컷오프 상향 확인 창(P14 H1) — 되돌릴 수 없는 결과가 딸린 저장에만 한 단계를 세운다.
@@ -645,6 +696,11 @@ function PolicyEditForm({ initial }: { initial: CenterPolicy }) {
     parsedMaxHolds >= -1 &&
     parsedMaxHoldDays >= -1 &&
     !holdsRangeBad;
+
+  // 서버 검증 미러(0 ≤ 첫 ＜ 마지막 ≤ 23). 두 칸이 각각은 범위 안이어도 **역전**될 수 있어
+  // (첫 20시 · 마지막 8시) 칸별 클램프만으로는 못 막는다 — 홀딩 상한과 같은 자리의 게이트다.
+  const hoursOk = hoursValid(openHour, closeHour);
+  const slotCount = hoursOk ? closeHour - openHour + 1 : 0;
 
   // 바뀐 필드만 담은 patch. 위약금율은 % 값끼리 비교한다 — 0~1 소수로 되돌린 뒤 비교하면
   // 부동소수 왕복 오차가 "안 바꿨는데 바뀐 필드"를 만든다.
@@ -663,6 +719,14 @@ function PolicyEditForm({ initial }: { initial: CenterPolicy }) {
       patch.max_hold_total_days = parsedMaxHoldDays;
     }
   }
+  // 운영시간도 **접은 값끼리** 비교한다(위약금율을 % 값끼리 비교하는 것과 같은 이유): 필드가
+  // 없던 응답의 기준선은 9/21이므로, 대표가 9/21 그대로 두면 patch에 실리지 않는다 — 서버는
+  // 계속 "필드 부재 = 9/21"로 같은 결과를 낸다. 값을 실제로 바꾼 순간에만 나간다.
+  if (hoursOk) {
+    const base = centerHours(baseline);
+    if (openHour !== base.open) patch.open_hour = openHour;
+    if (closeHour !== base.close) patch.close_hour = closeHour;
+  }
   const changedCount = Object.keys(patch).length;
   // 컷오프를 **올릴 때만** 확인한다. 내리는 쪽은 페널티 구간이 줄어드는 방향이라 회원에게
   // 불리한 결과가 새로 생기지 않는다.
@@ -672,12 +736,15 @@ function PolicyEditForm({ initial }: { initial: CenterPolicy }) {
   // 이 창을 연 뒤 **다른 창·다른 대표가** 정책을 바꿨나. 조용히 지나가면 화면의 숫자와 실제
   // 정책이 다른 채로 대표가 돈과 약관을 판단하게 된다. (내 저장은 성공 시 baseline을 갱신하므로
   // 여기 걸리지 않는다 — 아래 save의 onSuccess 참고.)
-  const serverMoved = (Object.keys(baseline) as (keyof CenterPolicy)[]).some(
-    (k) => baseline[k] !== initial[k],
-  );
+  const serverMoved =
+    (Object.keys(baseline) as (keyof CenterPolicy)[]).some((k) => baseline[k] !== initial[k]) ||
+    // 운영시간만 따로 한 번 더 본다: baseline의 **키 순회**라 "없던 필드가 생기는" 변화를 놓친다
+    // (구서버 응답으로 창을 연 뒤 다른 창이 처음으로 운영시간을 저장한 경우가 정확히 그 모양이다).
+    centerHours(baseline).open !== centerHours(initial).open ||
+    centerHours(baseline).close !== centerHours(initial).close;
 
   function save() {
-    if (!holdsValid || changedCount === 0) return;
+    if (!holdsValid || !hoursOk || changedCount === 0) return;
     setTouched(false);
     setConfirmCutoff(false);
     // 저장이 끝나면 서버가 돌려준 정책이 새 기준선이다 — 그래야 다음 patch가 다시 "내가 바꾼
@@ -697,6 +764,57 @@ function PolicyEditForm({ initial }: { initial: CenterPolicy }) {
     <div>
       {/* React onChange는 버블링된다 — 그리드 어느 필드가 바뀌어도 성공 문구를 숨긴다. */}
       <div className="grid grid-cols-2 gap-2" onChange={() => setTouched(true)}>
+        {/* 운영시간 — 예약 화면의 시간 격자를 만드는 값이라 정책 중 가장 먼저 읽혀야 한다.
+            **두 값 다 "수업이 시작하는 시각"이고 양끝을 포함한다**(9~21 = 13타임, 마지막 수업이
+            21:00 시작). 라벨을 "여는 시간/닫는 시간"으로 쓰면 21시를 마감으로 읽어 실제로는
+            20시까지만 받는 줄 알게 되므로, 라벨과 미리보기 양쪽에서 시작 시각임을 못박는다. */}
+        <div className="col-span-2">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>첫 수업 시작 시간 (0~23시)</Label>
+              <Input
+                type="number"
+                min={0}
+                max={23}
+                step={1}
+                value={openHour}
+                // 정수로 접는다(ProfileModal 연차 칸과 같은 규약) — "9.5"가 들어오면 아래 범위
+                // 경고가 **역전이 아닌 이유**로 뜨면서 문구가 상황과 어긋난다.
+                onChange={(e) => setOpenHour(Math.round(clamped(e.target.value, 0, 23)))}
+              />
+            </div>
+            <div>
+              <Label>마지막 수업 시작 시간 (0~23시)</Label>
+              <Input
+                type="number"
+                min={0}
+                max={23}
+                step={1}
+                value={closeHour}
+                onChange={(e) => setCloseHour(Math.round(clamped(e.target.value, 0, 23)))}
+              />
+            </div>
+          </div>
+          {hoursOk ? (
+            <p className="mt-1 text-[10.5px] leading-[1.7] text-muted">
+              <b className="text-ink">
+                {hourLabel(openHour)}부터 {hourLabel(closeHour)} 시작까지 · 하루 {slotCount}타임
+              </b>{" "}
+              — 마지막 수업은 {hourLabel(closeHour)}에 <b className="text-ink">시작</b>합니다(문
+              닫는 시각이 아니에요).
+            </p>
+          ) : (
+            <p className="mt-1 text-[11px] text-warn">
+              첫 수업 시간이 마지막 수업 시간보다 빨라야 해요 — 0~23시 사이에서 첫 시간을 마지막보다
+              앞에 두고 입력해야 저장할 수 있어요.
+            </p>
+          )}
+          {/* 정직 고지 — 회원 앱은 아직 09~21을 코드에 박고 있고 스토어 업데이트가 나가야 풀린다. */}
+          <p className="mt-1 text-[10.5px] leading-[1.7] text-muted">
+            바꾼 시간은 데스크·어드민 예약 화면에 바로 적용되고,{" "}
+            <b className="text-ink">회원 앱에는 다음 앱 업데이트부터</b> 반영돼요.
+          </p>
+        </div>
         <div>
           <Label>시간당 예약 용량 (팀, 1~10)</Label>
           <Input
@@ -837,15 +955,20 @@ function PolicyEditForm({ initial }: { initial: CenterPolicy }) {
 
       <Button
         className="mt-2.5 w-full"
-        disabled={updatePolicy.isPending || !holdsValid || changedCount === 0}
+        disabled={updatePolicy.isPending || !holdsValid || !hoursOk || changedCount === 0}
         onClick={() => (raisingCutoff ? setConfirmCutoff(true) : save())}
       >
         <Save className="h-4 w-4" />{" "}
         {updatePolicy.isPending
           ? "저장 중…"
-          : changedCount === 0
-            ? "바뀐 항목 없음"
-            : `저장 (${changedCount}개 항목)`}
+          : // 운영시간이 어긋나면 시간 칸 값이 patch에서 빠져 changedCount가 0이 될 수 있다 —
+            // 그대로면 버튼이 "바뀐 항목 없음"이라고 **틀린 이유**를 말한다(FacilityEditForm의
+            // "신고번호를 입력해주세요"와 같은 자리).
+            !hoursOk
+            ? "운영시간을 확인해주세요"
+            : changedCount === 0
+              ? "바뀐 항목 없음"
+              : `저장 (${changedCount}개 항목)`}
       </Button>
       <p className="mt-2.5 text-[10.5px] text-muted">
         현재 위약금율 {penaltyPct}%(상한 {MAX_PENALTY_PCT}%) · 연 매출 목표{" "}
@@ -1283,6 +1406,217 @@ function BusinessEditForm({ initial }: { initial: CenterBusinessView }) {
   );
 }
 
+// ── 체육시설업 신고(P42, PUT /v1/center/facility — owner 전용) ──────────────────────────
+
+// 응답에서 facility 절을 꺼내되, 없으면 **미확인과 같은 모양으로 접는다** — businessOf와 같은
+// 자리다. 이 절은 P42 백엔드와 병렬 작업이라 구서버 응답에 아예 없을 수 있고(P41 세션과 배포가
+// 엇갈리는 창도 같다), 그 순간이 크래시가 아니라 "아직 미확인"으로 보여야 한다 — 기본값
+// unknown이 그 의미와 정확히 일치한다(types.ts EMPTY_FACILITY).
+function facilityOf(c: Center): CenterFacility {
+  return c.facility ?? EMPTY_FACILITY;
+}
+
+// 저장 직후 무엇이 달라지는지 — BUSINESS_EFFECT_NOTE와 같은 자리. 예약·정산은 하나도 움직이지
+// 않고 **다음 계약서 발행**만 이 선언을 따른다(이미 발행·서명된 계약은 그대로다).
+const FACILITY_EFFECT_NOTE =
+  "다음 계약서부터 이 선언을 따라요 — 신고함은 신고번호가 인쇄되고, 신고 대상 아님은 신고번호 행이 빠지고, 미확인은 본문이 발행되지 않습니다.";
+
+// 3단 라디오의 라벨·부연. 순서 고정(기본값 미확인이 맨 위) — 아래로 갈수록 선언의 무게가
+// 커진다(신고함 = 신고번호 필요 · 신고 대상 아님 = 관할 구청 확인 선행).
+const FACILITY_STATUS_OPTIONS: {
+  value: FacilityReportStatus;
+  label: string;
+  hint: string;
+}[] = [
+  {
+    value: "unknown",
+    label: "미확인(기본)",
+    hint: "아직 확인 전이에요 — 이 상태에서는 계약서 본문이 발행되지 않아요.",
+  },
+  {
+    value: "reported",
+    label: "신고함",
+    hint: "체육시설업 신고를 마쳤어요 — 신고번호가 계약서 당사자 표에 인쇄돼요.",
+  },
+  {
+    value: "exempt",
+    label: "신고 대상 아님(확인됨)",
+    hint: "관할 구청 확인을 마쳤어요 — 계약서에서 신고번호 행이 빠져요.",
+  },
+];
+
+/**
+ * 체육시설업 신고 상태 폼(P42, PUT /v1/center/facility — owner 전용).
+ *
+ * **3필드를 항상 전부 보낸다**(통 교체 — 와이어 계약이 바디에 3키를 요구한다). 신고번호는
+ * 상태가 reported가 아니어도 폼 값 그대로 실어 보낸다: 상태를 잠시 바꿨다 되돌려도 입력해 둔
+ * 번호가 사라지지 않고, 서버도 상태에 맞을 때만 계약서에 쓴다.
+ *
+ * baseline을 마운트 시점에 얼리는 이유는 BusinessEditForm과 같다 — initial은 폴링·창 포커스
+ * 재조회로 움직이는 살아 있는 prop이라, 그대로 비교하면 다른 창의 저장이 "내가 바꾼 것"으로
+ * 둔갑한다.
+ */
+function FacilityEditForm({ initial }: { initial: CenterFacility }) {
+  const saveFacility = useSaveFacility();
+  const radioName = useId();
+  const reportNoId = useId();
+  const insuranceId = useId();
+  const [baseline, setBaseline] = useState<CenterFacility>(initial);
+  const [status, setStatus] = useState<FacilityReportStatus>(initial.report_status);
+  const [reportNo, setReportNo] = useState(initial.report_no);
+  const [insurance, setInsurance] = useState(initial.insurance);
+  // 저장 성공 문구는 이후 입력이 바뀌면 숨긴다 — 이웃 폼들과 같은 규약.
+  const [touched, setTouched] = useState(false);
+
+  // 서버 400 미러 — "신고함"인데 신고번호가 비면 저장을 잠근다. 판정을 화면이 앞당길 뿐
+  // 집행자는 서버다(reported + 빈 번호 400).
+  const reportNoMissing = status === "reported" && reportNo.trim() === "";
+
+  // 공백만 늘린 값은 서버 입장에서 "안 바뀜" — BusinessEditForm의 trim 비교와 같은 근거.
+  const changedCount = [
+    status !== baseline.report_status,
+    reportNo.trim() !== baseline.report_no.trim(),
+    insurance.trim() !== baseline.insurance.trim(),
+  ].filter(Boolean).length;
+
+  // 이 창을 연 뒤 다른 창·다른 대표가 신고 상태를 바꿨나 — 통 교체라 지금 저장하면 그쪽 값이
+  // 내 화면의 옛 값으로 덮인다(사업자 정보와 같은 경고 자리).
+  const serverMoved =
+    baseline.report_status !== initial.report_status ||
+    baseline.report_no !== initial.report_no ||
+    baseline.insurance !== initial.insurance;
+
+  function save() {
+    if (reportNoMissing || changedCount === 0) return;
+    setTouched(false);
+    saveFacility.mutate(
+      { report_status: status, report_no: reportNo.trim(), insurance: insurance.trim() },
+      {
+        // 서버가 돌려준 값(200 same shape)이 새 기준선이자 새 화면 값 — BusinessEditForm과
+        // 같은 재장전. 서버가 정규화한 값과 입력칸이 어긋나 "바뀐 항목"이 되살아나지 않게.
+        onSuccess: (f) => {
+          setBaseline(f);
+          setStatus(f.report_status);
+          setReportNo(f.report_no);
+          setInsurance(f.insurance);
+        },
+      },
+    );
+  }
+
+  return (
+    <div>
+      <div className="space-y-1.5">
+        {FACILITY_STATUS_OPTIONS.map((opt) => (
+          <label
+            key={opt.value}
+            className="flex items-start gap-2 rounded-[10px] bg-panel-2 px-3 py-2"
+          >
+            <input
+              type="radio"
+              name={radioName}
+              className="mt-0.5"
+              checked={status === opt.value}
+              onChange={() => {
+                setStatus(opt.value);
+                setTouched(true);
+              }}
+            />
+            <span className="min-w-0">
+              <span className="block text-[12.5px] font-bold">{opt.label}</span>
+              <span className="block text-[10.5px] leading-[1.7] text-muted">{opt.hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+
+      {status === "reported" && (
+        <div className="mt-2">
+          <Label htmlFor={reportNoId}>신고번호 (필수)</Label>
+          <Input
+            id={reportNoId}
+            value={reportNo}
+            placeholder="체육시설업 신고증에 적힌 번호"
+            onChange={(e) => {
+              setReportNo(e.target.value);
+              setTouched(true);
+            }}
+          />
+          {reportNoMissing && (
+            <p className="mt-1 text-[10.5px] text-warn">
+              "신고함"을 선택하면 신고번호가 필요해요 — 신고증에 적힌 번호를 입력해야 저장할 수
+              있어요.
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="mt-2">
+        <Label htmlFor={insuranceId}>보증보험 종류·보장내용 (선택)</Label>
+        <Textarea
+          id={insuranceId}
+          rows={2}
+          value={insurance}
+          placeholder='비워두면 계약서에 "가입하지 않았습니다"로 기재 — 제20조③'
+          onChange={(e) => {
+            setInsurance(e.target.value);
+            setTouched(true);
+          }}
+        />
+      </div>
+
+      {serverMoved && (
+        <p className="mt-2 rounded-[10px] border border-warn/40 bg-warn/10 px-3 py-2 text-[11px] leading-[1.8] text-warn">
+          <TriangleAlert className="mr-1 -mt-0.5 inline h-3.5 w-3.5" />이 창을 연 뒤 다른 곳에서
+          신고 상태가 바뀌었어요 — 화면의 값은 그때 것입니다. 저장은{" "}
+          <b>3칸을 통째로 덮어쓰기</b> 때문에 지금 저장하면 그쪽에서 바꾼 값도 화면의 옛 값으로
+          되돌아갑니다. 새로고침으로 최신 값을 먼저 확인해주세요.
+        </p>
+      )}
+      {saveFacility.isSuccess && !touched && (
+        <p className="mt-2 text-[11px] text-ok">
+          <Check className="mr-1 inline h-3 w-3" />
+          저장됐어요 — {FACILITY_EFFECT_NOTE}
+        </p>
+      )}
+      {/* 서버 400 문구를 그대로 보여준다 — 미러가 놓친 규칙이 있어도 이유가 화면에 남는다. */}
+      {saveFacility.isError && (
+        <p className="mt-2 text-[11px] text-danger">{saveFacility.error.message}</p>
+      )}
+
+      <Button
+        className="mt-2.5 w-full"
+        disabled={saveFacility.isPending || reportNoMissing || changedCount === 0}
+        onClick={save}
+      >
+        <Save className="h-4 w-4" />{" "}
+        {saveFacility.isPending
+          ? "저장 중…"
+          : reportNoMissing
+            ? "신고번호를 입력해주세요"
+            : changedCount === 0
+              ? "바뀐 항목 없음"
+              : `저장 (${changedCount}개 항목)`}
+      </Button>
+      {/* 안내문 근거(P42 결정 1 · P28 — 계약서doc :810-818 각주): 업종 판단은 실태 기준,
+          체력단련장업은 면적 하한 없는 신고 업종, 미신고 영업 처벌은 체육시설법 §38②1,
+          기구 미비치 강습 전용 공간의 포섭은 지자체 유권해석 영역. UI에는 출처 없이 사실만. */}
+      <p className="mt-2.5 text-[10.5px] leading-[1.8] text-muted">
+        업종 판단은 상호가 아니라 시설·운영 <b className="text-ink">실태</b> 기준이에요 —
+        "스튜디오"라는 이름과는 무관합니다.
+        <br />
+        체력단련장업은 면적 하한 없는 <b className="text-ink">신고 업종</b>이에요 — 미신고 영업은
+        1년 이하 징역 또는 1천만원 이하 벌금.
+        <br />
+        기구 없이 강습만 하는 1:1 PT룸은 포섭 여부가 지자체 유권해석 영역이에요 — "신고 대상
+        아님"은 관할 구청에 확인한 뒤 선택하세요.
+        <br />
+        미확인 상태에서는 계약서 본문이 발행되지 않습니다.
+      </p>
+    </div>
+  );
+}
+
 function OffdaysModal({ staff, onClose }: { staff: Staff; onClose: () => void }) {
   const [offdays, setOffdays] = useState<string[]>(staff.offdays);
   const [newDate, setNewDate] = useState(todayStr());
@@ -1474,6 +1808,218 @@ function ChipListEditor({
   );
 }
 
+// ── 트레이너 사진 올리기(POST /v1/staff/{uid}/photo) ────────────────────
+
+// 배포 시차 안내 — 어드민이 서버보다 먼저 올라간 창(CheckinQrCard의 NOT_DEPLOYED_MSG와 같은 자리).
+// 404는 "이 배포에 그 주소가 없다"는 뜻이지 대표가 뭘 잘못한 게 아니다. 화면은 크래시하지 않고
+// 이 문장만 남긴 뒤, 나머지 프로필 칸은 그대로 저장되게 둔다.
+const PHOTO_NOT_DEPLOYED_MSG =
+  "사진 올리기가 아직 서버에 올라가지 않았어요 — 서버가 업데이트되면 바로 쓸 수 있어요. 그때까지 이 창의 다른 정보는 정상적으로 저장됩니다.";
+
+// 업로드 실패 → 한국어. **서버가 준 문구를 최우선으로 그대로 쓴다**(api.ts가 {error}를 message에
+// 담아 준다 — 오프라인·전달 경로 실패도 이미 한국어로 정규화돼 있다). 여기서 덮는 건 서버가
+// 문구를 줄 수 없는 두 경우뿐이다:
+//   404  라우트 자체가 없어 본문이 없다(배포 시차).
+//   413  보통 프록시가 내는 응답이라 우리 서버의 한국어 본문이 아니고, api.ts 폴백은 "잠시 후 다시
+//        시도"라고 말하는데 그건 이 실패에서 **절대 통하지 않는 다음 행동**이다.
+function photoUploadErrorKo(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.status === 404) return PHOTO_NOT_DEPLOYED_MSG;
+    if (e.status === 413) {
+      return "사진 용량이 서버 상한을 넘었어요 — 더 작게 찍히거나 잘라 둔 사진으로 다시 올려주세요.";
+    }
+  }
+  return e instanceof Error ? e.message : "사진을 올리지 못했어요 — 잠시 후 다시 시도해주세요.";
+}
+
+// <img src>에 넣어도 되는 값인가. 사진은 이제 서버가 준 https URL이지만, URL 칸 시절에 손으로
+// 입력된 옛 값이 문서에 남아 있을 수 있어 스킴 검사는 유지한다(javascript: 등 주입 차단).
+function safePhotoSrc(url: string): string {
+  return /^https?:\/\//i.test(url) ? url : "";
+}
+
+/**
+ * 사진 컨트롤 — 미리보기(=드롭 존) + [사진 선택] + [사진 지우기].
+ *
+ * 종전에는 "사진 URL" 텍스트 칸 하나였다. 대표가 가진 사진(폰 갤러리·바탕화면 파일)에는 URL이
+ * 없으므로 그 칸으로는 **아무 사진도 넣을 수 없었다** — 어딘가에 먼저 업로드해 줄 사람이 필요했다.
+ * 여기는 데스크톱 브라우저이고, 파일 선택창과 드래그앤드롭이 바로 그 일을 한다.
+ *
+ * 접근성: 실제 동작 경로는 **버튼**이다(파일 입력은 숨겨 두고 버튼이 click을 대신 부른다) —
+ * 드롭 존은 마우스 사용자를 위한 보조 경로지 유일한 경로가 아니다.
+ *
+ * 저장 규약이 다른 이유: 서버가 업로드 응답의 photo_url을 프로필에 함께 저장한다(계약). 그래서
+ * 올리는 즉시 반영이고, 화면은 그 사실을 감추지 않는다. 반대로 **지우기**는 프로필 저장 경로로
+ * 보낸다(빈 photo_url) — 사진만 따로 지우는 동사가 계약에 없고, 있다 해도 "지우기 버튼 = 즉시
+ * 삭제"는 되돌릴 수 없는 1클릭이라 이 집의 관례(저장을 눌러야 반영)와 어긋난다.
+ */
+function TrainerPhotoField({
+  staff,
+  photoUrl,
+  onUploaded,
+  onClear,
+}: {
+  staff: Staff;
+  photoUrl: string;
+  onUploaded: (url: string) => void;
+  onClear: () => void;
+}) {
+  const upload = useUploadStaffPhoto();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
+  // 브라우저 안에서 축소하다 난 실패(형식·디코드·용량) — 서버 실패와 표시 자리는 같지만
+  // 생애주기가 다르다(뮤테이션 상태에 얹으면 다음 mutate가 지워 버린다).
+  const [prepError, setPrepError] = useState<string | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  // 방금 올린 사진의 축소 전/후 크기 — "왜 이렇게 빨리 올라갔지"에 대한 답이자, 폰 원본을
+  // 그대로 보내지 않았다는 증거다.
+  const [sizeNote, setSizeNote] = useState<{ from: number; to: number } | null>(null);
+
+  const busy = preparing || upload.isPending;
+  const notDeployed = upload.error instanceof ApiError && upload.error.status === 404;
+
+  // 드롭 존을 살짝 빗나간 드롭으로 **브라우저가 그 파일로 이동해 버리는** 사고를 막는다.
+  // 그 순간 이 모달의 미저장 입력(직함·소개문·칩 목록)이 통째로 사라진다 — 사진 한 장 올리려다
+  // 프로필을 다시 쓰게 되는 셈이다. 이 필드가 떠 있는 동안(=프로필 창이 열린 동안)만 건다.
+  useEffect(() => {
+    const swallow = (e: DragEvent) => e.preventDefault();
+    window.addEventListener("dragover", swallow);
+    window.addEventListener("drop", swallow);
+    return () => {
+      window.removeEventListener("dragover", swallow);
+      window.removeEventListener("drop", swallow);
+    };
+  }, []);
+
+  async function handleFile(file: File) {
+    setPrepError(null);
+    setSizeNote(null);
+    upload.reset(); // 지난 실패 문구가 새 시도 위에 남지 않게
+    setPreparing(true);
+    let prepared;
+    try {
+      prepared = await preparePhoto(file);
+    } catch (e) {
+      setPrepError(e instanceof Error ? e.message : "사진을 준비하지 못했어요.");
+      return;
+    } finally {
+      setPreparing(false);
+    }
+    upload.mutate(
+      {
+        uid: staff.uid,
+        body: { image: prepared.base64, content_type: prepared.content_type },
+      },
+      {
+        onSuccess: (res) => {
+          onUploaded(res.photo_url);
+          setSizeNote({ from: prepared.source_bytes, to: prepared.bytes });
+        },
+      },
+    );
+  }
+
+  function onDrop(e: ReactDragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    if (busy) return;
+    const file = e.dataTransfer.files?.[0];
+    if (!file) {
+      // 브라우저 탭·웹페이지의 이미지를 끌어오면 파일이 아니라 URL/텍스트만 실려 온다.
+      setPrepError(
+        "여기에 놓인 건 사진 파일이 아니에요 — 폴더에서 사진 파일을 끌어다 놓거나 [사진 선택]으로 골라주세요.",
+      );
+      return;
+    }
+    void handleFile(file);
+  }
+
+  return (
+    <div className="flex flex-wrap items-start gap-3">
+      {/* 미리보기 = 드롭 존. 사진이 없으면 색상 이니셜 아바타가 그대로 미리보기다. */}
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!busy) setDragOver(true);
+        }}
+        // 아바타·안내문 같은 **자식 위로 옮겨가도** dragleave가 난다 — 그대로 끄면 존 안에서
+        // 마우스를 움직이는 동안 강조가 깜빡인다. 진짜로 존 밖으로 나갔을 때만 끈다.
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
+        }}
+        onDrop={onDrop}
+        className={`flex w-[132px] shrink-0 flex-col items-center gap-1.5 rounded-[12px] border border-dashed px-3 py-3 text-center transition ${
+          dragOver ? "border-brand bg-brand/10" : "border-line bg-panel-2"
+        }`}
+      >
+        <StaffAvatar
+          name={staff.name}
+          color={staff.color}
+          photoUrl={safePhotoSrc(photoUrl)}
+          size="lg"
+        />
+        <span className={`text-[10.5px] leading-[1.6] ${dragOver ? "text-brand" : "text-muted"}`}>
+          {dragOver ? "여기에 놓으세요" : "사진을 여기로 끌어다 놓아도 돼요"}
+        </span>
+      </div>
+
+      <div className="min-w-[220px] flex-1">
+        <Label>프로필 사진 (비우면 색상 이니셜 아바타)</Label>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => fileRef.current?.click()}
+          >
+            <ImagePlus className="h-3.5 w-3.5" />{" "}
+            {preparing ? "사진 준비 중…" : upload.isPending ? "올리는 중…" : "사진 선택"}
+          </Button>
+          {photoUrl !== "" && (
+            <Button size="sm" variant="outline" className="text-danger" disabled={busy} onClick={onClear}>
+              <Trash2 className="h-3.5 w-3.5" /> 사진 지우기
+            </Button>
+          )}
+        </div>
+        {/* 같은 파일을 다시 고르는 경우(실패 후 재시도)에도 change가 나도록 값을 비운다. */}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) void handleFile(file);
+          }}
+        />
+        <p className="mt-1.5 text-[10.5px] leading-[1.7] text-muted">
+          폰에서 옮겨 둔 사진이나 컴퓨터 폴더의 사진을 그대로 올릴 수 있어요. 올리기 전에 브라우저가
+          긴 변 {PHOTO_MAX_SIDE}px로 줄여 보내니 원본이 커도 괜찮아요.
+        </p>
+        {sizeNote && !upload.isError && (
+          <p className="mt-1 text-[11px] text-ok">
+            <Check className="mr-1 inline h-3 w-3" />
+            사진이 저장됐어요 — {formatBytes(sizeNote.from)} → {formatBytes(sizeNote.to)}로 줄여
+            올렸습니다.
+          </p>
+        )}
+        {prepError && <p className="mt-1 text-[11px] text-danger">{prepError}</p>}
+        {upload.isError && (
+          <p
+            className={`mt-1 text-[11px] ${
+              notDeployed ? "rounded-[10px] border border-warn/40 bg-warn/10 px-3 py-2 leading-[1.8] text-warn" : "text-danger"
+            }`}
+          >
+            {notDeployed && <TriangleAlert className="mr-1 -mt-0.5 inline h-3.5 w-3.5" />}
+            {photoUploadErrorKo(upload.error)}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // 트레이너 프로필 편집(v1.6) — PUT /v1/staff/{uid}/profile은 "통 교체" 시맨틱: 폼 상태 전체를
 // 항상 전송한다(머지 아님). 전부 비우고 저장하면 자연스럽게 "프로필 지우기"가 된다.
 // 범위 위반(URL http(s)·직함 40자·연차 0~50·소개 500자·배열 20개/80자)은 서버 400 한국어
@@ -1481,6 +2027,10 @@ function ChipListEditor({
 function ProfileModal({ staff, onClose }: { staff: Staff; onClose: () => void }) {
   const updateProfile = useUpdateStaffProfile();
   const [photoUrl, setPhotoUrl] = useState(staff.profile.photo_url);
+  // **서버에 지금 저장돼 있는** 사진 주소. staff prop은 목록에서 클릭한 순간의 스냅샷이라
+  // 업로드로 서버 값이 바뀌어도 따라오지 않는다 — "지우기를 눌렀는데 아직 저장 전"을 판정하려면
+  // 살아 있는 기준선이 따로 필요하다.
+  const [savedPhotoUrl, setSavedPhotoUrl] = useState(staff.profile.photo_url);
   const [title, setTitle] = useState(staff.profile.title);
   const [careerYears, setCareerYears] = useState(staff.profile.career_years);
   const [specialties, setSpecialties] = useState<string[]>(staff.profile.specialties);
@@ -1489,10 +2039,9 @@ function ProfileModal({ staff, onClose }: { staff: Staff; onClose: () => void })
   const [bio, setBio] = useState(staff.profile.bio);
 
   const trimmedUrl = photoUrl.trim();
-  // 서버와 동일한 스킴 검사(http/https만 — javascript: 등 주입 차단). 서버도 대소문자 무시로
-  // 검사하므로 이 정규식(i 플래그)과 판정이 일치한다. 위반 URL은 미리보기 <img src>에도 넣지
-  // 않고 이니셜 폴백을 보여주며, 저장 버튼도 잠근다(서버 400 왕복 방지).
-  const urlSchemeBad = trimmedUrl !== "" && !/^https?:\/\//i.test(trimmedUrl);
+  // 사진을 지웠지만 아직 저장 전 — 업로드는 즉시 반영인데 지우기는 저장이 필요하다는
+  // 비대칭이 이 화면의 유일한 함정이라, 그 상태를 화면이 직접 말한다.
+  const photoCleared = savedPhotoUrl !== "" && trimmedUrl === "";
 
   function save() {
     updateProfile.mutate(
@@ -1515,27 +2064,20 @@ function ProfileModal({ staff, onClose }: { staff: Staff; onClose: () => void })
   return (
     <Modal open onClose={onClose} title={`프로필 편집 — ${staff.name}`} wide>
       <div className="space-y-3">
-        <div className="flex items-center gap-3">
-          <StaffAvatar
-            name={staff.name}
-            color={staff.color}
-            photoUrl={urlSchemeBad ? "" : trimmedUrl}
-            size="lg"
-          />
-          <div className="min-w-0 flex-1">
-            <Label htmlFor="pf-photo-url">사진 URL (http/https · 비우면 색상 이니셜 아바타)</Label>
-            <Input
-              id="pf-photo-url"
-              type="url"
-              value={photoUrl}
-              maxLength={2048}
-              placeholder="https://example.com/photo.jpg"
-              onChange={(e) => setPhotoUrl(e.target.value)}
-            />
-          </div>
-        </div>
-        {urlSchemeBad && (
-          <p className="text-[11px] text-warn">사진 URL은 http:// 또는 https:// 로 시작해야 해요.</p>
+        <TrainerPhotoField
+          staff={staff}
+          photoUrl={trimmedUrl}
+          onUploaded={(url) => {
+            setPhotoUrl(url);
+            setSavedPhotoUrl(url);
+          }}
+          onClear={() => setPhotoUrl("")}
+        />
+        {photoCleared && (
+          <p className="text-[11px] text-warn">
+            사진을 뺐어요 — <b>아래 저장을 눌러야</b> 실제로 지워집니다(그 전까지는 기존 사진이
+            그대로예요). 지우면 색상 이니셜 아바타로 돌아갑니다.
+          </p>
         )}
 
         <div className="grid grid-cols-2 gap-2">
@@ -1600,12 +2142,13 @@ function ProfileModal({ staff, onClose }: { staff: Staff; onClose: () => void })
         {updateProfile.isError && (
           <p className="text-[11px] text-danger">{updateProfile.error.message}</p>
         )}
-        <Button className="w-full" disabled={updateProfile.isPending || urlSchemeBad} onClick={save}>
+        <Button className="w-full" disabled={updateProfile.isPending} onClick={save}>
           <Save className="h-4 w-4" /> {updateProfile.isPending ? "저장 중…" : "저장"}
         </Button>
         <p className="text-[10.5px] text-muted">
           프로필은 회원 열람 전제의 공개 정보예요(정산 정보와 무관). 모든 칸을 비우고 저장하면
-          프로필이 지워집니다. 사진 업로드는 준비 중 — 지금은 이미지 주소(URL)만 지원해요.
+          프로필이 지워집니다. <b className="text-ink">사진만 규약이 달라요</b> — 고르는 즉시
+          올라가 저장되고, 나머지 칸은 저장을 눌러야 반영됩니다.
         </p>
       </div>
     </Modal>

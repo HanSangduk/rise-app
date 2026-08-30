@@ -124,10 +124,20 @@ class SlotList extends StatelessWidget {
   /// 판정은 행과 **같은 규칙 엔진**에 묻는다(빈 슬롯 하나를 가정해 evaluate). 조건을
   /// 여기서 다시 손으로 쓰면, 유효기간·홀딩이 함께 걸린 날에 행은 "8/10까지"라 하고
   /// 상단은 "휴무"라 하는 식으로 한 화면이 두 이유를 말하게 된다.
+  ///
+  /// 프로브 슬롯의 **시각은 아무 값이나 된다** — [BookingRules.evaluate]는 휴무·유효기간
+  /// 판정에서 `slot.startAt`의 날짜만 읽고(`_dateOnly`), 팀이 빈 슬롯이라 시간대 사정
+  /// (코치 수업중·만석)은 애초에 걸리지 않는다. 그래서 센터 운영시간을 끌어오지 않고
+  /// 하루의 시작(00시)으로 "이 날짜"라는 뜻만 남긴다 — 예전엔 여기서 운영시간 상수를
+  /// 빌려 썼는데, 정책이 편집 가능해진 지금 그러면 결과가 달라지지도 않는 자리가
+  /// 운영시간 변경을 따라 흔들리고 "이 프로브는 첫 수업 시간이어야 한다"는 없는
+  /// 제약을 읽는 사람에게 심는다.
+  static const _probeHour = 0;
+
   String? get _offdayCoach {
     if (!showMyCoachOnly) return null;
     final probe = BookingRules.evaluate(
-      slot: Slot(slotKey: DateFmt.toSlotKey(selectedDate, BookingRules.openHour)),
+      slot: Slot(slotKey: DateFmt.toSlotKey(selectedDate, _probeHour)),
       pass: _primaryPass,
       // 하루 단위 안내라 "내 예약" 여부는 의미가 없다(그 슬롯만의 사정).
       myMemberId: '',

@@ -8,6 +8,22 @@
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<!-- 홈 화면 표시 이름(P19): 길면 잘리므로 "라이즈 컨디셔닝"이 아니라 "라이즈".
 	     CFBundleName은 시스템 내부 식별용이라 ASCII(rise_member)를 유지한다. -->
+	<!-- Firebase Phone Auth reCAPTCHA 폴백 URL 스킴(P46). 이게 없으면 시뮬레이터
+	     (APNs 불가 환경)에서 "인증번호 받기" 순간 PhoneAuthProvider가 fatal로 죽는다
+	     — 실기기는 APNs 사일런트 검증이라 P09 실측에서 안 드러났던 구멍.
+	     이 프로젝트의 GoogleService-Info엔 REVERSED_CLIENT_ID가 없어(전화 인증 전용)
+	     인코딩된 앱 ID 스킴(app-{GOOGLE_APP_ID의 콜론→하이픈})을 쓴다. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>app-1-773077624928-ios-b700434a369d2acfb0fb05</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>라이즈</string>
 	<key>CFBundleExecutable</key>

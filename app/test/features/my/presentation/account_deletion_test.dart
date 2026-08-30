@@ -379,5 +379,6 @@ class _FakeMyRepository implements MyRepository {
 
 
   @override
-  Future<Result<void>> signContract(String contractId) => throw UnimplementedError();
+  Future<Result<void>> signContract(String contractId, {String? signaturePng}) =>
+      throw UnimplementedError();
 }

@@ -24,7 +24,7 @@ func (h *Handlers) ListMembers(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) CreateMember(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var mem domain.Member
-	if err := decodeJSON(r, &mem); err != nil {
+	if err := decodeJSON(w, r, &mem); err != nil {
 		writeErr(w, r, err)
 		return
 	}

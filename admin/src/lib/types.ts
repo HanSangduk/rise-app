@@ -254,6 +254,21 @@ export interface StaffProfile {
   bio: string; // 소개문 ≤500자
 }
 
+// 트레이너 사진 업로드 — POST /v1/staff/{uid}/photo(owner 전용).
+// 요청 {image: base64, content_type} → 응답 {photo_url}. 서버가 **프로필에도 함께 저장**하므로
+// 업로드 한 번으로 끝난다(이어서 PUT /profile을 부를 필요가 없다 — 부르면 같은 값을 두 번 쓴다).
+//
+// 그래서 이 창의 "사진"만 저장 규약이 다르다: 사진은 올리는 즉시 반영되고, 나머지 칸은 저장
+// 버튼을 눌러야 반영된다. 화면이 그 비대칭을 문장으로 말한다(ProfileModal 하단 안내).
+export interface StaffPhotoUploadRequest {
+  image: string; // data: 접두사 없는 base64
+  content_type: "image/jpeg" | "image/png" | "image/webp";
+}
+
+export interface StaffPhotoUploadResult {
+  photo_url: string;
+}
+
 // v2.0(P08 직원 생애주기): 하드 삭제 대신 상태 전이. "inactive"만이 명시적 퇴사이고
 // 필드 부재·빈 값은 재직으로 읽는다(서버 domain.Staff.IsActive와 동형 — format.ts isStaffActive).
 export type StaffStatus = "active" | "inactive";
@@ -671,6 +686,18 @@ export interface JoinRequest {
   requested_at: string;
 }
 
+// 재등록/상담 요청(계약 v2.20, P42) — 회원발 요청 큐. member_name은 서버가 응답에서
+// 해석한다(탈퇴 등으로 못 풀면 빈 문자열 — owner 응답에만 남는다).
+export interface ConsultRequest {
+  id: string;
+  member_id: string;
+  kind: "renewal" | "consult";
+  note?: string;
+  status: "pending" | "done";
+  created_at: string;
+  member_name: string;
+}
+
 // [가정 3] GET /v1/hw-checks?hw_id= — Home Work "이번 주 완료율" 표시에 필요.
 // 계약엔 POST /v1/hw-checks(회원 앱에서 체크 제출)만 있고 조회가 없어,
 // 동일 리소스의 대칭 조회 엔드포인트가 있다고 가정했다.
@@ -697,6 +724,60 @@ export interface CenterPolicy {
   expiring_days: number; // 만료임박 기준일
   max_holds_per_pass: number; // 패스당 홀딩 최대 횟수(-1 = 무제한)
   max_hold_total_days: number; // 패스당 홀딩 총 일수 상한(-1 = 무제한)
+  // 센터 운영시간 — **슬롯 시작 시각**이고 양끝 포함이다(open=9, close=21 → 09시부터 21시
+  // 시작까지 13타임, 마지막 수업이 21:00에 시작). "닫는 시각"이 아니라는 점이 유일하게
+  // 헷갈리는 지점이라 화면 라벨도 "마지막 수업 시작 시간"으로 쓴다. 서버 검증 0 ≤ open < close ≤ 23.
+  //
+  // **optional인 이유**: 계약이 "필드 부재 = 9/21"을 기본값으로 못박았다(구서버 응답 · 정책을
+  // 한 번도 저장하지 않은 센터). 필수로 선언하면 타입은 number인데 런타임은 undefined인 구멍이
+  // 생기고, 화면마다 다른 폴백을 짜 넣게 된다 — facility와 같은 판단이다. 접는 곳은
+  // centerHours() 한 곳뿐이니 화면은 그걸 부른다.
+  open_hour?: number;
+  close_hour?: number;
+}
+
+/// 운영시간 기본값 — 계약이 정한 "필드 부재" 시의 값이자 정책을 아직 못 불러온 동안의 값.
+/// 종전 Schedule.tsx의 하드코딩 상수(09~21)와 같은 숫자다: 이 화면이 지금까지 그려 온 격자를
+/// 정책 도입으로 조용히 바꾸지 않는다.
+export const DEFAULT_OPEN_HOUR = 9;
+export const DEFAULT_CLOSE_HOUR = 21;
+
+/// 운영시간의 단일 해석 지점. 정책 부재(로딩 중·구서버)·필드 부재·역전된 값을 전부 여기서 접는다.
+///
+/// 역전 값(open ≥ close)까지 기본값으로 접는 이유: 서버가 막는 조합이지만, 막지 못한 데이터가
+/// 하나라도 흘러들면 시간 목록이 **빈 배열**이 되어 예약 격자가 통째로 사라진다. 잘못된 설정의
+/// 대가가 "화면이 없어짐"이면 안 된다.
+export function centerHours(p?: CenterPolicy | null): { open: number; close: number } {
+  const open = p?.open_hour;
+  const close = p?.close_hour;
+  const ok =
+    typeof open === "number" &&
+    typeof close === "number" &&
+    Number.isInteger(open) &&
+    Number.isInteger(close) &&
+    open >= 0 &&
+    close <= 23 &&
+    open < close;
+  return ok
+    ? { open: open as number, close: close as number }
+    : { open: DEFAULT_OPEN_HOUR, close: DEFAULT_CLOSE_HOUR };
+}
+
+/// 양끝 포함 시간 목록(open..close). 예약 격자의 행이자 고정 스케줄 시간 셀렉트의 선택지다.
+export function hourRange(open: number, close: number): number[] {
+  return Array.from({ length: close - open + 1 }, (_, i) => open + i);
+}
+
+/// 서버 검증 미러(0 ≤ open < close ≤ 23) — 폼이 저장을 선차단하는 근거. 집행자는 서버다.
+export function hoursValid(open: number, close: number): boolean {
+  return (
+    Number.isInteger(open) && Number.isInteger(close) && open >= 0 && close <= 23 && open < close
+  );
+}
+
+/// "09:00" — 라벨·미리보기가 같은 모양을 쓰게 한 곳에 둔다.
+export function hourLabel(h: number): string {
+  return `${String(h).padStart(2, "0")}:00`;
 }
 
 // [v2.13] 사업자 정보 — 백엔드 domain.Business json 태그와 1:1.
@@ -798,10 +879,61 @@ export const EMPTY_BUSINESS: CenterBusinessView = {
   complete: false,
 };
 
+// [P42] 체육시설업 신고 상태 — centers 문서의 별도 절(facility). GET /v1/center에 실려 오고
+// PUT /v1/center/facility(owner 전용)로 저장한다.
+//
+// 서식 취향이 아니라 **신고 상태 선언**이다(P42 결정 1): unknown이면 계약서 본문이 발행되지
+// 않고(P39 래치와 같은 철학 — 모르는 상태로 문서를 만들지 않는다), reported/exempt가 계약서
+// 템플릿 2종(pt-v1-reported / pt-v1-exempt)을 가른다. business 밖에 두는 이유도 P42 결정 3 —
+// Business에 섞으면 IsComplete 판정이 회귀해 법정 문서 4장이 초안 배너로 되돌아간다.
+export type FacilityReportStatus = "unknown" | "reported" | "exempt";
+
+export interface CenterFacility {
+  report_status: FacilityReportStatus;
+  // 체육시설업 신고번호 — reported일 때 필수(서버 400). 화면이 같은 규칙으로 선차단하되
+  // 서버가 최종 집행자다(Settings.tsx FacilityEditForm).
+  report_no: string;
+  // 보증보험 종류·보장내용 — 빈 값이면 계약서가 "가입하지 않았습니다"로 기재한다
+  // (계약서doc 제20조③ 자체 설계 — P42 결정 4의 슬롯 폴백).
+  insurance: string;
+}
+
+/// facility 부재 응답 폴백 — EMPTY_BUSINESS와 같은 이유(배포 순서가 어긋난 창). P42 백엔드와
+/// 이 화면이 병렬로 나가는 데다 P41 세션 배포와도 엇갈릴 수 있어, facility 없는 응답이 장애가
+/// 아니라 "아직 미확인"으로 보여야 한다 — 기본값 unknown이 그 의미와 정확히 일치한다.
+export const EMPTY_FACILITY: CenterFacility = {
+  report_status: "unknown",
+  report_no: "",
+  insurance: "",
+};
+
+// [P49] 데스크 체크인 QR 토큰 — GET /v1/center/checkin-qr · POST /v1/center/checkin-qr/rotate
+// (둘 다 owner 전용, 같은 모양을 돌려준다).
+//
+// **이 화면이 서버에서 받아오는 유일한 비밀**이다. 종전엔 서버가 배포 설정에 박힌 값과 문자열
+// 비교만 하고 그 값을 돌려주는 경로가 없어, 값을 아는 사람(개발자)이 대표에게 불러주고 대표가
+// 손으로 입력했다 — 실사용자가 혼자서는 끝낼 수 없는 화면이었다.
+// 이제 서버가 만들어 보관하고, 어드민은 받아서 QR로 그리기만 한다.
+//
+// token — QR에 그대로 인코딩되는 원문. **화면에 글자로 띄우지 않는다**(CheckinQr.tsx 머리주석).
+//         아직 발급 전이면 ""(빈 문자열)다. optional이 아니라 빈 문자열인 이유는 계약이 그렇고,
+//         "필드 없음"과 "발급 전"을 화면이 다시 가르지 않게 하기 위해서다.
+// issued_at — RFC3339. 미발급이면 null. 지금 데스크에 붙어 있는 종이가 최신인지 가르는
+//             **유일한 표식**이라 화면과 인쇄물이 같은 값을 쓴다.
+export interface CheckinQrToken {
+  issued: boolean;
+  token: string;
+  issued_at: string | null;
+}
+
 export interface Center {
   center_id: string;
   policy: CenterPolicy;
   // v2.13 신설. 서버가 항상 채워 보낸다(미등록이면 12칸이 빈 문자열 + complete:false) —
   // optional로 두면 화면마다 다른 폴백을 짜 넣게 되고 "미등록"과 "아직 안 불러옴"이 섞인다.
   business: CenterBusinessView;
+  // [P42] 체육시설업 신고 상태. business와 달리 **optional**인 이유: 이 절은 P42 백엔드와
+  // 병렬 작업이라 구서버 응답에 없을 수 있고, 그때 대가가 화면 크래시면 안 된다 — 부재는
+  // facilityOf(Settings.tsx)가 EMPTY_FACILITY(=미확인)로 접는다.
+  facility?: CenterFacility;
 }

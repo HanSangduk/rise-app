@@ -10,6 +10,7 @@ import 'package:rise_member/core/widgets/rise_badge.dart';
 import 'package:rise_member/core/widgets/rise_card.dart';
 import 'package:rise_member/core/widgets/trainer_avatar.dart';
 import 'package:rise_member/features/booking/presentation/widgets/trainer_profile_sheet.dart';
+import 'package:rise_member/features/my/presentation/widgets/center_coaches_sheet.dart';
 
 /// 홈의 담당 코치 카드.
 ///
@@ -54,7 +55,8 @@ class HomeCoachCard extends ConsumerWidget {
 
     // 캐시 미로드/실패면 이름만 채운 폴백을 만든다. 예약 탭이 프로필 시트를 여는
     // 방식과 같다 — 모르는 걸 "퇴사"로 단정하는 쪽이 훨씬 나쁘다(계약 v2.0 승격 규약).
-    final staff = cached ??
+    final staff =
+        cached ??
         StaffDto(
           uid: trainerId,
           name: CoachLabel.resolve(trainerName, fallback: '담당 코치'),
@@ -105,7 +107,10 @@ class HomeCoachCard extends ConsumerWidget {
                             ),
                             if (inactive) ...[
                               const SizedBox(width: 5),
-                              const RiseBadge('퇴사', variant: RiseBadgeVariant.muted),
+                              const RiseBadge(
+                                '퇴사',
+                                variant: RiseBadgeVariant.muted,
+                              ),
                             ],
                           ],
                         ),
@@ -148,6 +153,25 @@ class HomeCoachCard extends ConsumerWidget {
               ],
             ),
           ],
+          // 센터 코치 전체 보기(P41) — "이 코치 말고 다른 분은?"이 드는 순간이
+          // 정확히 이 카드 앞이다. 데이터는 같은 staffMap 캐시라 비용 0이고,
+          // 마이 탭 센터 카드의 같은 진입점과 같은 시트를 연다.
+          InkWell(
+            onTap: () => showCenterCoachesSheet(context),
+            child: const RiseRow(
+              showDivider: false,
+              minHeight: 44,
+              child: Text(
+                '센터의 다른 코치 보기',
+                style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+              ),
+              trailing: RiseIcon(
+                RiseIcons.chevronRight,
+                size: 13,
+                color: AppColors.muted,
+              ),
+            ),
+          ),
         ],
       ),
     );

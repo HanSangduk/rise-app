@@ -166,9 +166,16 @@ class ContractItem {
     required this.paidAmount,
     required this.status,
     this.sentAt,
+    this.firstSentAt,
     this.signedAt,
     this.pdfPath,
     this.penaltyRate,
+    this.templateVersion = '',
+    this.vars = const {},
+    this.signerIp,
+    this.sha256,
+    this.signaturePng = '',
+    this.signatureSha256 = '',
   });
 
   final String id;
@@ -177,6 +184,11 @@ class ContractItem {
   final int paidAmount;
   final String status; // draft|sent|signed|voided
   final DateTime? sentAt;
+
+  /// 최초 발송 증적(v1.5). {{계약 체결일}} 표시 규칙(계약서doc :781 — SignedAt,
+  /// 미서명이면 FirstSentAt)의 폴백으로 본문 렌더에 쓴다.
+  final DateTime? firstSentAt;
+
   final DateTime? signedAt;
   final String? pdfPath;
 
@@ -184,6 +196,37 @@ class ContractItem {
   /// 환불 정산에는 소급되지 않는다(domain/contract.go). **null은 0%가 아니라 "모름"**
   /// (v1.5 이전 레거시 계약) — 상세 화면은 그때 행을 아예 뺀다.
   final double? penaltyRate;
+
+  /// v2.18(P39) — send가 확정한 계약서 템플릿 버전과 슬롯→값 스냅샷.
+  /// 빈 값 = 스탬프 전(발행 래치 OFF 동안의 계약·레거시 전부) → 요약 고지 경로 그대로.
+  final String templateVersion;
+  final Map<String, String> vars;
+
+  /// 서명 당시 IP(v1.4부터 서버 기록 — 체결 정보의 한 행, P44 결정 7).
+  /// null = 미기록(미서명·초기 레거시) — 행을 아예 뺀다(지어내지 않기).
+  final String? signerIp;
+
+  /// 문서 내용 해시 — send가 확정한 버전+vars의 sha256(불변). 아래 서명 이미지
+  /// 해시와 **역할이 다르다**(P44 결정 3: Dropbox 2해시 모델과 동형 — 내용 봉인 ↔
+  /// 서명 행위 증적). null = 미기록.
+  final String? sha256;
+
+  /// 자필 서명 PNG base64(P44 결정 2 — 계약 문서 내 2필드 보관).
+  /// 빈 값 = 이미지 없음: 레거시·구버전 앱의 체크 동의 서명 전부(결정 6 — 그때의
+  /// 서명도 계속 유효하다).
+  final String signaturePng;
+
+  /// 서명 이미지 해시 — 문서 sha256과 같은 트랜잭션에 기록되는 **별도** 해시(결정 3).
+  final String signatureSha256;
+
+  /// 자필 서명 이미지가 있는가 — 상세의 서명란 도킹 블록(결정 4)과 체결 정보의
+  /// 이미지 해시 행이 이 판정을 쓴다.
+  bool get hasSignatureImage => signaturePng.isNotEmpty;
+
+  /// 본문 렌더를 시도할 자격 — 둘 다 있어야 한다(서버 스탬프는 전부-아니면-전무,
+  /// v2.18). 한쪽만 있는 기형은 규약상 없지만, 만나도 요약 경로로 조용히 떨어진다
+  /// (부재 우선 — 반쪽 스냅샷으로 가짜 문서를 만들지 않는다).
+  bool get hasDocumentSnapshot => templateVersion.isNotEmpty && vars.isNotEmpty;
 
   bool get isSigned => status == 'signed';
 

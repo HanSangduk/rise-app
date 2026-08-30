@@ -48,7 +48,7 @@ func (h *Handlers) JoinMatch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Phone string `json:"phone"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -64,7 +64,7 @@ func (h *Handlers) JoinMatch(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) JoinConfirm(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var req JoinConfirmRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -81,7 +81,7 @@ func (h *Handlers) JoinConfirm(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) JoinRequest(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var req JoinRequestBody
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -99,7 +99,7 @@ func (h *Handlers) JoinApprove(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RequestID string `json:"request_id"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -152,7 +152,7 @@ func (h *Handlers) UpdateCenter(w http.ResponseWriter, r *http.Request) {
 		// 알아야** 어드민이 보낼 수 있다(계약 v2.13 "배포 순서" 절 — 서버 먼저, 어드민 나중).
 		Business json.RawMessage `json:"business"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}

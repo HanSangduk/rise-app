@@ -386,7 +386,7 @@ func TestListInbodyOrderIsDeterministic(t *testing.T) {
 func newInbodyRouter(t *testing.T) (http.Handler, *Service) {
 	t.Helper()
 	st := store.NewMemory()
-	cfg := config.Config{DefaultCenterID: testCenter, CheckinQRToken: "test-qr-token"}
+	cfg := config.Config{DefaultCenterID: testCenter}
 	auth, err := NewAuthenticator(context.Background(), cfg, st)
 	if err != nil {
 		t.Fatalf("NewAuthenticator: %v", err)

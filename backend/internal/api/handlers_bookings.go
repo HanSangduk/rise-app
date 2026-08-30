@@ -33,7 +33,7 @@ func (h *Handlers) ListBookings(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) CreateBooking(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var req BookingCreateRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -86,7 +86,7 @@ func (h *Handlers) NoshowBooking(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) CreateRecurring(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var req RecurringCreateRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}
@@ -128,7 +128,7 @@ func (h *Handlers) DeleteRecurring(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) Checkin(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var req CheckinRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}

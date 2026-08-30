@@ -24,7 +24,9 @@ abstract interface class MyRepository {
   });
 
   /// POST /v1/contracts/{id}/sign (v1.4 — 회원 자체서명, sent→signed 전이).
-  Future<Result<void>> signContract(String contractId);
+  /// [signaturePng]는 자필 서명 PNG의 base64(P44) — null이면 바디 없는 종전 wire
+  /// 그대로다(결정 6: 바디 없는 sign 계속 유효 — 이미지는 증거 보강이지 요건이 아니다).
+  Future<Result<void>> signContract(String contractId, {String? signaturePng});
 
   /// DELETE /v1/me (v2.11 — 회원탈퇴). **되돌릴 수 없다.**
   ///

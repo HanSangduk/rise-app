@@ -98,14 +98,21 @@ class BookingViewModel extends _$BookingViewModel {
     final serverSlots = _unwrap(await repo.loadSlots(date));
     final bookings = _unwrap(await repo.loadMyBookings(memberId));
 
-    // 빈 시간대 합성(P04 HIGH) — 서버는 예약이 있던 슬롯만 주므로, 운영시간(09~21시)의
+    // 빈 시간대 합성(P04 HIGH) — 서버는 예약이 있던 슬롯만 주므로, 센터 운영시간의
     // 빈 슬롯을 정책 용량(slot_capacity)으로 합성해 병합한다(slot_key 기준, 서버 우선).
     // 이 provider는 조회 실패 시 fallback을 반환하고 절대 throw하지 않는다.
+    //
+    // 운영시간도 **정책 실값**이다(policy.open_hour/close_hour) — 예전엔 규칙 파일에
+    // 9·21이 상수로 박혀 있어, 06시에 열거나 23시에 닫는 센터의 회원은 실제 영업
+    // 중인 시간대를 앱에서 볼 수조차 없었다. 구버전 서버(필드 부재)는 정책 provider가
+    // 9·21로 해석하므로 이 줄의 동작은 종전과 한 칸도 다르지 않다.
     final policy = await ref.watch(centerPolicyProvider.future);
     final slots = BookingRules.mergeWithOpenHours(
       date: date,
       serverSlots: serverSlots,
       capacity: policy.slotCapacity,
+      openHour: policy.openHour,
+      closeHour: policy.closeHour,
     );
 
     return BookingScreenData(

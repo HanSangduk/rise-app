@@ -19,3 +19,6 @@ serviceAccount*.json
 .firebase/
 .DS_Store
 .claude/scheduled_tasks.lock
+
+# 빌드 산출물(각 하위 .gitignore가 못 덮는 자리)
+app/android/build/

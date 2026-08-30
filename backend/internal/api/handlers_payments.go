@@ -11,7 +11,7 @@ import (
 func (h *Handlers) CreatePayment(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var req PaymentCreateRequest
-	if err := decodeJSON(r, &req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}

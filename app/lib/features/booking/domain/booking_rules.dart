@@ -104,22 +104,37 @@ final class TrainerOffday extends SlotBookState {
 /// 유효기간 판정은 "슬롯의 날짜" 기준(현재 시각 아님) — 슬롯 날짜가
 /// [validFrom, validUntil] 밖이면 예약 불가(백엔드도 같은 규칙).
 abstract final class BookingRules {
-  /// 센터 운영시간 기본값(09~21시 시작) — 어드민 Schedule의 DEFAULT_HOURS(9..21,
-  /// 13칸)와 동일. 운영시간 API가 없어 클라이언트 기본값으로 합성한다.
-  static const openHour = 9;
-  static const closeHour = 21;
-
   /// 빈 시간대 합성(P04 HIGH — 예약 여정 단절 해소): GET /v1/slots는 "예약이 있던
   /// 시간대"만 주므로, 아무도 예약 안 한 날짜는 목록이 텅 빈다("열린 슬롯이 없어요").
-  /// 운영시간(09~21시)의 빈 슬롯(capacity = 센터 정책 slot_capacity, teams=[])을
+  /// 운영시간의 빈 슬롯(capacity = 센터 정책 slot_capacity, teams=[])을
   /// 만들어 서버 슬롯과 slot_key 기준으로 병합한다 — 같은 키는 항상 서버 우선
   /// (합성이 실제 예약·용량을 덮어쓰면 안 된다). 운영시간 밖의 서버 슬롯(관리자
   /// 수기 등록 등)도 버리지 않고 그대로 포함한다(어드민 Schedule 합성과 동일 원리).
   /// 지난 시각 처리(오늘의 지난 시간대 "지남" 칩)는 기존 UI 로직이 그대로 담당.
+  ///
+  /// ## [openHour]·[closeHour]는 **슬롯 시작 시각, 양끝 포함**이다
+  ///
+  /// 9·21이면 09시 시작부터 21시 시작까지 **13칸**이고 마지막 수업은 21:00에 시작한다
+  /// (`h <= closeHour`). 이 경계에서 하나만 틀려도 센터의 영업 한 시간이 사라지거나
+  /// (`h < closeHour` → 21시 수업이 목록에서 통째로 증발) 없는 한 시간이 생긴다
+  /// (`h <= closeHour + 1` → 22시에 예약 버튼이 뜨고 서버가 거부한다).
+  /// `booking_rules_test`가 첫/마지막 slot_key를 직접 단언해 이 경계를 못박는다.
+  ///
+  /// ## 값은 **주입받는다** — 여기서 정책을 읽지 않는다
+  ///
+  /// 예전엔 이 클래스가 `openHour = 9` / `closeHour = 21`을 상수로 들고 있었다.
+  /// 06시에 열거나 23시에 닫는 센터는 그 시간대를 앱에서 **표현할 방법 자체가
+  /// 없었고**, 회원은 실제로 영업 중인 시간을 예약할 수 없었다.
+  /// 지금은 `GET /v1/center`의 `policy.open_hour`/`close_hour`가 진실이고,
+  /// 이 파일은 규칙 파일의 규약대로 값을 받기만 한다(정책을 읽는 경계는
+  /// `core/policy/center_policy_provider.dart` — 구버전 서버의 기본값 9·21도
+  /// 거기서 `CenterPolicy.resolveHours`가 정한다).
   static List<Slot> mergeWithOpenHours({
     required DateTime date,
     required List<Slot> serverSlots,
     required int capacity,
+    required int openHour,
+    required int closeHour,
   }) {
     final byKey = {for (final s in serverSlots) s.slotKey: s};
     final keys = <String>{

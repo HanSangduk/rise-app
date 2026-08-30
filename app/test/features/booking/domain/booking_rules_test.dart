@@ -417,8 +417,22 @@ void main() {
   });
 
   group('BookingRules.mergeWithOpenHours (빈 시간대 합성 — P04 예약 여정 단절 해소)', () {
+    final date = DateTime(2026, 8, 14);
+
+    List<String> keys({
+      required int openHour,
+      required int closeHour,
+      List<Slot> serverSlots = const [],
+    }) =>
+        BookingRules.mergeWithOpenHours(
+          date: date,
+          serverSlots: serverSlots,
+          capacity: 3,
+          openHour: openHour,
+          closeHour: closeHour,
+        ).map((s) => s.slotKey).toList();
+
     test('합성이 서버 슬롯을 덮어쓰지 않는다 — 같은 slot_key는 서버 우선, 빈 시간대만 채움', () {
-      final date = DateTime(2026, 8, 14);
       // 서버 슬롯: 10시(팀 1·용량 2 — 정책 기본과 다른 값), 08시(운영시간 밖 수기 등록).
       const server10 = Slot(
         slotKey: '20260814-10',
@@ -431,6 +445,8 @@ void main() {
         date: date,
         serverSlots: const [server10, server08],
         capacity: 3,
+        openHour: 9,
+        closeHour: 21,
       );
 
       // 09~21시 13칸 + 운영시간 밖 서버 슬롯(08시) 1칸 = 14칸, 시간순 정렬.
@@ -451,6 +467,59 @@ void main() {
       expect(at9.teams, isEmpty);
       final at21 = merged.singleWhere((s) => s.slotKey == '20260814-21');
       expect(at21.teams, isEmpty);
+    });
+
+    // ── 운영시간은 센터 정책값이다(하드코딩 9·21 제거) ──────────────────────────
+    // open_hour/close_hour는 **슬롯 시작 시각, 양끝 포함**이다. 이 경계에서 하나만
+    // 틀리면 센터의 영업 한 시간이 사라지거나(마지막 칸 증발) 없는 한 시간이 생긴다
+    // (서버가 거부할 예약 버튼). 그래서 개수뿐 아니라 **첫/마지막 slot_key를 직접**
+    // 단언한다 — 개수만 보면 구간 전체가 한 칸씩 밀려도 통과한다.
+    group('운영시간 경계 — closeHour는 마지막 슬롯의 "시작" 시각(양끝 포함)', () {
+      test('9..21 = 13칸, 첫 09시 · 마지막 21시', () {
+        final k = keys(openHour: 9, closeHour: 21);
+        expect(k, hasLength(13));
+        expect(k.first, '20260814-09');
+        expect(k.last, '20260814-21'); // 21시 "시작" 수업이 있다 — h < close면 사라진다
+        expect(k.contains('20260814-22'), isFalse); // h <= close+1이면 없는 영업이 생긴다
+        expect(k.contains('20260814-08'), isFalse);
+      });
+
+      test('06시 개장 · 23시 마지막 수업(9..21로는 표현 불가능했던 센터) = 18칸', () {
+        final k = keys(openHour: 6, closeHour: 23);
+        expect(k, hasLength(18));
+        expect(k.first, '20260814-06');
+        expect(k.last, '20260814-23');
+        // 종전 하드코딩이면 06~08시와 22~23시가 통째로 없었다.
+        expect(k, containsAll(['20260814-06', '20260814-08', '20260814-22', '20260814-23']));
+      });
+
+      test('10..11 = 2칸뿐 — 좁은 구간도 그대로', () {
+        final k = keys(openHour: 10, closeHour: 11);
+        expect(k, ['20260814-10', '20260814-11']);
+      });
+
+      test('open == close = 1칸(하루 한 타임만 여는 센터)', () {
+        expect(keys(openHour: 14, closeHour: 14), ['20260814-14']);
+      });
+
+      test('00..23 = 24시간 — 자정 슬롯도 제로패딩돼 문자열 정렬이 곧 시간순', () {
+        final k = keys(openHour: 0, closeHour: 23);
+        expect(k, hasLength(24));
+        expect(k.first, '20260814-00');
+        expect(k.last, '20260814-23');
+        expect(k, List.of(k)..sort());
+      });
+
+      test('운영시간이 바뀌어도 운영시간 밖 서버 슬롯은 계속 살아남는다', () {
+        // 대표가 개장을 10시로 늦춰도 이미 09시에 잡힌 예약이 화면에서 사라지면 안 된다.
+        const server09 = Slot(
+          slotKey: '20260814-09',
+          capacity: 3,
+          teams: [SlotTeam(bookingId: 'b1', trainerId: 't1', memberId: 'me', kind: 'pt')],
+        );
+        final k = keys(openHour: 10, closeHour: 11, serverSlots: const [server09]);
+        expect(k, ['20260814-09', '20260814-10', '20260814-11']);
+      });
     });
   });
 

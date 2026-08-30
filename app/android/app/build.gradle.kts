@@ -1,9 +1,25 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // Firebase 설정(google-services.json) 처리 — 버전은 settings.gradle.kts에서 관리.
     id("com.google.gms.google-services")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// 릴리스 서명(P46) — android/key.properties가 있으면 그 keystore로 서명한다.
+// 파일 생성은 store/scripts/make-keystore.sh, 파일 자체는 .gitignore 대상(비밀).
+// 없으면 debug 키 폴백 — `flutter run --release` 로컬 확인은 계속 되지만, 그 산출물은
+// Play에 올라가지 않는다(업로드 시 서명 불일치로 거부).
+//
+// **android {} 블록 밖**이어야 한다: 그 안에서는 `java`가 Android DSL 쪽으로 해석돼
+// `java.util.Properties`가 "Unresolved reference 'util'"로 깨진다(실측, P46).
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+val hasReleaseKeystore = keystorePropertiesFile.exists()
+if (hasReleaseKeystore) {
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
 }
 
 android {
@@ -34,11 +50,24 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

@@ -45,7 +45,11 @@ type healthState struct {
 func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
 	h.health.mu.Lock()
 	if time.Since(h.health.checked) > healthCacheTTL {
-		ctx, cancel := context.WithTimeout(r.Context(), healthCheckTimeout)
+		// 요청 ctx가 아니라 Background에서 파생한다. r.Context()를 쓰면 **호출자가 연결을 끊는
+		// 것만으로** GetPolicy가 context.Canceled를 반환하고, 그 실패가 15초간 캐시돼 이후
+		// 모든 헬스체크가 503이 된다 — DB는 멀쩡한데 거짓 장애 알림이 울린다. 감시 대상의
+		// 건강은 감시자의 인내심과 무관해야 한다.
+		ctx, cancel := context.WithTimeout(context.Background(), healthCheckTimeout)
 		_, err := h.svc.store.GetPolicy(ctx, h.svc.cfg.DefaultCenterID)
 		cancel()
 		h.health.checked = time.Now()
@@ -72,6 +76,7 @@ func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
 // 구조화 JSON 한 줄로 stderr에 남긴다(Cloud Logging이 JSON 라인을 필드로 파싱한다).
 func recoverJSON(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sw := &statusWriter{ResponseWriter: w}
 		defer func() {
 			rec := recover()
 			if rec == nil {
@@ -87,10 +92,32 @@ func recoverJSON(next http.Handler) http.Handler {
 				"stack":    string(debug.Stack()),
 			})
 			fmt.Fprintln(os.Stderr, string(line))
-			// 응답이 이미 시작된 뒤라면 아래 WriteHeader는 "superfluous" 경고 한 줄로 끝난다 —
-			// 그 경우 어차피 온전한 응답을 만들 방법이 없다.
-			writeJSON(w, http.StatusInternalServerError, errBody{Error: "서버 오류가 발생했습니다"})
+			if sw.wrote {
+				// 응답이 이미 시작됐다면 에러 본문을 덧붙이면 안 된다 — 앞서 나간 JSON 뒤에
+				// 두 번째 JSON 문서가 이어붙어 클라이언트가 200으로 받고 파싱에서 깨진다
+				// (요청 바디에서는 "이어붙인 다중 JSON"을 우리가 거부한다 — 응답에서 그걸
+				// 만들어서는 안 된다). 온전한 응답을 만들 수 없으니 연결을 끊어 클라이언트가
+				// "잘린 응답"으로 정확히 인지하게 한다.
+				panic(http.ErrAbortHandler)
+			}
+			writeJSON(sw, http.StatusInternalServerError, errBody{Error: "서버 오류가 발생했습니다"})
 		}()
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(sw, r)
 	})
+}
+
+// statusWriter — 응답이 이미 시작됐는지만 추적하는 얇은 래퍼(recoverJSON 전용).
+type statusWriter struct {
+	http.ResponseWriter
+	wrote bool
+}
+
+func (s *statusWriter) WriteHeader(code int) {
+	s.wrote = true
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusWriter) Write(b []byte) (int, error) {
+	s.wrote = true // 암묵적 200 — WriteHeader 없이 Write하면 net/http가 200을 보낸다.
+	return s.ResponseWriter.Write(b)
 }

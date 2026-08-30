@@ -20,8 +20,16 @@ class MyRemoteDataSource {
 
   /// POST /v1/contracts/{id}/sign (API계약 v1.4 — 회원 자체서명 P27).
   /// sent→signed 전이 · signed_at·signer_ip는 서버가 기록.
-  Future<void> signContract(String contractId) =>
-      _dio.post<void>('/v1/contracts/$contractId/sign');
+  ///
+  /// P44: [signaturePng](자필 서명 PNG base64)가 있으면 {"signature_png": …} 바디로
+  /// 동봉한다 — 서버는 base64·PNG 매직·크기 상한만 검증한다(결정 6). null이면
+  /// **바디 자체를 싣지 않는다**: 바디 없는 sign이 종전 그대로 유효한 wire고,
+  /// 서버 decodeJSON(DisallowUnknownFields) 앞에서 빈 오브젝트를 지어 보낼 이유가 없다.
+  Future<void> signContract(String contractId, {String? signaturePng}) =>
+      _dio.post<void>(
+        '/v1/contracts/$contractId/sign',
+        data: signaturePng == null ? null : {'signature_png': signaturePng},
+      );
 
   /// GET /v1/payments?member= — 본인 결제·분할 내역.
   ///

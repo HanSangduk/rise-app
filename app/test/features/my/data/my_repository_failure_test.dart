@@ -168,6 +168,70 @@ void main() {
       expect(summary.ledgerFailedPassIds, isEmpty);
     });
   });
+
+  group('계약 문서 스냅샷(v2.18, P39) — DTO→도메인 스레딩에서 유실되지 않는다', () {
+    test('template_version·vars·first_sent_at이 ContractItem까지 온다', () async {
+      // 종전 매핑은 first_sent_at을 DTO까지 받고 버렸다 — {{계약 체결일}}의 미서명
+      // 폴백(:781)이 여기서 끊기면 시트는 스냅샷이 있어도 본문을 못 그린다.
+      adapter.contractsBody =
+          '[{"id":"c1","member_id":"m1","pass_id":"p1","product":"PT 20회",'
+          '"paid_amount":1200000,"status":"sent","first_sent_at":"2026-08-20T00:30:00Z",'
+          '"template_version":"pt-v1","vars":{"회원명":"람"}}]';
+
+      final summary = await loadOk();
+      final c = summary.contracts.single;
+
+      expect(c.templateVersion, 'pt-v1');
+      expect(c.vars, {'회원명': '람'});
+      expect(c.firstSentAt, DateTime.utc(2026, 8, 20, 0, 30));
+      expect(c.hasDocumentSnapshot, isTrue);
+    });
+
+    test('스탬프 전(필드 부재) → 스냅샷 없음 판정 — 요약 고지 경로', () async {
+      adapter.contractsBody =
+          '[{"id":"c1","member_id":"m1","pass_id":"p1","product":"PT 20회",'
+          '"paid_amount":1200000,"status":"sent"}]';
+
+      final summary = await loadOk();
+
+      expect(summary.contracts.single.hasDocumentSnapshot, isFalse);
+      expect(summary.contractsFailed, isFalse);
+    });
+  });
+
+  group('체결 증적(P44) — 서명 이미지·해시·IP가 ContractItem까지 온다', () {
+    test('signature_png/signature_sha256/signer_ip/sha256 스레딩', () async {
+      adapter.contractsBody =
+          '[{"id":"c1","member_id":"m1","pass_id":"p1","product":"PT 20회",'
+          '"paid_amount":1200000,"status":"signed","signed_at":"2026-08-29T05:03:00Z",'
+          '"signer_ip":"211.36.132.7","sha256":"a1b2c3",'
+          '"signature_png":"aGk=","signature_sha256":"f6e5d4"}]';
+
+      final summary = await loadOk();
+      final c = summary.contracts.single;
+
+      expect(c.signaturePng, 'aGk=');
+      expect(c.signatureSha256, 'f6e5d4');
+      expect(c.hasSignatureImage, isTrue);
+      expect(c.signerIp, '211.36.132.7');
+      expect(c.sha256, 'a1b2c3');
+    });
+
+    test('빈 문자열 IP·해시는 null로 접힌다 — 빈 값 행을 화면에 만들지 않는다(pdfPath 규약)', () async {
+      adapter.contractsBody =
+          '[{"id":"c1","member_id":"m1","pass_id":"p1","product":"PT 20회",'
+          '"paid_amount":1200000,"status":"signed","signer_ip":"","sha256":"",'
+          '"signature_png":"","signature_sha256":""}]';
+
+      final summary = await loadOk();
+      final c = summary.contracts.single;
+
+      expect(c.signerIp, isNull);
+      expect(c.sha256, isNull);
+      expect(c.signaturePng, '');
+      expect(c.hasSignatureImage, isFalse);
+    });
+  });
 }
 
 /// 마이 탭 로드가 때리는 4개 엔드포인트를 경로로 갈라 응답하는 최소 어댑터.

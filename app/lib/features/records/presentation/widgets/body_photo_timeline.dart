@@ -15,7 +15,9 @@ import 'package:rise_member/core/widgets/rise_chip.dart';
 import 'package:rise_member/features/bodycheck/domain/bodycheck_models.dart';
 import 'package:rise_member/features/records/domain/records_models.dart'
     as records;
+import 'package:rise_member/features/bodycheck/presentation/widgets/grid_overlay.dart';
 import 'package:rise_member/features/records/presentation/widgets/body_photo_viewer.dart';
+import 'package:rise_member/features/records/presentation/widgets/photo_measure_grid.dart';
 
 /// 체형 분석 타임라인 — 포즈 칩으로 볼 포즈를 고르고, **날짜 칩으로 「기준」을 고른 뒤
 /// 아래 스크러버로 「비교」쪽을 날짜순으로 훑는다.**
@@ -94,6 +96,19 @@ class _BodyPhotoTimelineCardState extends State<BodyPhotoTimelineCard> {
 
   /// 오른쪽 「비교」 — **스크러버만** 바꾼다. 첫 진입은 마지막 = 최신 사진.
   late int _compareIndex;
+
+  /// 계측 격자 표시(P46). 기본 **켜짐** — 이 화면의 목적이 "얼마나 달라졌나"를 재는
+  /// 것이고, 눈금 없는 두 사진은 그 질문에 답하지 못한다. 사진 자체를 보고 싶을 때
+  /// 끌 수 있게 토글을 준다.
+  bool _grid = true;
+
+  /// 눈금 촘촘함 — 타일이 작아 기본은 성김(9×12). 뷰어에서 확대해 볼 땐 촘촘한 쪽이 낫다.
+  GridDensity _density = GridDensity.coarse;
+
+  /// **두 사진이 공유하는** 가로 기준선(0~1). 기준 사진의 어깨에 맞춰 두면 비교
+  /// 사진에서 그 선이 어깨 위·아래 어디에 걸리는지가 곧 변화량이다.
+  /// 사진마다 따로 두지 않는 이유는 [MeasureGridPhoto.refLine] 주석 참조.
+  double _refLine = 0.42;
 
   @override
   void initState() {
@@ -249,32 +264,53 @@ class _BodyPhotoTimelineCardState extends State<BodyPhotoTimelineCard> {
               ],
             ),
             const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: _PhotoTile(
-                    key: bodyPhotoTileKey(entries[baseIndex]),
-                    entry: entries[baseIndex],
-                    role: '기준',
-                    showYear: showYear,
-                    poseLabel: poseLabel,
-                    onDeleted: widget.onPhotoDeleted,
+            // 눈금 컨트롤 — 두 사진에 **같은 값**이 걸린다(비교의 전제).
+            _GridControls(
+              on: _grid,
+              density: _density,
+              onToggle: () => setState(() => _grid = !_grid),
+              onDensity: () => setState(() => _density = _density.next),
+            ),
+            const SizedBox(height: 6),
+            // 기준선 드래그는 **두 타일에 걸쳐** 동작한다 — 한쪽에서 어깨에 맞추면
+            // 반대쪽에도 같은 높이로 그어진다. 그래서 제스처를 Row 전체에 건다.
+            _RefLineDragArea(
+              enabled: _grid,
+              value: _refLine,
+              onChanged: (v) => setState(() => _refLine = v),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _PhotoTile(
+                      key: bodyPhotoTileKey(entries[baseIndex]),
+                      entry: entries[baseIndex],
+                      role: '기준',
+                      showYear: showYear,
+                      poseLabel: poseLabel,
+                      onDeleted: widget.onPhotoDeleted,
+                      showGrid: _grid,
+                      gridDensity: _density,
+                      refLine: _grid ? _refLine : null,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _PhotoTile(
-                    key: bodyPhotoTileKey(entries[compareIndex]),
-                    entry: entries[compareIndex],
-                    role: '비교',
-                    highlighted: true,
-                    showYear: showYear,
-                    poseLabel: poseLabel,
-                    onDeleted: widget.onPhotoDeleted,
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _PhotoTile(
+                      key: bodyPhotoTileKey(entries[compareIndex]),
+                      entry: entries[compareIndex],
+                      role: '비교',
+                      highlighted: true,
+                      showYear: showYear,
+                      poseLabel: poseLabel,
+                      onDeleted: widget.onPhotoDeleted,
+                      showGrid: _grid,
+                      gridDensity: _density,
+                      refLine: _grid ? _refLine : null,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             _DateScrubber(
               entries: entries,
@@ -293,16 +329,20 @@ class _BodyPhotoTimelineCardState extends State<BodyPhotoTimelineCard> {
           //
           // 문구도 두 군데가 사실이 아니었다:
           //  · "자동 비교" — 회원이 손으로 고른다.
-          //  · "코치가 그리드 눈금으로" — 저장 파일에 격자가 없다. `takePicture()`가
-          //    카메라 원본 JPEG을 그대로 주고 격자는 프리뷰 **위에** 얹힌 CustomPaint다.
-          //    어드민 뷰어(BodyPhotoLightbox)도 맨 `<img>`다.
+          //  · "코치가 그리드 눈금으로" — 저장 파일에 격자가 없었다. `takePicture()`가
+          //    카메라 원본 JPEG을 그대로 주고 격자는 프리뷰 **위에** 얹힌 CustomPaint라,
+          //    다 찍고 나면 눈금이 사라졌다. **P46에서 닫았다**: 파일에 굽지 않고
+          //    표시할 때 두 사진에 같은 눈금을 얹는다([MeasureGridPhoto] — 굽지 않는
+          //    근거는 그 클래스 주석). 어드민 뷰어(BodyPhotoLightbox)는 여전히 맨
+          //    `<img>`라 격자가 없다(후속).
           //
           // 아래 문구는 이 화면에서 가장 중요한 한 줄이다 — 회원이 눈으로 보는 크기
           // 차이의 상당 부분이 **몸이 아니라 촬영 거리**에서 온다(2.5m에서 20cm 앞으로
           // 서면 8.7% 커진다. 한 달치 실제 변화는 5% 남짓이다). 이걸 말하지 않으면
           // 화면이 조용히 과장한다.
           const Text(
-            '촬영 거리·폰 높이가 매번 조금씩 달라 크기도 달라 보여요 · 그래서 겹치지 않고 나란히 둬요',
+            '촬영 거리·폰 높이가 매번 조금씩 달라 크기도 달라 보여요 · 그래서 겹치지 않고 나란히 둬요\n'
+            '눈금은 사진에 남지 않고 볼 때만 그려요 — 원본은 그대로예요',
             style: AppTypography.note,
           ),
         ],
@@ -503,6 +543,91 @@ String _shortDate(DateTime d, {bool withYear = false}) =>
 Key bodyPhotoTileKey(BodyPhotoEntry entry) =>
     ValueKey('body-photo-tile-${entry.id}');
 
+/// 눈금 컨트롤 — 켜기/끄기 + 촘촘함. 두 사진에 같은 값이 걸리므로 컨트롤도 하나다.
+class _GridControls extends StatelessWidget {
+  const _GridControls({
+    required this.on,
+    required this.density,
+    required this.onToggle,
+    required this.onDensity,
+  });
+
+  final bool on;
+  final GridDensity density;
+  final VoidCallback onToggle;
+  final VoidCallback onDensity;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        RiseChip(label: on ? '눈금 켜짐' : '눈금 꺼짐', selected: on, onTap: onToggle),
+        if (on) ...[
+          const SizedBox(width: 4),
+          RiseChip(label: density.label, selected: false, onTap: onDensity),
+        ],
+        const Spacer(),
+        if (on)
+          const Flexible(
+            child: Text(
+              '빨간 선을 끌어 맞춰보세요',
+              textAlign: TextAlign.end,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTypography.note,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// 기준선 드래그 영역 — 두 타일을 함께 감싼다.
+///
+/// 타일 **안**에 제스처를 두지 않는 이유: 그러면 왼쪽에서 끈 선과 오른쪽에서 끈 선이
+/// 따로 놀아 눈금자가 두 개가 된다. 여기서 한 번 받아 두 사진에 같은 값을 내려보낸다.
+/// 세로 드래그만 가로챈다 — 탭(확대)과 가로 스크롤은 그대로 통과한다.
+class _RefLineDragArea extends StatefulWidget {
+  const _RefLineDragArea({
+    required this.enabled,
+    required this.value,
+    required this.onChanged,
+    required this.child,
+  });
+
+  final bool enabled;
+  final double value;
+  final ValueChanged<double> onChanged;
+  final Widget child;
+
+  @override
+  State<_RefLineDragArea> createState() => _RefLineDragAreaState();
+}
+
+class _RefLineDragAreaState extends State<_RefLineDragArea> {
+  double? _height;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.enabled) return widget.child;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return GestureDetector(
+          // 타일 탭(뷰어 열기)을 막지 않도록 **세로 드래그만** 가져간다.
+          behavior: HitTestBehavior.translucent,
+          onVerticalDragStart: (d) => _height = context.size?.height,
+          onVerticalDragUpdate: (d) {
+            final h = _height ?? context.size?.height;
+            if (h == null || h <= 0) return;
+            widget.onChanged((widget.value + d.delta.dy / h).clamp(0.02, 0.98));
+          },
+          child: widget.child,
+        );
+      },
+    );
+  }
+}
+
 class _PhotoTile extends ConsumerStatefulWidget {
   const _PhotoTile({
     super.key,
@@ -512,7 +637,17 @@ class _PhotoTile extends ConsumerStatefulWidget {
     required this.poseLabel,
     required this.onDeleted,
     this.highlighted = false,
+    this.showGrid = false,
+    this.gridDensity = GridDensity.coarse,
+    this.refLine,
   });
+
+  /// 계측 격자 표시 여부 — 두 타일이 **같은 값**을 받는다(비교의 전제).
+  final bool showGrid;
+  final GridDensity gridDensity;
+
+  /// 두 사진이 공유하는 가로 기준선(0~1). 회원이 끌어 옮긴다.
+  final double? refLine;
 
   final BodyPhotoEntry entry;
 
@@ -689,19 +824,27 @@ class _PhotoTileState extends ConsumerState<_PhotoTile> {
         poseLabel: widget.poseLabel,
         heroTag: _heroTag,
         onDeleted: widget.onDeleted,
+        // 뷰어도 같은 눈금으로 연다 — 타일에서 맞춰 둔 기준선이 확대하면
+        // 사라진다면, 정작 자세히 볼 때 잴 것이 없어진다.
+        showGrid: widget.showGrid,
+        gridDensity: widget.gridDensity,
+        refLine: widget.refLine,
       ),
       child: Stack(
         fit: StackFit.expand,
         children: [
           Hero(
             tag: _heroTag,
-            child: Image.memory(
-              bytes,
-              fit: BoxFit.contain,
+            // 격자는 이미지 실영역에만 올라간다(레터박스 제외) — 눈금이 사진 밖으로
+            // 새면 위치가 어긋나 비교가 틀린다.
+            child: MeasureGridPhoto(
+              bytes: bytes,
+              showGrid: widget.showGrid,
+              density: widget.gridDensity,
+              refLine: widget.refLine,
               // 디코드 해상도 제한 — 타일이 172dp 높이라 원본 해상도가 필요 없다.
               // (캐시가 든 건 원본 JPEG 바이트 전부라 이건 디코드 쪽만 아낀다.)
               cacheWidth: 720,
-              gaplessPlayback: true,
             ),
           ),
           // 어느 쪽이 기준인지 사진 위에서 바로 읽혀야 한다 — 눈은 사진을 보지

@@ -33,6 +33,11 @@ func (p Principal) IsTrainer() bool { return p.Role == domain.RoleTrainer }
 func (p Principal) IsMember() bool  { return p.Role == domain.RoleMember }
 func (p Principal) IsStaff() bool   { return p.IsOwner() || p.IsTrainer() }
 
+// IsSuperadmin — 교차 센터 관리 평면 전용 롤(멀티센터 Phase A). **IsStaff에 넣지 않는다** —
+// 기존 owner/staff 가드 87곳이 무변경으로 superadmin을 403 처리하는 것이 설계다(설계04 §2:
+// 일상 운영·회원 개인정보에는 들어가지 않는 경계). CenterID는 빈 값이다.
+func (p Principal) IsSuperadmin() bool { return p.Role == domain.RoleSuperadmin }
+
 // ErrForbidden — 역할 스코프 위반(403 매핑, util.go의 writeErr 참고).
 var ErrForbidden = errors.New("api: forbidden")
 
@@ -50,7 +55,7 @@ func withPrincipal(ctx context.Context, p Principal) context.Context {
 var (
 	errMissingToken       = errors.New("missing bearer token")
 	errDevHeadersRequired = errors.New("X-Dev-Uid, X-Dev-Role headers required in dev mode")
-	errInvalidRole        = errors.New("X-Dev-Role must be owner|trainer|member")
+	errInvalidRole        = errors.New("X-Dev-Role must be owner|trainer|member|superadmin")
 )
 
 // Authenticator — Firebase ID 토큰 검증(FIREBASE_PROJECT 설정 시) 또는 dev 헤더 인증(미설정 시).
@@ -95,15 +100,43 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			// 싣고 SDK 에러 원문은 흘리지 않는다(util.go의 원문 노출 금지 원칙).
 			log.Printf("auth reject: reqid=%s %s %s: %v",
 				middleware.GetReqID(r.Context()), r.Method, r.URL.Path, err)
-			msg := "unauthorized"
-			if errors.Is(err, errMissingToken) || errors.Is(err, errDevHeadersRequired) || errors.Is(err, errInvalidRole) {
-				msg = "unauthorized: " + err.Error()
+			// 본문은 **항상 사용자향 한국어**다. 두 클라이언트 모두 서버의 error 문자열을
+			// 자기 폴백보다 우선해 화면에 띄우므로(admin api.ts·앱 api_result_guard), 여기에
+			// "unauthorized"나 dev 헤더 이름을 실으면 그대로 사용자 화면에 뜬다 — util.go가
+			// 세운 "영문 내부 문구 노출 금지" 원칙이 이 한 줄에서 깨진다. 원인 구분이 필요하면
+			// 기계 판독용 code 필드를 쓴다(로그에는 이미 원문이 남는다).
+			code := "unauthorized"
+			switch {
+			case errors.Is(err, errMissingToken):
+				code = "missing_token"
+			case errors.Is(err, errDevHeadersRequired):
+				code = "dev_headers_required"
+			case errors.Is(err, errInvalidRole):
+				code = "invalid_role"
 			}
-			writeJSON(w, http.StatusUnauthorized, errBody{Error: msg})
+			writeJSON(w, http.StatusUnauthorized, struct {
+				Error string `json:"error"`
+				Code  string `json:"code"`
+			}{Error: "인증이 필요해요 — 다시 로그인해주세요", Code: code})
+			return
+		}
+		// superadmin은 관리 평면(/admin/*)과 /me만 쓴다. 센터 스코프 API에 들어가면
+		// CenterID=""로 store를 때려 Firestore nil doc ref panic(→500)이 되거나 빈 답을
+		// 진실처럼 주게 된다 — 개별 서비스 가드 87곳을 재검토하는 대신 여기 한 관문에서
+		// 막는다(운영 침입 방지가 기본값, 설계04 §2).
+		if p.IsSuperadmin() && !superadminAllowedPath(r.URL.Path) {
+			writeJSON(w, http.StatusForbidden,
+				errBody{Error: "forbidden: superadmin은 관리 평면(/v1/admin/*)만 사용할 수 있어요"})
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(withPrincipal(r.Context(), p)))
 	})
+}
+
+// superadminAllowedPath — /v1 · /api/v1 두 마운트를 모두 커버해야 해서 접두사가 아니라
+// 세그먼트로 판정한다. /me는 어드민 로그인 부트스트랩(fetchMe)이 역할 판별에 쓴다.
+func superadminAllowedPath(path string) bool {
+	return strings.Contains(path, "/admin/") || strings.HasSuffix(path, "/me")
 }
 
 func (a *Authenticator) resolve(r *http.Request) (Principal, error) {
@@ -140,10 +173,17 @@ func (a *Authenticator) resolveDev(r *http.Request) (Principal, error) {
 	if uid == "" || role == "" {
 		return Principal{}, errDevHeadersRequired
 	}
-	if role != domain.RoleOwner && role != domain.RoleTrainer && role != domain.RoleMember {
+	if role != domain.RoleOwner && role != domain.RoleTrainer && role != domain.RoleMember &&
+		role != domain.RoleSuperadmin {
 		return Principal{}, errInvalidRole
 	}
-	return a.enrich(r.Context(), uid, role), nil
+	p := a.enrich(r.Context(), uid, role)
+	// dev 헤더로 superadmin을 흉내낼 때는 센터 소속을 비운다 — 운영에선 UserIndex의
+	// center_id=""가 같은 일을 한다(enrich가 인덱스 값을 그대로 복사).
+	if p.Role == domain.RoleSuperadmin {
+		p.CenterID = ""
+	}
+	return p, nil
 }
 
 // enrich — Store의 UserIndex로 centerID/memberID를 보강한다. 인덱스가 없으면 기본 센터 +

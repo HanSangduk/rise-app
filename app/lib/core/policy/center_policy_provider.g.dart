@@ -86,4 +86,4 @@ final class CenterPolicyProvider
   }
 }
 
-String _$centerPolicyHash() => r'796a54a51b737e5cf1e5321df706fd2a43ff33c3';
+String _$centerPolicyHash() => r'f2285b28dc5a9999beeffbd8309f8011f425428a';

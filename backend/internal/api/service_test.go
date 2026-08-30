@@ -26,7 +26,6 @@ const testCenter = "rise"
 func newTestService() *Service {
 	return NewService(store.NewMemory(), config.Config{
 		DefaultCenterID: testCenter,
-		CheckinQRToken:  "test-qr-token",
 	}, nil) // users=nil → dev 합성 uid 프로비저너(Firebase SDK·네트워크 없이 스태프 생성 테스트)
 }
 
@@ -37,7 +36,6 @@ func newTestService() *Service {
 func newProdModeService() *Service {
 	return NewService(store.NewMemory(), config.Config{
 		DefaultCenterID: testCenter,
-		CheckinQRToken:  "test-qr-token",
 		FirebaseProject: "rize-test",
 	}, nil)
 }
@@ -104,7 +102,7 @@ func slotKeyDaysAhead(days, hour int) string {
 func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
 	st := store.NewMemory()
-	cfg := config.Config{DefaultCenterID: testCenter, CheckinQRToken: "test-qr-token"}
+	cfg := config.Config{DefaultCenterID: testCenter}
 	auth, err := NewAuthenticator(context.Background(), cfg, st)
 	if err != nil {
 		t.Fatalf("NewAuthenticator: %v", err)
@@ -440,27 +438,20 @@ func TestTrainerCenterStatsAreRedacted(t *testing.T) {
 }
 
 // P44: self_qr 체크인 — qr_token 검증 + 시간창 내 예약 자동 탐색 + last_visit_at 갱신.
+//
+// P49(v2.23): 대조값의 출처가 환경변수에서 **센터 문서에 저장된 토큰**으로 바뀌었다. 픽스처가
+// config 한 줄에서 seedCheckinToken으로 옮겨간 것이 그 차이 전부다 — 시간창 탐색·last_visit_at
+// 갱신은 그대로다. 발급·재발급·누출 방지는 service_checkin_qr_test.go가 따로 본다.
 func TestSelfQRCheckinFindsBookingInWindow(t *testing.T) {
 	s := newTestService()
 	ctx := context.Background()
 	mem, pass := seedMemberWithPass(t, s, 20)
+	seedCheckinToken(t, s, "test-qr-token")
 
 	// 시간창(±30분)에 확실히 들어오는 슬롯: 분<30이면 현재 정시(경계 :30:xx flaky 방지 — 2R),
 	// 아니면 다음 정시. 현재 정시는 "지난 시간" 예약 거부(v1.3)에 걸리므로 스토어에 직접 심는다
 	// (실플로우: 예약은 며칠 전, 체크인은 수업 시각 — 생성 시점 검증과 무관).
-	now := time.Now().In(domain.KST)
-	slotHour := now
-	if now.Minute() >= 30 {
-		slotHour = now.Add(time.Hour)
-	}
-	slotKey := slotHour.Format("20060102") + fmt.Sprintf("-%02d", slotHour.Hour())
-	seeded := &domain.Booking{
-		SlotKey: slotKey, MemberID: mem.ID, TrainerID: "t1", PassID: pass.ID,
-		Kind: domain.BookingKindPT, Status: domain.BookingConfirmed,
-	}
-	if err := s.store.BookAtomic(ctx, testCenter, slotKey, 3, seeded); err != nil {
-		t.Fatal(err)
-	}
+	slotKey := seedBookingInCheckinWindow(t, s, mem, pass)
 
 	p := memberP(mem.ID)
 	if _, err := s.Checkin(ctx, p, CheckinRequest{Source: "self_qr", QRToken: "wrong"}); err == nil {
@@ -1074,17 +1065,17 @@ func TestContractSignByMember(t *testing.T) {
 	}
 	cid := contracts[0].ID
 	other, _ := seedMemberWithPass(t, s, 10)
-	if _, err := s.SignContract(ctx, memberP(other.ID), cid, "1.2.3.4"); !errors.Is(err, ErrForbidden) {
+	if _, err := s.SignContract(ctx, memberP(other.ID), cid, "1.2.3.4", nil); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("타인 계약 서명이 통과: %v", err)
 	}
-	signed, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4")
+	signed, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if signed.Status != domain.ContractStatusSigned || signed.SignedAt == nil || signed.SignerIP != "1.2.3.4" {
 		t.Errorf("signed = %+v", signed)
 	}
-	if _, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4"); err == nil {
+	if _, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4", nil); err == nil {
 		t.Fatal("signed 계약 재서명이 통과")
 	}
 }
@@ -1510,7 +1501,7 @@ func TestOffdayBookingRejectedAndSeedSmoke(t *testing.T) {
 	}
 
 	// 시딩 스모크: 빈 스토어에 시딩 → 핵심 화면 데이터가 실제로 조회되는지.
-	fresh := NewService(store.NewMemory(), config.Config{DefaultCenterID: testCenter, CheckinQRToken: "tok"}, nil)
+	fresh := NewService(store.NewMemory(), config.Config{DefaultCenterID: testCenter}, nil)
 	if err := store.SeedDemo(ctx, fresh.store, testCenter); err != nil {
 		t.Fatalf("SeedDemo: %v", err)
 	}
@@ -1728,7 +1719,7 @@ func TestRefundSettlementWithPartialPayment(t *testing.T) {
 		}
 	}
 	if len(contracts) > 0 {
-		if _, err := s.SignContract(ctx, memberP(mem.ID), contracts[0].ID, "1.2.3.4"); err == nil {
+		if _, err := s.SignContract(ctx, memberP(mem.ID), contracts[0].ID, "1.2.3.4", nil); err == nil {
 			t.Error("voided 계약 서명이 통과")
 		}
 	}
@@ -2540,7 +2531,7 @@ func (u uncappedPolicyStore) GetPolicy(ctx context.Context, centerID string) (*d
 // P14 C1 최종 방어선 — 정책 출처가 무엇을 주든 **회원이 서명하는 숫자는 공제 가능한 숫자**다.
 func TestContractSnapshotNeverExceedsCapEvenIfPolicySourceLies(t *testing.T) {
 	s := NewService(uncappedPolicyStore{Store: store.NewMemory(), rate: 0.30}, config.Config{
-		DefaultCenterID: testCenter, CheckinQRToken: "test-qr-token",
+		DefaultCenterID: testCenter,
 	}, nil)
 	ctx := context.Background()
 	mem, pass := seedMemberWithPass(t, s, 20)

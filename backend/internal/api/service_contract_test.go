@@ -12,6 +12,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
@@ -119,7 +120,7 @@ func TestSendContractSignedIsRejected(t *testing.T) {
 		t.Fatalf("계약 목록: %v %d건", err, len(cs))
 	}
 	cid := cs[0].ID
-	if _, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4"); err != nil {
+	if _, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4", nil); err != nil {
 		t.Fatalf("서명: %v", err)
 	}
 
@@ -178,7 +179,7 @@ func TestSendAndSignContractRefundedPassGuard(t *testing.T) {
 	if !errors.Is(err, errBadRequest) || !strings.Contains(err.Error(), "발송할 수 없어요") {
 		t.Errorf("환불 패스 발송 = %v, want 400 '환불 처리된 거래의 계약은 발송할 수 없어요'", err)
 	}
-	_, err = s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4")
+	_, err = s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4", nil)
 	if !errors.Is(err, errBadRequest) || !strings.Contains(err.Error(), "서명할 수 없어요") {
 		t.Errorf("환불 패스 서명 = %v, want 400 '환불 처리된 거래의 계약은 서명할 수 없어요'", err)
 	}
@@ -249,6 +250,8 @@ func TestCreateContractScopeAndValidation(t *testing.T) {
 
 // 서명이 먼저 성립한 계약은 환불이 **보존**해야 한다(v1.5 "signed는 무효화 불가" — 성립했던
 // 거래의 법적 기록). 무효화 스윕의 CanVoidContract 스킵이 지키는 불변식의 순차 재현.
+// v2.21(P44): 자필 서명 이미지 포함으로 서명한다 — 서명 증적 보존에 signature_png·
+// signature_sha256도 포함된다는 것(이미지 있는 서명이 환불에 살아남는 것)까지 함께 고정.
 func TestRefundKeepsSignedContract(t *testing.T) {
 	s := newTestService()
 	ctx := context.Background()
@@ -258,7 +261,8 @@ func TestRefundKeepsSignedContract(t *testing.T) {
 		t.Fatalf("계약 목록: %v %d건", err, len(cs))
 	}
 	cid := cs[0].ID
-	if _, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4"); err != nil {
+	sig := signPadPNG(t, 300, 120)
+	if _, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4", sig); err != nil {
 		t.Fatalf("서명: %v", err)
 	}
 	if _, _, err := s.RefundPass(ctx, ownerP(), pass.ID, 0); err != nil {
@@ -271,6 +275,10 @@ func TestRefundKeepsSignedContract(t *testing.T) {
 	}
 	if saved.Status != domain.ContractStatusSigned || saved.SignedAt == nil || saved.SignerIP != "1.2.3.4" {
 		t.Fatalf("환불이 signed 계약을 건드렸다: %s(signed_at=%v, ip=%q) — 서명된 계약은 보존", saved.Status, saved.SignedAt, saved.SignerIP)
+	}
+	if saved.SignaturePNG != base64.StdEncoding.EncodeToString(sig) || saved.SignatureSHA256 == "" {
+		t.Errorf("환불이 서명 이미지 증적을 지웠다: png_len=%d hash=%q — signed 보존은 서명 이미지 포함(P44)",
+			len(saved.SignaturePNG), saved.SignatureSHA256)
 	}
 	savedPass, err := s.store.GetPass(ctx, testCenter, pass.ID)
 	if err != nil {
@@ -306,7 +314,7 @@ func TestResendCannotClobberSignedContract(t *testing.T) {
 		sendErr <- err
 	}()
 	<-reached // 재발송이 계약 쓰기 직전에 멈춰 있다 — 사전 읽기(스냅샷)는 이미 끝난 지점
-	if _, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4"); err != nil {
+	if _, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4", nil); err != nil {
 		t.Fatalf("서명: %v", err)
 	}
 	close(release)
@@ -344,7 +352,7 @@ func TestSignCannotResurrectVoidedContract(t *testing.T) {
 
 	signErr := make(chan error, 1)
 	go func() {
-		_, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4")
+		_, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4", nil)
 		signErr <- err
 	}()
 	<-reached // 서명이 계약 쓰기 직전에 멈춰 있다 — 스냅샷은 아직 sent·active였다
@@ -391,7 +399,7 @@ func TestRefundVoidSkipsContractSignedMidflight(t *testing.T) {
 		refundErr <- err
 	}()
 	<-reached // 환불이 후보 선정(sent로 목록에 담음)을 끝내고 마감 쓰기 직전에 멈춰 있다
-	if _, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4"); err != nil {
+	if _, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4", nil); err != nil {
 		t.Fatalf("서명: %v", err)
 	}
 	close(release)

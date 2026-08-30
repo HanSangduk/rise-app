@@ -96,8 +96,21 @@ class MyRepositoryImpl implements MyRepository {
                   paidAmount: d.paidAmount,
                   status: d.status,
                   sentAt: d.sentAt == null ? null : DateTime.tryParse(d.sentAt!),
+                  // 최초 발송 증적 — {{계약 체결일}} 렌더의 미서명 폴백(계약서doc :781).
+                  firstSentAt: d.firstSentAt == null ? null : DateTime.tryParse(d.firstSentAt!),
                   signedAt: d.signedAt == null ? null : DateTime.tryParse(d.signedAt!),
                   pdfPath: (d.pdfPath == null || d.pdfPath!.isEmpty) ? null : d.pdfPath,
+                  // v2.18 문서 스냅샷 — 빈 값은 빈 값 그대로(스냅샷 유무 판정은
+                  // ContractItem.hasDocumentSnapshot 몫).
+                  templateVersion: d.templateVersion,
+                  vars: d.vars,
+                  // P44 체결 증적 — 서명 IP·문서 해시는 빈 문자열을 null로 접는다
+                  // (pdfPath와 같은 규약: 빈 값 행을 그리지 않는다). 서명 이미지
+                  // 2필드는 빈 값 그대로 — 유무 판정은 hasSignatureImage 몫.
+                  signerIp: (d.signerIp == null || d.signerIp!.isEmpty) ? null : d.signerIp,
+                  sha256: (d.sha256 == null || d.sha256!.isEmpty) ? null : d.sha256,
+                  signaturePng: d.signaturePng,
+                  signatureSha256: d.signatureSha256,
                   // 위약금율은 계약 상세에서 보여준다 — 회원이 나중에 "해지하면
                   // 얼마 떼이나"를 다시 확인할 수 있어야 한다. 종전엔 DTO까지만
                   // 받고 여기서 버려 화면까지 오지 못했다.
@@ -203,8 +216,8 @@ class MyRepositoryImpl implements MyRepository {
   }
 
   @override
-  Future<Result<void>> signContract(String contractId) =>
-      guardApi(() => _remote.signContract(contractId));
+  Future<Result<void>> signContract(String contractId, {String? signaturePng}) =>
+      guardApi(() => _remote.signContract(contractId, signaturePng: signaturePng));
 
   @override
   Future<Result<AccountDeletionSummary>> deleteAccount() {

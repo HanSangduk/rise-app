@@ -11,7 +11,9 @@ import type {
   Booking,
   Center,
   CenterBusiness,
+  CenterFacility,
   CenterPolicy,
+  CheckinQrToken,
   Contract,
   CreateStaffRequest,
   Exercise,
@@ -20,6 +22,7 @@ import type {
   HwCheck,
   Inbody,
   InbodyCreateRequest,
+  ConsultRequest,
   JoinMatchResult,
   JoinRequest,
   Ledger,
@@ -36,6 +39,8 @@ import type {
   Role,
   Slot,
   Staff,
+  StaffPhotoUploadRequest,
+  StaffPhotoUploadResult,
   StaffProfile,
   StaffTransferResult,
   StaffUpdateRequest,
@@ -82,14 +87,20 @@ async function authHeader(): Promise<{ Authorization?: string }> {
 //
 // data — 표준 {error} 위에 확장 필드를 얹어 보내는 응답의 파싱 결과(v2.0 퇴사 409의 blockers가
 // 첫 사례). 재조회 없이 "무엇을 먼저 이관해야 하는지"를 그 자리에서 그리려면 본문이 필요하다.
+// transport — 백엔드가 아니라 **전달 경로**(Hosting 리라이트 유실·SPA 폴백이 /api를 삼킴)가
+// 낸 실패라는 표시. 상류 502(Cloud Run 콜드스타트 등 일시적)와 달리 배포를 고치기 전까지
+// 100% 결정적으로 실패하므로 **재시도하면 안 된다** — 재시도는 진단만 늦추고(백오프 대기)
+// 요청 수를 4배로 만든다. main.tsx의 retry 술어가 이 플래그를 본다.
 export class ApiError extends Error {
   readonly status: number;
   readonly data: unknown;
-  constructor(message: string, status: number, data?: unknown) {
+  readonly transport: boolean;
+  constructor(message: string, status: number, data?: unknown, transport = false) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.data = data;
+    this.transport = transport;
   }
 }
 
@@ -112,9 +123,20 @@ const STATUS_FALLBACK: Record<number, string> = {
   401: "인증이 필요해요 — 다시 로그인해주세요",
   403: "권한이 없어요",
   404: "요청한 데이터를 찾을 수 없어요",
-  409: "동시 처리 충돌 — 새로고침 후 다시 시도해주세요",
-  500: "서버 오류가 발생했어요",
+  // 종전 "동시 처리 충돌"·"서버 오류가 발생했어요"는 쓰는 사람(센터 대표)의 말이 아니고,
+  // 특히 500은 다음에 뭘 하라는 말이 없어 화면이 그대로 막다른 길이 됐다.
+  409: "다른 곳에서 먼저 바뀌었어요 — 새로고침 후 다시 시도해주세요",
+  500: "지금 처리하지 못했어요 — 잠시 후 다시 시도해주세요",
 };
+
+// 연결 자체가 실패했을 때의 문구 — fetch가 던지는 곳(요청·본문 수신)이 둘이라 상수로 묶는다.
+// 센터 와이파이가 끊기는 상황이 가장 흔한 실패라 이 한 줄이 제일 자주 읽힌다.
+const OFFLINE_MSG = "인터넷 연결이 끊긴 것 같아요 — 연결을 확인하고 다시 시도해주세요";
+
+// 전달 경로(Hosting 리라이트 유실·SPA 폴백이 /api를 삼킴)가 낸 실패의 문구.
+// 대표가 고칠 수 있는 게 없는 상태라 "관리자에게 알리세요"는 존재하지 않는 사람을 가리켰다
+// (이 제품에 관리자는 없다 — 대표 본인이 최상위 사용자다). 실제로 가능한 유일한 다음 행동만 남긴다.
+const TRANSPORT_MSG = "지금 자료를 불러올 수 없어요 — 잠시 후 다시 시도해주세요";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers ?? { "Content-Type": "application/json" });
@@ -126,19 +148,47 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     if (devRole) headers.set("X-Dev-Role", devRole);
     if (devUid) headers.set("X-Dev-Uid", devUid);
   }
-  // cache: "no-store" — 브라우저 HTTP 캐시를 완전히 우회한다. 전달 경로가 고장난 동안 나간
-  // 캐시 가능 에러(Hosting 404가 max-age=3600을 달고 온 P34 실사고)가 브라우저에 눌러앉으면,
-  // 서버를 고쳐도 이 클라이언트는 캐시된 에러를 재생하며 "서버가 죽었다"를 유지한다 —
-  // 서버/CDN 설정과 무관하게 클라이언트에서 확정적으로 끊는 유일한 방어선이다.
-  const res = await fetch(BASE + path, { ...init, headers, cache: "no-store" });
+  // cache: "reload" — 캐시를 **읽지 않고** 항상 네트워크로 나간다. P34에서 Hosting 404가
+  // max-age=3600을 달고 나가 브라우저·엣지에 눌러앉는 바람에, 서버를 고쳐도 클라이언트가
+  // 캐시된 404를 재생하며 "서버가 죽었다"를 유지했다(시크릿 창에서만 정상 동작).
+  //
+  // "no-store"가 아니라 "reload"인 이유: no-store는 **브라우저 자신의 캐시만** 우회하고
+  // 요청에 재검증 헤더를 붙이지 않아 중간 공유 캐시(Hosting 엣지)가 저장본을 그대로 줄 수 있다.
+  // reload는 no-cache 요청 헤더를 실어 공유 캐시까지 재검증시킨다 — 우리가 겪은 실패 모드가
+  // 정확히 "엣지·브라우저에 눌러앉은 응답"이라 이쪽이 맞다. (API 응답 자체의 저장 금지는
+  // 서버 writeJSON의 no-store가 담당한다 — 층마다 책임이 다르다.)
+  //
+  // 네트워크가 아예 실패하면(오프라인·DNS·서버 미도달) fetch는 응답 대신 브라우저 자신의
+  // TypeError를 던진다 — 메시지가 "Failed to fetch"(Safari "Load failed")라, 화면 53곳이
+  // 하나같이 .message를 그리는 이 어드민에서는 **한국어 화면에 영문 한 줄**이 뜬다.
+  // req()의 다른 모든 갈래는 한국어로 정규화돼 있었는데(STATUS_FALLBACK) 정작 센터에서
+  // 제일 자주 나는 실패만 구멍이었다. 여기서 감싸 나머지와 같은 모양(ApiError)으로 만든다.
+  //
+  // status 0 — HTTP 응답을 못 받았다는 뜻의 관례값이다. 4xx가 아니므로 main.tsx의 retry
+  // 술어가 자동 재시도 대상으로 본다(연결이 돌아오면 그대로 성공한다). transport 플래그는
+  // 붙이지 않는다 — 그건 "배포를 고치기 전까지 결정적으로 실패"라는 표시라 재시도를 끈다.
+  let res: Response;
+  try {
+    res = await fetch(BASE + path, { ...init, headers, cache: "reload" });
+  } catch (e) {
+    // 원문은 개발자 몫으로 콘솔에만 — 화면에는 위 한국어만 나간다.
+    console.error(`[api] 네트워크 요청 실패 ${path}:`, e);
+    throw new ApiError(OFFLINE_MSG, 0);
+  }
   // HTML 응답 = 백엔드가 아니라 **전달 경로**(Hosting 404 페이지, SPA 폴백이 /api를 삼킨 부분
   // 배포)의 응답이다. JSON.parse 실패나 "데이터 없음" 폴백으로 뭉개면 15시간짜리 오진이 된다
   // (P34 — 라우팅 유실이 "요청한 데이터를 찾을 수 없어요"로 표시됐다). 전용 문구로 가른다.
-  const isJSON = (res.headers.get("content-type") ?? "").includes("application/json");
+  // \bjson\b — application/problem+json·text/json 같은 변형도 JSON으로 인정한다.
+  // "application/json" 부분일치로만 보면 게이트웨이(ESPv2·IAP)를 앞에 뒀을 때 정상 JSON을
+  // "전달 경로 오류"로 오진한다.
+  const isJSON = /\bjson\b/i.test(res.headers.get("content-type") ?? "");
   if (!res.ok) {
     // 서버는 {"error":"한국어 메시지"}를 주는 것이 계약이지만, 프록시/게이트웨이가 낸
     // 비JSON 에러까지 영문 statusText로 노출하지 않도록 상태코드별 한국어 폴백을 둔다.
-    let msg = STATUS_FALLBACK[res.status] ?? `요청에 실패했어요 (${res.status})`;
+    // 매핑에 없는 상태(429·502·503 등)도 한국어 + 다음 행동으로 — 괄호 안 숫자는 남긴다
+    // (대표가 찍어 보내는 화면 사진에서 유일한 단서라, 이것까지 지우면 원인을 못 좁힌다).
+    let msg =
+      STATUS_FALLBACK[res.status] ?? `지금 처리하지 못했어요 — 잠시 후 다시 시도해주세요 (${res.status})`;
     let data: unknown;
     if (isJSON) {
       try {
@@ -149,25 +199,44 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
         /* 에러 바디가 JSON이 아니면 상태코드 폴백 유지 */
       }
     } else {
-      msg = "API 서버에 연결되지 않았어요 — 연결 경로 문제일 수 있어요. 잠시 후 다시 시도해주세요";
+      msg = TRANSPORT_MSG;
       // 다음 사고의 진단 시간을 줄이는 흔적 — 무엇이 왔는지(HTML 등) 앞부분만 남긴다.
       const text = await res.text().catch(() => "");
       console.error(`[api] 비JSON 에러 응답 (${res.status}) ${path}:`, text.slice(0, 200));
+      // 세션 정리는 던지기 **전에** — 화면이 에러를 처리하는 사이 셸이 남아 있지 않게 한다.
+      if (res.status === 401) onUnauthorized?.();
+      throw new ApiError(msg, res.status, data, true /* transport */);
     }
-    // 세션 정리는 던지기 **전에** — 화면이 에러를 처리하는 사이 셸이 남아 있지 않게 한다.
     if (res.status === 401) onUnauthorized?.();
     throw new ApiError(msg, res.status, data);
   }
   // 2xx인데 바디가 빈 응답(204 포함)은 undefined로 — res.json()의 SyntaxError가
   // 성공을 실패로 둔갑시키지 않게 한다.
-  const text = await res.text();
+  //
+  // 헤더는 왔는데 본문을 받는 도중 연결이 끊기면 res.text()가 위 fetch와 똑같은 TypeError를
+  // 던진다 — 같은 구멍이 하나 더 있었던 셈이라 같은 방식으로 막는다.
+  let text: string;
+  try {
+    text = await res.text();
+  } catch (e) {
+    console.error(`[api] 응답 본문 수신 실패 ${path}:`, e);
+    throw new ApiError(OFFLINE_MSG, 0);
+  }
   if (text && !isJSON) {
     // 200인데 HTML — SPA 폴백(** → /index.html)이 /api를 삼킨 상태다. res.ok라 에러 경로를
     // 안 타므로 여기서 안 끊으면 JSON.parse SyntaxError 원문이 화면에 그대로 뜬다.
     console.error(`[api] 2xx 비JSON 응답 ${path}:`, text.slice(0, 200));
-    throw new ApiError("API 연결 경로에 문제가 있어요 — 관리자에게 알려주세요", 502);
+    throw new ApiError(TRANSPORT_MSG, 502, undefined, true);
   }
-  return (text ? JSON.parse(text) : undefined) as T;
+  try {
+    return (text ? JSON.parse(text) : undefined) as T;
+  } catch {
+    // content-type은 JSON인데 본문이 잘렸다(연결 끊김·프록시 truncate). 정규화하지 않으면
+    // 생 SyntaxError의 영문 원문("Unexpected token …")이 화면에 그대로 뜬다 — 화면은 모두
+    // .message를 표시한다. 전송 실패이므로 재시도 대상은 맞다(transport 플래그는 안 붙인다).
+    console.error(`[api] JSON 파싱 실패 ${path}:`, text.slice(0, 200));
+    throw new ApiError("받아 온 자료가 온전하지 않아요 — 잠시 후 다시 시도해주세요", 502);
+  }
 }
 
 function qs(params: Record<string, string | number | undefined>): string {
@@ -195,6 +264,12 @@ export const api = {
     req<void>("/v1/join/approve", { method: "POST", body: JSON.stringify({ request_id }) }),
   // [가정 2] 대기 중 가입 요청 목록(설정 화면). types.ts JoinRequest 참고.
   joinRequests: () => req<JoinRequest[]>("/v1/join/requests"),
+
+  // ── 재등록/상담 요청(계약 v2.20, P42) ─────────────────────────────────
+  // 서버가 역할 스코프를 정한다: owner 전체 / trainer 담당 회원만 — 어드민은 그대로 그린다.
+  consultRequests: () => req<ConsultRequest[]>("/v1/consult-requests"),
+  consultRequestDone: (id: string) =>
+    req<ConsultRequest>(`/v1/consult-requests/${id}/done`, { method: "POST" }),
 
   // ── 회원 ────────────────────────────────────────────────────────────
   // [가정 1] 응답에 회원권(passes[])이 포함된다고 가정 — types.ts MemberWithPasses 참고.
@@ -369,6 +444,22 @@ export const api = {
   // 폼이 항상 전 필드를 제출한다(머지 아님) — 빈 값으로 지우기가 자연스럽다. 범위 위반은 400 한국어.
   updateStaffProfile: (uid: string, profile: StaffProfile) =>
     req<Staff>(`/v1/staff/${uid}/profile`, { method: "PUT", body: JSON.stringify({ profile }) }),
+  // 트레이너 사진 업로드(owner 전용) — 폰·노트북에 있는 파일을 그대로 올린다. 종전에는 "이미지
+  // 주소(URL)" 칸 하나뿐이라, URL이 없는 사진(= 대표가 가진 사진 대부분)은 넣을 방법이 아예 없었다.
+  //
+  // 바디는 base64 문자열이다(multipart 아님): 이 API 층은 전부 JSON + Bearer 한 벌로 통일돼 있고,
+  // 아바타 한 장(축소 후 수십 KB)에 전송 층을 하나 더 들일 이유가 없다. 대신 **보내기 전에**
+  // 클라이언트가 512px로 줄인다(lib/imageDownscale.ts) — 서버는 디코드 후 2MB를 넘기면 거절하고,
+  // 폰 원본은 그 상한을 항상 넘는다.
+  //
+  // 서버가 응답의 photo_url을 프로필에도 저장하므로 이 호출 하나로 반영이 끝난다.
+  // 404 = 이 배포에 아직 없는 엔드포인트(백엔드 병렬 작업) — 화면이 CheckinQrCard와 같은 규약으로
+  // 접는다(크래시 대신 "아직 서버에 올라가지 않았어요").
+  uploadStaffPhoto: (uid: string, body: StaffPhotoUploadRequest) =>
+    req<StaffPhotoUploadResult>(`/v1/staff/${uid}/photo`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   // (구 [가정 4] → v1.4 계약 확정) 센터 정책 조회 — member에게도 공개, revenue_target은 owner만.
   center: () => req<Center>("/v1/center"),
   // [v1.4] 운영 정책 편집(owner 전용). 범위 위반은 400 한국어 메시지 — 폼에 그대로 표시한다.
@@ -391,4 +482,20 @@ export const api = {
   // 응답은 GET /v1/center과 같은 모양(Center 전체)이라 캐시를 그대로 갈아끼울 수 있다.
   updateCenterBusiness: (business: CenterBusiness) =>
     req<Center>("/v1/center", { method: "PUT", body: JSON.stringify({ business }) }),
+  // [P42] 체육시설업 신고 상태 저장(owner 전용) — PUT /v1/center의 덩어리 머지가 아니라
+  // **전용 엔드포인트**다: 바디는 facility 절 3필드를 통째로(top-level, {facility} 래핑 없음).
+  // reported인데 신고번호가 비면 400 — 화면이 같은 규칙으로 선차단한다(서버가 최종 집행자).
+  // 응답은 Center가 아니라 **저장된 facility 그 자체**(200 same shape) — 캐시 반영은
+  // useSaveFacility의 keys.center 무효화가 맡는다.
+  saveFacility: (facility: CenterFacility) =>
+    req<CenterFacility>("/v1/center/facility", { method: "PUT", body: JSON.stringify(facility) }),
+
+  // ── 데스크 체크인 QR(P49, owner 전용) ────────────────────────────────
+  // 조회 — 미발급이면 {issued:false, token:"", issued_at:null}. 200이지 404가 아니다
+  // (404는 "이 배포에 엔드포인트가 아직 없다"는 뜻으로만 쓰인다 — CheckinQr.tsx의 배포 시차 분기).
+  checkinQr: () => req<CheckinQrToken>("/v1/center/checkin-qr"),
+  // 재발급 — 첫 발급과 교체가 **같은 동사**다(서버가 새 토큰을 만들어 저장하고 그 결과를
+  // 조회와 같은 모양으로 돌려준다). 바디 없음. 성공하는 순간 **이전 토큰은 즉시 무효**가 되어
+  // 데스크에 붙어 있는 종이가 죽는다 — 화면이 2단 확인을 세우는 이유가 이 한 줄이다.
+  rotateCheckinQr: () => req<CheckinQrToken>("/v1/center/checkin-qr/rotate", { method: "POST" }),
 };

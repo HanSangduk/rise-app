@@ -13,7 +13,7 @@ import {
   type ThHTMLAttributes,
   useEffect,
 } from "react";
-import { Loader2, X } from "lucide-react";
+import { Loader2, RotateCw, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 type Variant = "default" | "outline" | "ghost" | "danger";
@@ -138,11 +138,25 @@ export function EmptyState({ children }: { children: ReactNode }) {
   );
 }
 
-export function ErrorState({ error }: { error: unknown }) {
+// 조회 실패 패널. onRetry를 주면 "다시 시도" 버튼이 함께 뜬다.
+//
+// 버튼이 필요한 이유: 문구는 여러 곳에서 "새로고침 후 다시 시도"라고 말하는데 정작 누를 것이
+// 하나도 없었다. 대표는 F5나 브라우저 새로고침 아이콘을 안내 없이 떠올리지 못하고, 설령
+// 새로고침해도 화면 전체가 다시 그려져 보고 있던 자리를 잃는다 — 실패한 조회 하나만 다시
+// 부르는 게 맞다. 같은 판단을 이미 BodyPhotoLightbox가 하고 있어(network 실패에만 재시도
+// 버튼) 그 패턴을 공용 컴포넌트로 올린 것이다.
+//
+// onRetry는 선택값이다: 되돌릴 방법이 정말 없는 자리(권한 없음 등)에 죽은 버튼을 만들지 않는다.
+export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const msg = error instanceof Error ? error.message : String(error);
   return (
-    <div className="rounded-xl border border-dashed border-danger/40 py-10 text-center text-sm text-danger">
-      오류: {msg}
+    <div className="rounded-xl border border-dashed border-danger/40 px-4 py-10 text-center text-sm text-danger">
+      <p className="leading-relaxed">{msg}</p>
+      {onRetry && (
+        <Button variant="outline" size="sm" className="mt-3" onClick={onRetry}>
+          <RotateCw className="h-3 w-3" /> 다시 시도
+        </Button>
+      )}
     </div>
   );
 }

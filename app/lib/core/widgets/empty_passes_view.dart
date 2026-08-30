@@ -17,11 +17,16 @@ class EmptyPassesView extends StatelessWidget {
     required this.onRefresh,
     this.title = '아직 회원권이 없어요',
     this.message = '센터에서 회원권 등록 후 이용할 수 있어요',
+    this.action,
   });
 
   final VoidCallback onRefresh;
   final String title;
   final String message;
+
+  /// 새로고침 위에 서는 주 행동(선택) — 재등록 요청 CTA(P42) 등. 이 뷰가 "회원이 할 수
+  /// 있는 게 없다"는 데드엔드였던 이유가 이 자리의 부재였다.
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -31,16 +36,31 @@ class EmptyPassesView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const RiseIcon(RiseIcons.fileText, size: 34, color: AppColors.muted),
+            const RiseIcon(
+              RiseIcons.fileText,
+              size: 34,
+              color: AppColors.muted,
+            ),
             const SizedBox(height: 12),
-            Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+            ),
             const SizedBox(height: 6),
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.5),
+              style: const TextStyle(
+                fontSize: 11.5,
+                color: AppColors.muted,
+                height: 1.5,
+              ),
             ),
             const SizedBox(height: 14),
+            if (action case final action?) ...[
+              action,
+              const SizedBox(height: 8),
+            ],
             RiseButton(label: '새로고침', small: true, onPressed: onRefresh),
           ],
         ),

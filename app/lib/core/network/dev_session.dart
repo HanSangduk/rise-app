@@ -15,11 +15,17 @@ part 'dev_session.g.dart';
 class DevSession {
   const DevSession({
     this.enabled = defaultEnabled,
-    this.uid = 'dev-member-uid-001',
+    this.uid = defaultUid,
   });
 
   static const defaultEnabled =
       bool.fromEnvironment('DEV_SESSION', defaultValue: kDebugMode);
+
+  /// dev 헤더에 실을 uid — 기본은 시드에 없는 신규 uid(온보딩 플로우 개발용).
+  /// 스토어 스크린샷 캡처(P46)는 `--dart-define=DEV_UID=member1`로 시드 김민지
+  /// (UserIndex member1 → mem_000001)에 붙는다. 릴리스에선 dev 세션 자체가 꺼진다.
+  static const defaultUid =
+      String.fromEnvironment('DEV_UID', defaultValue: 'dev-member-uid-001');
 
   final bool enabled;
   final String uid;

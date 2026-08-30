@@ -27,6 +27,7 @@ import (
 //	  slots/{slotKey}  bookings/{id}  recurring/{id}
 //	  homeworks/{id}  hwChecks/{memberID_hwID_date}
 //	  payments/{id}  contracts/{id}(v1.1 정합 패치)  bodyPhotos/{id}  inbody/{id}  checkins/{id}
+//	  consult_requests/{id}(재등록/상담 요청, v2.20 — 회원이 이미 센터 귀속이라 센터 스코프)
 //	users/{uid}            UserIndex(인증 인덱스, 센터 무관 — 설계03 §6 users/{uid} 대응)
 //	join_requests/{id}     JoinRequest(승인 전엔 특정 센터에 귀속되지 않아 최상위)
 //
@@ -207,6 +208,81 @@ func (f *Firestore) ListJoinRequests(ctx context.Context, centerID string) ([]Jo
 		out = append(out, *jr)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) }) // 최신 먼저
+	return out, nil
+}
+
+// ---- 재등록/상담 요청(계약 v2.20, P42) — 센터 스코프 컬렉션 ----
+
+func (f *Firestore) CreateConsultRequest(ctx context.Context, centerID string, cr *ConsultRequest) (string, error) {
+	ref := f.center(centerID).Collection("consult_requests").NewDoc()
+	cr.ID = ref.ID
+	if cr.CreatedAt.IsZero() {
+		cr.CreatedAt = time.Now().UTC()
+	}
+	if cr.Status == "" {
+		cr.Status = ConsultPending
+	}
+	if _, err := ref.Set(ctx, toDoc(cr)); err != nil {
+		return "", err
+	}
+	return cr.ID, nil
+}
+
+func (f *Firestore) GetConsultRequest(ctx context.Context, centerID, id string) (*ConsultRequest, error) {
+	if err := checkDocID(id); err != nil {
+		return nil, err
+	}
+	snap, err := f.center(centerID).Collection("consult_requests").Doc(id).Get(ctx)
+	if err != nil {
+		return nil, mapNotFound(err)
+	}
+	return fromDoc[ConsultRequest](snap.Data())
+}
+
+// UpdateConsultRequest — 없는 ID면 ErrNotFound(UpdateJoinRequest와 같은 존재 확인 선행).
+func (f *Firestore) UpdateConsultRequest(ctx context.Context, centerID string, cr *ConsultRequest) error {
+	if err := checkDocID(cr.ID); err != nil {
+		return err
+	}
+	ref := f.center(centerID).Collection("consult_requests").Doc(cr.ID)
+	if _, err := ref.Get(ctx); err != nil {
+		return mapNotFound(err)
+	}
+	_, err := ref.Set(ctx, toDoc(cr))
+	return err
+}
+
+func (f *Firestore) ListConsultRequests(ctx context.Context, centerID, memberID string) ([]ConsultRequest, error) {
+	coll := f.center(centerID).Collection("consult_requests")
+	var iter *firestore.DocumentIterator
+	if memberID != "" {
+		iter = coll.Where("member_id", "==", memberID).Documents(ctx)
+	} else {
+		iter = coll.Documents(ctx)
+	}
+	defer iter.Stop()
+	out := []ConsultRequest{}
+	for {
+		snap, err := iter.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		cr, err := fromDoc[ConsultRequest](snap.Data())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *cr)
+	}
+	// 오래 기다린 요청이 위로(데스크 큐) — 동률은 ID로 안정화(Memory 구현과 같은 규약).
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
 }
 
@@ -479,6 +555,22 @@ func (f *Firestore) updatePassInTx(ctx context.Context, centerID, passID string,
 		if err := checkDocID(cid); err != nil {
 			return nil, err
 		}
+	}
+	// 같은 계약 ID가 두 번 지목되면 한 트랜잭션이 같은 문서를 두 번 쓴다(아래 contractWrites) —
+	// 호출측(RefundPass 후보 선정)은 중복 없이 추리지만 여기서 한 번 더 거른다(P40 — P37 리뷰
+	// 권고). 사본으로 거른다: 호출측 슬라이스를 제자리에서 줄이면 재사용하는 쪽이 놀란다.
+	// Memory는 맵 커밋이라 중복이 자연 흡수된다 — 이 가드는 Firestore 쓰기 목록 전용이다.
+	if len(contractIDs) > 1 {
+		seen := make(map[string]struct{}, len(contractIDs))
+		uniq := make([]string, 0, len(contractIDs))
+		for _, cid := range contractIDs {
+			if _, dup := seen[cid]; dup {
+				continue
+			}
+			seen[cid] = struct{}{}
+			uniq = append(uniq, cid)
+		}
+		contractIDs = uniq
 	}
 	passRef := f.center(centerID).Collection("passes").Doc(passID)
 	var out *domain.Pass
@@ -1624,6 +1716,69 @@ func (f *Firestore) SaveCheckinRecord(ctx context.Context, centerID string, c *C
 	return err
 }
 
+// ---- 센터 신원(멀티센터 Phase A) ----
+
+// GetCenter — centers/{id} 문서의 `center` 맵에서 읽는다. 문서·필드가 없으면 빈 값
+// (GetBusiness와 같은 규약 — 읽기가 문서를 만들지 않는다).
+func (f *Firestore) GetCenter(ctx context.Context, centerID string) (*domain.Center, error) {
+	snap, err := f.center(centerID).Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return &domain.Center{ID: centerID}, nil
+		}
+		return nil, err
+	}
+	raw, ok := snap.Data()["center"].(map[string]any)
+	if !ok {
+		return &domain.Center{ID: centerID}, nil
+	}
+	c, err := fromDoc[domain.Center](raw)
+	if err != nil {
+		return nil, err
+	}
+	c.Normalize()
+	// 문서 키가 진실 — 맵 안의 id가 손편집으로 어긋나도 키를 따른다. Normalize **뒤**에
+	// 덮는다: 앞에 두면 ToLower가 키를 변조해 키를 그대로 돌려주는 Memory와 케이싱이
+	// 드리프트한다(프로덕션 키는 centerIDPattern이 소문자로 강제하지만 계약은 키 원문이다).
+	c.ID = centerID
+	return c, nil
+}
+
+// SaveCenter — centers/{id} 문서의 `center` 필드만 머지로 쓴다(Policy·business 불침범 —
+// SaveBusiness와 같은 규약).
+func (f *Firestore) SaveCenter(ctx context.Context, c *domain.Center) error {
+	_, err := f.center(c.ID).Set(ctx, map[string]any{"center": toDoc(c)}, firestore.MergeAll)
+	return err
+}
+
+// ListCenters — `center` 신원이 등록된 문서만. GetPolicy 지연 시딩·헬스체크가 만든
+// 정책-only 유령 문서는 name이 없어 자연히 걸러진다. 정렬은 ID 오름차순(결정적 순서).
+func (f *Firestore) ListCenters(ctx context.Context) ([]domain.Center, error) {
+	snaps, err := f.c.Collection("centers").Documents(ctx).GetAll()
+	if err != nil {
+		return nil, err
+	}
+	out := []domain.Center{}
+	for _, snap := range snaps {
+		raw, ok := snap.Data()["center"].(map[string]any)
+		if !ok {
+			continue
+		}
+		c, err := fromDoc[domain.Center](raw)
+		if err != nil {
+			return nil, err
+		}
+		if c.Name == "" {
+			continue
+		}
+		c.Normalize()
+		c.ID = snap.Ref.ID // GetCenter와 같은 순서 — 키 원문이 계약, Normalize가 케이싱을 못 바꾼다
+		out = append(out, *c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
 // ---- 센터 정책 ----
 
 // GetPolicy — centers/{centerID} 문서 자체에서 정책을 읽는다. 문서가 없으면(최초 접근) 기본값을
@@ -1693,5 +1848,77 @@ func (f *Firestore) GetBusiness(ctx context.Context, centerID string) (*domain.B
 // toDoc(b)는 빈 칸도 키로 포함하므로 "칸을 비워 지우기"가 머지에서도 그대로 반영된다.
 func (f *Firestore) SaveBusiness(ctx context.Context, centerID string, b *domain.Business) error {
 	_, err := f.center(centerID).Set(ctx, map[string]any{"business": toDoc(b)}, firestore.MergeAll)
+	return err
+}
+
+// ---- 시설 신고 상태(체육시설업, P42) ----
+
+// GetFacility — 센터 문서의 `facility` 맵에서 읽는다. 문서·필드가 없으면 **기본값**
+// (report_status="unknown", ErrNotFound 아님 — GetBusiness와 같은 "읽기가 문서를 만들지
+// 않는다" 규약). Normalize를 읽기에 태워 구 문서(절 부재)·손편집 값도 늘 3값 중 하나로
+// 나간다 — 스탬프 게이트·응답이 이 값을 그대로 분기 조건으로 쓴다.
+func (f *Firestore) GetFacility(ctx context.Context, centerID string) (*domain.Facility, error) {
+	snap, err := f.center(centerID).Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return &domain.Facility{ReportStatus: domain.FacilityStatusUnknown}, nil
+		}
+		return nil, err
+	}
+	raw, ok := snap.Data()["facility"].(map[string]any)
+	if !ok {
+		return &domain.Facility{ReportStatus: domain.FacilityStatusUnknown}, nil
+	}
+	fac, err := fromDoc[domain.Facility](raw)
+	if err != nil {
+		return nil, err
+	}
+	fac.Normalize()
+	return fac, nil
+}
+
+// SaveFacility — 센터 문서의 `facility` 필드만 머지로 쓴다(Policy·Business·center 불침범 —
+// SaveBusiness와 같은 규약, P27 SavePolicy 교훈). toDoc(fac)는 빈 칸도 키로 포함하므로
+// 상태를 되돌리거나 번호를 비우는 재제출이 머지에서도 그대로 반영된다(절 단위 통 교체).
+func (f *Firestore) SaveFacility(ctx context.Context, centerID string, fac *domain.Facility) error {
+	_, err := f.center(centerID).Set(ctx, map[string]any{"facility": toDoc(fac)}, firestore.MergeAll)
+	return err
+}
+
+// ---- 데스크 체크인 QR 토큰(센터 비밀, P49) ----
+
+// GetCheckinQR — 센터 문서의 `checkin_qr` 맵에서 읽는다. 문서·필드가 없으면 **빈 값**
+// (ErrNotFound 아님 — GetFacility와 같은 "읽기가 문서를 만들지 않는다" 규약. 미발급은 정상
+// 상태이고, 체크인 경로가 그 상태를 보고 안내 문구를 고른다).
+//
+// **지연 시딩을 하지 않는 것이 여기서는 특히 중요하다**: 읽기가 토큰을 만들면 회원의 체크인
+// 시도가 곧 발급이 되어, 대표가 인쇄하지도 않은 QR이 유효해진다. 발급은 owner의 명시적
+// 행위(POST rotate)뿐이다.
+func (f *Firestore) GetCheckinQR(ctx context.Context, centerID string) (*domain.CheckinQR, error) {
+	snap, err := f.center(centerID).Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return &domain.CheckinQR{}, nil
+		}
+		return nil, err
+	}
+	raw, ok := snap.Data()["checkin_qr"].(map[string]any)
+	if !ok {
+		return &domain.CheckinQR{}, nil
+	}
+	q, err := fromDoc[domain.CheckinQR](raw)
+	if err != nil {
+		return nil, err
+	}
+	q.Normalize() // 손편집 공백이 바이트 비교를 깨지 않도록 — 응답과 대조가 같은 모양을 본다
+	return q, nil
+}
+
+// SaveCheckinQR — 센터 문서의 `checkin_qr` 필드만 머지로 쓴다(Policy·Business·Facility·center
+// 불침범 — SaveFacility와 같은 규약, P27 SavePolicy 교훈). toDoc(q)가 두 키를 전부 포함하므로
+// 절 안에서는 통 교체다 — 재발급이 이전 토큰을 유령으로 남기지 않는다(남으면 옛 인쇄물이
+// 계속 통과해 "재발급하면 무효"가 거짓이 된다).
+func (f *Firestore) SaveCheckinQR(ctx context.Context, centerID string, q *domain.CheckinQR) error {
+	_, err := f.center(centerID).Set(ctx, map[string]any{"checkin_qr": toDoc(q)}, firestore.MergeAll)
 	return err
 }

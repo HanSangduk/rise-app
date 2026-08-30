@@ -94,7 +94,10 @@ export function BodyPhotoLightbox({
                 <button
                   type="button"
                   onClick={() => setAttempt((n) => n + 1)}
-                  className="mt-2 text-[11.5px] font-bold text-accent underline"
+                  // text-accent는 index.css @theme에 없는 토큰이라 Tailwind가 클래스를 만들지
+                  // 않았다 — 버튼이 강조 없이 상속색으로 그려지고 있었다(어드민 UX 감사).
+                  // 실재하는 하우스 토큰(brand)으로 바꾼다.
+                  className="mt-2 text-[11.5px] font-bold text-brand underline"
                 >
                   다시 시도
                 </button>
@@ -106,7 +109,8 @@ export function BodyPhotoLightbox({
         </div>
 
         <p className="border-t border-line px-4 py-2 text-[10.5px] text-muted">
-          민감정보(P8)입니다 — 화면을 공유하거나 내려받아 보관하지 마세요.
+          {/* 내부 티켓 번호(P8)는 화면에서 뺀다 — 대표에게 아무 의미가 없고 찾아볼 곳도 없다(어드민 UX 감사). */}
+          민감정보입니다 — 화면을 공유하거나 내려받아 보관하지 마세요.
         </p>
       </div>
     </div>

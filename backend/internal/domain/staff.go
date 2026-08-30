@@ -128,6 +128,13 @@ const (
 	RoleOwner   = "owner"
 	RoleTrainer = "trainer"
 	RoleMember  = "member"
+
+	// RoleSuperadmin — 교차 센터 관리 평면 전용(멀티센터 Phase A, 설계04 §2). 센터 소속이
+	// 없고(UserIndex.center_id="") Staff 레코드도 없다 — 센터 생성·최초 owner 초대만 하고,
+	// 회원·매출 등 일상 운영 API에는 들어가지 않는다(IsStaff에 포함시키지 않는 이유).
+	// 최초 superadmin 1회는 Firestore 콘솔에서 users/{uid} = {role:"superadmin", center_id:""}
+	// 수작업 시딩(backend README 부트스트랩 절차).
+	RoleSuperadmin = "superadmin"
 )
 
 // Payout — 트레이너 정산 방식.

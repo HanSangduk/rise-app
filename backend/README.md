@@ -100,9 +100,10 @@ member 셀프 스코프 강제, consent 전이 시각, 부분 PUT 머지, 셀프
 | `internal/api/service_scope_test.go` | 쓰기 경로 담당 경계(v2.5) | 4 |
 | `internal/api/service_hwschedule_wiring_test.go` · `service_inbody_date_test.go` | 배선 회귀 | 1 + 1 |
 | `internal/api/service_contract_test.go` | 전자계약 전이·경합(v2.15) | 10 |
+| `internal/api/service_checkin_qr_test.go` | 데스크 QR 발급·재발급·누출 방지(v2.23) | 10 |
 | `internal/api/hookstore_test.go` | 실패 주입용 훅 스토어(테스트 없음, 헬퍼) | 0 |
 
-현재 총계(2026-08-29, P37 시점 재집계): **api 179 · domain 84 · store 9 · config 2 = 274**
+현재 총계(2026-08-30, P49 시점 재집계): **api 234 · domain 86 · store 9 · config 3 = 332**
 (그중 1개는 아래 에뮬레이터 태그가 있어야 돈다). 위 표의 파일별 숫자는 각 파일이 만들어진
 시점 것이라 이후 추가분을 반영하지 않는다 — 정확한 값은 `grep -c "^func Test"`. 종전 README가
 적어 둔 "api 통합 34케이스"는 v1.5, "총계 182"는 v2.7 시점 숫자다.
@@ -162,12 +163,14 @@ GET  /v1/body-photos  POST /v1/body-photos  GET /v1/inbody  POST /v1/inbody
 GET  /v1/staff  POST /v1/staff(v1.8 초대·재고용)  POST /v1/staff/{uid}/offdays
 PUT  /v1/staff/{uid}  POST /v1/staff/{uid}/transfer|deactivate|reactivate   (v2.0 생애주기)
 GET  /v1/center(v1.1·v1.4 member 공개)  PUT /v1/center(v1.4 정책 편집)
+GET  /v1/center/checkin-qr  POST /v1/center/checkin-qr/rotate   (v2.23 데스크 QR 발급, owner 전용)
 GET  /v1/workout-logs  POST /v1/workout-logs        (v1.4 수업 기록)
 GET  /v1/recurrings?include_expired=                 (v1.4 고정 스케줄 관리 · v2.3 만료 규칙 포함)
 DELETE /v1/recurrings/{id}?keep_bookings=            (v2.3: 204 → 200 {cancelled, kept})
 POST /v1/passes/{id}/refund                          (v1.4 환불 실행)
 POST /v1/contracts/{id}/sign                         (v1.4 회원 자체서명)
 PUT  /v1/staff/{uid}/profile                         (v1.6 트레이너 공개 프로필)
+POST /v1/staff/{uid}/photo                           (v2.25 프로필 사진 업로드, owner 전용 — STORAGE_BUCKET 필수)
 GET  /healthz  GET /health  ← Cloud Run(run.app)에서는 /health만 사용 — GFE가 /healthz를 가로챔(P06)
 ```
 
@@ -362,12 +365,46 @@ gcloud run deploy rize-api --source backend --region asia-northeast3 --project r
 | `USE_FIRESTORE` | `true` | Firestore 스토어 사용 |
 | `GCP_PROJECT` · `FIREBASE_PROJECT` | `rize-218c1` | 둘 다 필요 — 후자가 있으면 dev 헤더는 무시된다 |
 | `DEFAULT_CENTER_ID` | `rise` | 센터 부트스트랩 |
-| `CHECKIN_QR_TOKEN` | (운영 토큰) | 셀프 체크인 대조값. **어드민 설정 화면의 "데스크 체크인 QR"에 대표가 입력해 인쇄한 문자열과 정확히 같아야** 한다(`admin/src/features/CheckinQr.tsx` — 이 값을 돌려주는 API는 없다). 회원 앱은 그 QR을 스캔해 그대로 보낸다(`app/README.md`) |
+| ~~`CHECKIN_QR_TOKEN`~~ | — | **v2.23에서 삭제. 이 변수를 설정하라는 종전 안내는 이제 틀렸다.** 아래 절 참고 |
+| `STORAGE_BUCKET` | `rize-218c1.firebasestorage.app` | **v2.25부터 업로드에 필수.** 두 경로가 쓴다 — 회원탈퇴 시 체형사진 원본 파기(v2.11, 없으면 no-op+기동 경고)와 트레이너 프로필 사진 업로드(v2.25, **없으면 그 엔드포인트가 503**). 파기는 없어도 서비스가 돌지만 업로드는 안 돈다 |
 | `CORS_ORIGINS` | `http://localhost:5174` | 로컬 개발 어드민용. 운영 어드민은 Firebase Hosting에서 같은 오리진의 `/api`로 붙어 **CORS가 발생하지 않는다**(P07) |
 
 **`USE_FIRESTORE=true`인데 `FIREBASE_PROJECT`가 비어 있으면 기동을 거부한다**(P08). 그 조합은 실
 DB에 붙은 채 dev 헤더 인증으로 뜨는 것이라, 헤더만 보내면 누구나 owner가 된다 — 종전엔 경고만
 찍고 기동했다. 검증은 `config.Config.Validate()`(테스트 있음).
+
+### 데스크 체크인 QR — 환경변수가 아니다 (v2.23, P49)
+
+**종전 안내(`CHECKIN_QR_TOKEN`을 설정하고 그 값을 어드민에 손으로 입력)는 폐기됐다.** 그 구조는
+대표가 **알 수 없는 값을 옮겨 적어야** 하는 요구였다(값은 Cloud Run 설정 안에만 있고 대표는 배포
+설정을 볼 수 없다). 지금은 서버가 만들어 서버가 보관한다:
+
+```
+GET  /v1/center/checkin-qr          (owner 전용) → {issued, token, issued_at}
+POST /v1/center/checkin-qr/rotate   (owner 전용) → 새 토큰 발급(바디 없음)
+```
+
+대표는 어드민 설정에서 **발급 버튼만** 누르고 QR을 인쇄한다. 토큰은 `centers/{id}` 문서의
+`checkin_qr` 절에 저장되고(머지 쓰기 — Policy·Business·Facility 불침범), 32자 URL-safe
+base64(crypto/rand)다. **회원·트레이너가 보는 어떤 응답에도 실리지 않는다** — 아는 회원은 집에서
+출석을 찍는다. `GET /v1/center`(5키)와 무인증 `GET /v1/public/business`에 없다는 것을 키 집합
+테스트가 고정한다.
+
+**재발급은 직전 인쇄물을 즉시 무효로 만든다.** 토큰이 샜을 때 대표가 스스로 되돌릴 유일한
+수단이고, 어드민이 누르기 전에 경고하는 근거다.
+
+`CHECKIN_QR_TOKEN` 환경변수와 그 기동 검증(운영에서 저장소 기본값이면 거부)은 **함께 삭제됐다**.
+그 검증은 "미설정 → 저장소의 공개 기본값으로 승격"이라는 fail-open을 막던 것인데, 읽는 코드가
+사라져 막을 대상 자체가 없어졌다. env를 폴백으로 남기지 않은 이유는 **재발급이 이전 토큰을
+무효로 만들지 못하게 되기 때문**이다 — 유출된 env 토큰이 영원히 통과하는데 화면에는 안 보인다.
+fail-closed는 기동 검증에서 **요청 경로로** 내려갔다: 미발급 센터의 self_qr은 400 +
+"데스크 체크인 QR이 아직 발급되지 않았습니다 — 어드민 설정에서 발급해 주세요".
+
+배포 후 프로덕션은 **미발급 상태**이므로(종전 env 토큰은 DB로 이관되지 않는다) 대표가 한 번
+발급해야 셀프 체크인이 열린다. 기존 Cloud Run에 `CHECKIN_QR_TOKEN`이 남아 있어도 무해하다
+(읽히지 않고 기동을 막지도 않는다) — 지우는 것이 권고지만 배포 순서에 걸리지 않는다.
+로컬은 `DEV_SEED=true`가 고정 토큰 `rise-desk-checkin`을 심는다(앱 dart-define 기본값과 동일,
+인메모리 전용).
 
 Firestore 서비스 계정에 `roles/datastore.user` 권한이 필요하다. `FIREBASE_PROJECT`를 설정하면
 Firebase Admin SDK가 Cloud Run의 서비스 계정으로 Application Default Credentials를 자동 사용한다
@@ -393,6 +430,31 @@ Firebase Hosting에서 서비스되고 `/api/**`가 이 서비스로 리라이�
 Firestore 보안 규칙은 저장소 루트 `firestore.rules`가 소스 오브 트루스이며 **클라이언트 전면
 차단**이다(모든 접근은 Admin SDK를 쓰는 이 백엔드를 경유 — Admin SDK는 규칙을 우회한다).
 
+### Storage 버킷 — 파기는 선택, 업로드는 필수 (v2.25, P51)
+
+`STORAGE_BUCKET`을 서버가 만지는 경로가 **두 개**이고, 미설정 시 동작이 정반대다.
+
+```
+파기(v2.11 회원탈퇴)        미설정 → 조용한 no-op + 기동 경고.  체형사진 업로드는 클라이언트
+                            SDK가 하므로 이 값이 없어도 서비스 자체는 돈다.
+업로드(v2.25 트레이너 사진)  미설정 → 그 엔드포인트가 **503**.   규칙이 클라이언트 쓰기를 막아
+                            둔 경로라 서버만이 쓸 수 있다.
+```
+
+업로드가 no-op으로 떨어지지 않는 이유가 이 절의 요점이다: 조용히 성공하면 어드민은 "저장됨"을
+보고 회원앱은 빈 아바타를 본다. 그 조용한 no-op이 실제로 버킷에 고아 50개를 남긴 사고의
+모양이다(v2.15 reconcile이 그것을 치우려고 생겼다). 그래서 업로드는 실패를 말한다 —
+`{"error":"사진 업로드 저장소가 설정되지 않았어요(관리자에게 STORAGE_BUCKET 설정을 요청해주세요)"}`.
+
+**로컬 개발(`FIREBASE_PROJECT` 미설정, 인메모리)에서는 업로드가 항상 503이다.** Admin SDK 앱이
+없어 Storage 클라이언트를 만들 수 없다. 로컬에서 트레이너 사진을 넣어 보려면 v1.6의 URL 직접
+입력 경로(`PUT /v1/staff/{uid}/profile`의 `photo_url`)를 계속 쓴다 — 그 경로는 제거하지 않았다.
+
+`storage.rules`는 **변경하지 않았다.** `match /staff/photos/{fileName}`의 전면 차단
+(`allow read, write: if false`)이 그대로 옳다: Admin SDK는 규칙을 지나지 않고, 클라이언트는
+서버가 붙인 **다운로드 토큰 URL**로만 읽는다(그 URL도 규칙을 거치지 않는다 — 규칙 주석이
+적어 둔 설계 그대로다).
+
 ## 알려진 갭 / TODO(정직한 목록)
 
 이 절은 "무엇을 안 만들었는가"를 숨기지 않기 위한 목록이다. API계약_v1.md가 모든 세부사항을
@@ -416,11 +478,12 @@ Firestore 보안 규칙은 저장소 루트 `firestore.rules`가 소스 오브 �
 - **멀티센터 해석은 단일 센터로 단순화**: `users/{uid}.memberships[]`(설계03 §6, 여러 센터 가입)
   대신 `store.UserIndex`가 uid당 센터 1건만 유지한다. 실제 1호 고객(라이즈 컨디셔닝)이 단일
   센터라 v1엔 충분하지만, 진짜 멀티센터 전환 시 슬라이스로 승격해야 한다.
-- **센터 생성 API가 없고, 부트스트랩 owner는 여전히 수동이다**: `centers/{centerId}`는
-  `DEFAULT_CENTER_ID` 환경변수로 부트스트랩되고, 정책(Policy)은 최초 접근 시 기본값이 지연
-  시딩된다. 스태프 생성은 v1.8의 `POST /v1/staff`로 닫혔지만 **그 핸들러가 owner 전용**이라
-  (`!p.IsOwner()` → 403) **최초 owner 한 명은 만들 경로가 없다** — Firestore에 손으로 심어야
-  한다. `store.SeedDemo`는 `DEV_SEED=true` + 인메모리 전용이라 프로덕션 부트스트랩에 못 쓴다.
+- **센터 생성·최초 owner는 v2.16 관리 평면으로 닫혔다**(멀티센터 Phase A, P41): superadmin이
+  `POST /v1/admin/centers`로 센터 신원 + 정책 기본값 + 최초 owner(계정·인덱스·레코드)를 한
+  요청으로 만든다. 남은 수작업은 **최초 superadmin 1회 시딩**뿐 — Firestore 콘솔에서
+  `users/{uid}` = `{role:"superadmin", center_id:""}`. (기존 rise 센터는 신원 미등록 상태로도
+  종전과 동일하게 동작한다 — `GET /v1/center`의 name이 ""일 뿐.)
+  `store.SeedDemo`는 여전히 `DEV_SEED=true` + 인메모리 전용이라 프로덕션 부트스트랩에 못 쓴다.
 - **예약 생성 바디의 `kind`**: 계약 예시는 `{slot_key, member_id, pass_id}`뿐이라 kind(pt/group/ot)
   출처가 불명확 — 기본값 `pt`로 채우되 요청에 `kind`가 오면 그대로 쓴다.
 - **체크인 응답/부수효과**: 계약은 검증 규칙만 명시한다. 구현은 `Member.last_visit_at` 갱신
@@ -443,12 +506,24 @@ Firestore 보안 규칙은 저장소 루트 `firestore.rules`가 소스 오브 �
   덮어쓴다(`ListHomeworks`와 동일한 override 패턴 — 불일치 시 에러가 아니라 조용히 본인 스코프로
   대체). trainer는 담당 회원(또는 담당 트레이너 소속 패스로 연결된) 것만, owner는 전체를 본다.
   `Payment`·`Contract`는 엔티티에 `trainer_id`가 없어 연결된 `Pass.trainer_id`로 소유를 판별한다.
-- **전자계약은 "상태 전이"만 있고 문서 실체가 없다**: `POST /v1/contracts/{id}/sign`은 v1.4에
-  생겼고(`Service.SignContract`) `signed_at`·`signer_ip`를 서버가 기록한다. 하지만
-  **`sha256`·`pdf_path`는 필드만 있고 채우는 코드가 0곳이다** — 실제 PDF 생성·해시 봉인 연동이
-  붙어야 채워진다. 즉 지금의 "서명"은 동의 기록이지 위·변조를 증명하는 문서가 아니다.
-  `signer_ip`도 신뢰 프록시(Cloud Run/GCLB) 전제다 — XFF의 **마지막** 홉을 쓴다(v1.5. 첫 항목은
-  클라이언트가 위조할 수 있다).
+- **전자계약 문서 스냅샷 — 발행 래치는 이제 켜져 있다**(v2.18 → **v2.22 ON**, P39·P42·P48):
+  `send`가 `template_version`·`vars`를 확정하고(재발송 = 재확정) `POST /v1/contracts/{id}/sign`이
+  서명 트랜잭션 **안에서** `sha256`(= SHA-256(버전 + canonical_json(vars)))으로 봉인한다.
+  2026-08-30 대표 결정으로 `pt-v1-reported`·`pt-v1-exempt` 두 변형 모두 **issuable=true**
+  (`contract_template.go`) — v2.18이 적어 둔 "래치 OFF로 배포된다"는 **더 이상 사실이 아니다**.
+  다만 래치는 세 게이트 중 첫째일 뿐이라, 지금 실제로 발행을 막고 있는 것은 나머지 둘이다:
+  **① `facility.report_status`가 미선언(unknown)** — 프로덕션 센터가 아직 선언하지 않아 읽기
+  기본값이 unknown → 스탬프 스킵(v2.19) **② Business 6칸 미등록** — 전부-아니면-전무 조립이
+  스킵. 즉 오늘의 관측 가능한 동작 변화는 0이지만 **이건 안전장치가 아니라 잠금 해제다**: 대표가
+  어드민에서 사업자 정보를 등록하고 시설 신고 상태를 선언하는 순간(코드·배포 없이) 다음 발급·재발송부터
+  실제 스탬프가 시작되고, 회원 화면은 요약 고지 → 계약서 본문 렌더로 바뀐다. 래치가 열린
+  대가로 발급·발송이 매번 `facility`를 1회 더 읽는다(v2.19의 latch-off 불변은 이제 롤백
+  구성의 보장이고, 그 구성에서는 여전히 테스트로 증명된다). **템플릿 교체는 첫 서명 전까지만
+  자유**다 — 한 건이라도 서명되면 그 버전은 동결이고 문구 변경은 새 버전 키로 온다(§D ①).
+  `pdf_path`는 §D ③대로 의도적으로 빈 자리다(채우면 "PDF가 있다"는 거짓 신호). **sha256이 빈
+  서명은 요약 고지 기반 동의 기록**(P28 적법 기준선)이고, 채워진 서명만 본문 위·변조 검출이
+  가능하다. `signer_ip`도 신뢰 프록시(Cloud Run/GCLB) 전제다 — XFF의 **마지막** 홉을 쓴다
+  (v1.5. 첫 항목은 클라이언트가 위조할 수 있다).
 - **`GET /v1/join/requests`는 owner 전용**: `JoinApprove`(승인)가 이미 owner 전용이라 목록도
   동일 경계로 맞췄다 — trainer는 가입 요청을 볼 수 없다.
 - **P14(v2.7) 이전에 10%를 넘겨 서명된 계약**: `Contract.penalty_rate`에 0.3 같은 값이 그대로
@@ -476,9 +551,16 @@ Firestore 보안 규칙은 저장소 루트 `firestore.rules`가 소스 오브 �
   센터 유지율(P45가 언급하는 2종 정의)을 코드가 자동 구분하진 않는다 — trainer_id로 미리
   필터링된 입력을 넣으면 트레이너 유지율이, 필터링 안 하면 센터 유지율이 나오는 방식으로 by_trainer
   루프가 트레이너별로 계산한다.
-- **`GET /v1/slots?date=`는 예약이 하나라도 있는 시간대만 반환**: 센터 영업시간 모델이 없어
-  빈 시간대(0/3)를 합성할 근거가 없다. 어드민 프론트가 영업시간을 자체적으로 알고 있다면
-  빈 슬롯을 프론트에서 채워 넣어야 한다.
+- **`GET /v1/slots?date=`는 예약이 하나라도 있는 시간대만 반환**: 빈 시간대(0/3)를 서버가
+  합성하지 않는다. **v2.24부터 영업시간 모델 자체는 생겼지만**(`Policy.open_hour`/`close_hour`)
+  이 엔드포인트는 그대로다 — 클라이언트가 그 두 값으로 그리드를 그리고 빈 칸을 채운다.
+  서버 합성으로 옮기려면 응답 크기·캐시 정책을 함께 정해야 해서 미룬 것이지 근거가 없어서가
+  아니다. 두 값은 **슬롯 시작 시각이고 양끝 포함**이다(9~21 = 13칸, 마지막이 21시 시작).
+- **운영시간을 예약 생성이 강제하지 않는다**(v2.24 의도된 범위): `POST /v1/bookings`·
+  `/v1/recurrings`는 `hour 0~23`만 보고 운영시간 밖 예약을 거부하지 않는다. 강제하면 대표가
+  `close_hour`를 줄이는 순간 이미 잡힌 그 시간 예약을 **취소·이동조차 못 하게** 잠긴다
+  (정책 변경이 과거를 소급 파괴하지 않는다는 규칙 — v2.0과 같은 근거). 데스크에서 특별히
+  잡아 주는 영업시간 외 수업도 실재하는 정상 영업이다.
 - **가입 매칭(`/v1/join/match`) 대상 센터**: 요청자가 아직 어느 센터에도 연결되지 않았으면
   `DEFAULT_CENTER_ID`를 대상으로 검색한다. 진짜 멀티센터에서는 "센터 검색" UI가 지정한
   center_id를 받아야 한다(위 멀티센터 갭과 연결).

@@ -50,6 +50,8 @@ import {
 } from "@/lib/format";
 import {
   WEEKDAY_LABEL,
+  centerHours,
+  hourRange,
   isPassBookable,
   type BookingKind,
   type Exercise,
@@ -59,7 +61,6 @@ import {
 } from "@/lib/types";
 
 const KIND_LABEL: Record<BookingKind, string> = { pt: "1:1", group: "그룹", ot: "체험(OT)" };
-const DEFAULT_HOURS = Array.from({ length: 13 }, (_, i) => i + 9); // 09~21시(센터 운영시간 API 없어 기본값)
 
 // 이름 자리의 폴백 — **raw 문서ID/uid는 어떤 경우에도 노출하지 않는다**. mem_7Kd2…·t1 같은
 // 값은 사람이 읽을 정보가 아니고(개인정보 최소 노출 원칙에도 어긋난다), "이름을 못 풀었다"와
@@ -119,11 +120,21 @@ export function Schedule() {
     return Math.max(capacity, ...teamCounts);
   }, [slotsQ.data, capacity]);
 
+  // 격자의 행(시간) — 센터 운영시간 정책에서 만든다. 종전엔 09~21 하드코딩 상수였고, 06시에
+  // 여는 센터는 그 시간에 예약을 잡을 방법이 아예 없었다(설계00 §3.1 하드코딩 금지의 마지막 조각).
+  //
+  // 정책이 없거나(구서버) 아직 로딩 중이면 centerHours가 9~21로 접는다 — 지금까지 그려 온 격자와
+  // 같은 모양이라, 정책이 도착하는 순간 화면이 튀는 폭이 최소가 된다.
+  //
+  // 실제 슬롯 시간과의 **합집합은 유지한다**: 운영시간을 좁히기 전에 잡아 둔 수업(예: 22시)이
+  // 격자에서 사라지면 취소·완료 처리를 할 수단이 없어진다. 정책은 "새로 잡을 수 있는 시간"을
+  // 정하는 값이지 이미 있는 예약을 감추는 값이 아니다.
   const hours = useMemo(() => {
-    const set = new Set<number>(DEFAULT_HOURS);
+    const { open, close } = centerHours(centerQ.data?.policy);
+    const set = new Set<number>(hourRange(open, close));
     for (const h of slotByHour.keys()) set.add(h);
     return Array.from(set).sort((a, b) => a - b);
-  }, [slotByHour]);
+  }, [slotByHour, centerQ.data]);
 
   const nearbyDates = useMemo(() => {
     const out: string[] = [];
@@ -183,19 +194,20 @@ export function Schedule() {
         {membersQ.isError && (
           <p className="mb-2 rounded-[10px] border border-danger/40 bg-danger/[0.08] px-3 py-2 text-[11px] text-danger">
             회원 목록을 불러오지 못했어요 — 모든 블록의 회원명이 "예약됨"으로 표시됩니다.
-            ({membersQ.error.message})
+            {" "}
+            {membersQ.error.message}
           </p>
         )}
         {staffQ.isError && (
           <p className="mb-2 rounded-[10px] border border-warn/40 bg-warn/[0.08] px-3 py-2 text-[11px] text-warn">
             직원 목록을 불러오지 못했어요 — 색상 범례가 비고 모든 블록이 같은 색·"{UNRESOLVED_STAFF}"로
-            표시됩니다. ({staffQ.error.message})
+            표시됩니다. {staffQ.error.message}
           </p>
         )}
         {slotsQ.isLoading ? (
           <Spinner />
         ) : slotsQ.isError ? (
-          <ErrorState error={slotsQ.error} />
+          <ErrorState error={slotsQ.error} onRetry={() => void slotsQ.refetch()} />
         ) : (
           <div
             className="grid gap-1.5 text-[11px]"
@@ -442,7 +454,7 @@ function CreateBookingModal({
           {/* 조회 실패를 "회원 0명"으로 위장하지 않는다 — 빈 셀렉트는 "등록된 회원이 없다"로 읽힌다. */}
           {membersQ.isError && (
             <p className="mt-1 text-[10.5px] text-danger">
-              회원 목록을 불러오지 못했어요 — 새로고침 후 다시 시도해주세요. ({membersQ.error.message})
+              회원 목록을 불러오지 못했어요. {membersQ.error.message}
             </p>
           )}
         </div>
@@ -861,7 +873,7 @@ function RecurringPanelBody({ hours, isTrainer }: { hours: number[]; isTrainer: 
       {recurringsQ.isLoading ? (
         <Spinner />
       ) : recurringsQ.isError ? (
-        <ErrorState error={recurringsQ.error} />
+        <ErrorState error={recurringsQ.error} onRetry={() => void recurringsQ.refetch()} />
       ) : !rows.length ? (
         <EmptyState>등록된 고정 스케줄이 없습니다.</EmptyState>
       ) : (

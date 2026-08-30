@@ -29,6 +29,12 @@ Future<CenterPolicy> centerPolicy(Ref ref) async {
     final p = dto.policy;
     // 성공했을 때만 캐시 유지 — 실패 폴백은 캐시에 남기지 않는다(다음 구독 때 재시도).
     ref.keepAlive();
+    // **운영시간 기본값이 정해지는 유일한 지점.** DTO는 "서버가 안 줬다"를 null로
+    // 그대로 올려 보내고(구버전 서버), 여기서 9·21(= 이 필드가 생기기 전 앱과 같은
+    // 동작)과 유효성(open ≤ close, 0..23)을 함께 결정한다. 규칙 파일
+    // (`BookingRules.mergeWithOpenHours`)과 화면은 이미 정해진 값을 받기만 한다 —
+    // 기본값이 규칙 안에 박혀 있던 게 애초에 이 버그였다.
+    final (openHour, closeHour) = CenterPolicy.resolveHours(p.openHour, p.closeHour);
     return CenterPolicy(
       slotCapacity: p.slotCapacity,
       cancelCutoffHours: p.cancelCutoffHours,
@@ -37,6 +43,8 @@ Future<CenterPolicy> centerPolicy(Ref ref) async {
       expiringDays: p.expiringDays,
       maxHoldsPerPass: p.maxHoldsPerPass,
       maxHoldTotalDays: p.maxHoldTotalDays,
+      openHour: openHour,
+      closeHour: closeHour,
     );
   } catch (_) {
     return CenterPolicy.fallback;

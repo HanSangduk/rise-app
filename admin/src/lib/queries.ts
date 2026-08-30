@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api } from "./api";
 import type {
   CenterBusiness,
+  CenterFacility,
   CenterPolicy,
   CreateStaffRequest,
   Exercise,
@@ -11,6 +12,7 @@ import type {
   InbodyCreateRequest,
   Member,
   PaymentCreateRequest,
+  StaffPhotoUploadRequest,
   StaffProfile,
   StaffUpdateRequest,
   Weekday,
@@ -36,7 +38,12 @@ export const keys = {
   inbody: (member: string) => ["inbody", member] as const,
   staff: ["staff"] as const,
   center: ["center"] as const,
+  // keys.center와 **가르는** 이유: GET /v1/center은 member까지 읽는 공개 조회고 이쪽은 owner
+  // 전용 비밀이다. 같은 키에 담으면 대표가 QR을 재발급할 때마다 정책·사업자 정보까지 다시
+  // 읽히고, 반대로 정책을 저장할 때마다 토큰 조회가 딸려 나간다(서로 무관한 두 문서다).
+  checkinQr: ["checkinQr"] as const,
   joinRequests: ["joinRequests"] as const,
+  consultRequests: ["consultRequests"] as const,
 };
 
 // ── 회원 · 회원권 ──────────────────────────────────────────────────────
@@ -155,11 +162,19 @@ export function useContracts(member?: string, status?: string) {
   });
 }
 
-export function useSendContract() {
+// P40: onSent — 발송 성공 표식(호출부의 세션 로컬 Set) 갱신용 **훅-레벨** 콜백. mutate-레벨
+// onSuccess는 같은 훅에서 다음 mutate()가 시작되는 순간 옵저버가 앞선 mutation에서 떨어져
+// 영영 실행되지 않는다(react-query v5) — 연속 발송에서 앞선 건이 성공하고도 마킹을 잃었다.
+// 훅-레벨(useMutation 옵션)은 옵저버 분리와 무관하게 mutation마다 실행되므로, 캐시 무효화와
+// 같은 자리에서 variables(계약 id)로 어느 건이 성공했는지 식별해 마킹한다.
+export function useSendContract(onSent?: (id: string) => void) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.sendContract(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["contracts"] }),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ["contracts"] });
+      onSent?.(id);
+    },
   });
 }
 
@@ -267,16 +282,20 @@ export function useNoshowBooking() {
   });
 }
 
-export function useCheckin() {
+// P40: onCheckedIn — 체크인 성공 표식(대시보드 세션 로컬 Set) 갱신용 훅-레벨 콜백.
+// useSendContract와 같은 결함·같은 수리 — mutate-레벨 onSuccess는 연속 체크인에서 옵저버가
+// 떨어져 앞선 건의 마킹이 유실된다. booking_id 없는 변형(self_qr)은 마킹 대상이 아니라 건너뛴다.
+export function useCheckin(onCheckedIn?: (bookingId: string) => void) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { source: "tap" | "self_qr"; booking_id?: string; qr_token?: string }) =>
       api.checkin(body),
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["slots"] });
       // 체크인은 출석 기록 + last_visit_at 갱신만 한다 — 세션 차감(원장 complete)은
       // 완료 처리(useCompleteBooking)의 몫이라 원장은 무효화하지 않는다.
       qc.invalidateQueries({ queryKey: ["members"] });
+      if (vars.booking_id) onCheckedIn?.(vars.booking_id);
     },
   });
 }
@@ -456,6 +475,22 @@ export function useUpdateStaffProfile() {
   });
 }
 
+// 트레이너 사진 업로드(owner 전용) — 이웃 프로필 뮤테이션과 **같은 키 하나**(keys.staff)를 비운다.
+// 서버가 photo_url을 프로필에 함께 저장하므로 이 무효화 한 번으로 직원 표의 아바타·"프로필
+// 미등록" 뱃지·예약 그리드가 함께 갱신된다(별도 캐시가 없다).
+//
+// invalidateQueries의 **프로미스를 돌려준다**(useRotateCheckinQr와 같은 근거): 그래야 재조회가
+// 끝날 때까지 isPending이 유지돼, 버튼이 "올리는 중…"에서 풀리는 순간의 화면이 이미 새 사진이다.
+// 삼키면 pending이 먼저 풀려 옛 아바타가 잠깐 남고, 그 창에서 대표가 같은 사진을 또 올린다.
+export function useUploadStaffPhoto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ uid, body }: { uid: string; body: StaffPhotoUploadRequest }) =>
+      api.uploadStaffPhoto(uid, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.staff }),
+  });
+}
+
 // ── 직원 생애주기(v2.0, owner 전용) ────────────────────────────────────
 
 // 정정(PUT /v1/staff/{uid}) — 이름·색·정산·역할. 이름과 색은 직원 표뿐 아니라 스케줄 그리드의
@@ -547,6 +582,47 @@ export function useUpdateCenterBusiness() {
   });
 }
 
+// [P42] 체육시설업 신고 상태 저장(owner 전용) — 정책·사업자 정보와 **같은 keys.center 캐시**를
+// 무효화한다(facility가 GET /v1/center 응답의 한 절이라 키를 나누면 같은 문서의 조각들이 서로
+// 다른 시점을 가리킨다 — useUpdateCenterBusiness와 같은 근거). 응답이 facility 절뿐이라(Center
+// 아님) 캐시를 setQueryData로 직접 갈아끼우지 않고 재조회로 맞춘다.
+export function useSaveFacility() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (facility: CenterFacility) => api.saveFacility(facility),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.center }),
+  });
+}
+
+// ── 데스크 체크인 QR(P49, owner 전용) ──────────────────────────────────
+//
+// **enabled 게이트를 두지 않는다.** useJoinRequests는 게이트가 필요했다 — 대시보드처럼 두 역할이
+// 함께 쓰는 화면에서도 불려서, 트레이너에게 403을 받아놓고 "조회 실패"를 그리게 되기 때문이다.
+// 이 훅의 호출부는 딱 하나(CheckinQrCard)고 그 카드는 **owner 게이트 두 겹** 뒤에 있다:
+// App.tsx `section === "set" && isOwner && <Settings />` → Settings.tsx `{isOwner && <CheckinQrCard/>}`.
+// 트레이너 세션에서는 컴포넌트가 마운트조차 되지 않아 훅이 실행되지 않는다 — 안 쓰이는 인자를
+// 열어두면 "게이트가 필요한 훅"으로 오해돼 호출부마다 판단이 갈린다.
+export function useCheckinQr() {
+  return useQuery({ queryKey: keys.checkinQr, queryFn: () => api.checkinQr() });
+}
+
+// 발급/재발급 — 응답이 조회와 **같은 모양**이라 setQueryData로 갈아끼울 수도 있지만, 집안
+// 규약대로 무효화만 한다(useUpdateCenterBusiness — 응답 모양이 같아도 캐시는 서버 재조회로
+// 맞춘다. 두 갈래로 채우면 어느 쪽이 진짜인지 화면마다 달라진다).
+//
+// invalidateQueries의 **프로미스를 돌려주는 것이 이 훅의 안전장치**다: react-query v5는 onSuccess가
+// 돌려준 프로미스를 기다리는 동안 isPending을 유지한다. 그 사이 캐시에는 아직 **옛 토큰**이 들어
+// 있는데, 이 화면은 그 값으로 인쇄 시트를 그린다 — 재조회가 끝나기 전에 pending이 풀리면
+// "방금 무효가 된 QR"을 인쇄할 수 있는 창이 열린다(대표는 그걸 데스크에 붙인다). 프로미스를
+// 삼키면(`onSuccess: () => { qc.invalidate...() }`) 그 창이 그대로 생긴다.
+export function useRotateCheckinQr() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.rotateCheckinQr(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.checkinQr }),
+  });
+}
+
 // 가입 요청 폴링 주기. **이 화면에서 유일하게 사람이 기다리는 데이터**라서 하나 예외를 둔다 —
 // 회원 앱은 "센터에서 승인하면 연결돼요"라고 안내하고 대기 화면에 머무는데, 대표 쪽은
 // staleTime 15s + refetchOnWindowFocus:false라 대시보드를 켜둔 채로는 수동 새로고침 전까지
@@ -583,6 +659,32 @@ export function useJoinRequests(enabled = true) {
     // 전역 기본(refetchOnWindowFocus:false)을 이 쿼리만 뒤집는다 — 다른 창에서 일하다 돌아온
     // 순간이 대표가 목록을 확인하는 시점이다. 전역 staleTime 15초가 연타 포커스를 흡수한다.
     refetchOnWindowFocus: true,
+  });
+}
+
+// 재등록/상담 요청(계약 v2.20, P42) — 가입 요청과 같은 폴링·포커스 규약. 단 owner 게이트가
+// 없다: 서버가 역할 스코프를 정한다(owner 전체 / trainer 담당만) — enabled로 끌 이유가 없고,
+// 트레이너에게도 자기 담당의 손든 회원은 할 일이다.
+export function useConsultRequests() {
+  return useQuery({
+    queryKey: keys.consultRequests,
+    queryFn: () => api.consultRequests(),
+    refetchInterval: (query) => {
+      const e = query.state.error;
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) return false;
+      return JOIN_REQUESTS_POLL_MS;
+    },
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useConsultDone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.consultRequestDone(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.consultRequests });
+    },
   });
 }
 

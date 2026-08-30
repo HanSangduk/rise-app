@@ -22,8 +22,25 @@ import {
   Table,
 } from "@/components/ui";
 import { useCenter, useMembers, useStats } from "@/lib/queries";
-import { formatCurrency, formatRatio, isStaffActive, ratioState } from "@/lib/format";
+import { NO_VALUE, formatCurrency, formatRatio, isStaffActive, ratioState } from "@/lib/format";
 import { MAX_PENALTY_PCT, type MonthlyRevenue } from "@/lib/types";
+
+/**
+ * `"2026-08"` → `"2026년 8월"`(withYear) · `"8월"`(차트 가로축).
+ *
+ * 서버가 주는 `YYYY-MM`은 저장용 표기지 사람에게 보여줄 말이 아니다 — "이번 달 매출"이라는
+ * 제목 바로 아래 `2026-08`이 놓이면 그게 날짜인지 코드인지부터 읽어야 한다.
+ * 모양이 다른 값이 오면 지어내지 않고 원문을 그대로 둔다(무엇을 받았는지 보여야 문의가 된다).
+ * format.ts는 이 화면의 소관이 아니라 여기 둔다 — 다른 화면도 쓰게 되면 그때 함께 옮긴다.
+ */
+function formatMonthLabel(month: string | null | undefined, withYear: boolean): string {
+  if (!month) return NO_VALUE;
+  const [y, m] = month.split("-");
+  const yn = Number(y);
+  const mn = Number(m);
+  if (!y || !m || !Number.isFinite(yn) || !Number.isFinite(mn)) return month;
+  return withYear ? `${yn}년 ${mn}월` : `${mn}월`;
+}
 
 export function Sales() {
   const statsQ = useStats("ytd", "center");
@@ -81,7 +98,7 @@ export function Sales() {
       {statsQ.isLoading ? (
         <Spinner />
       ) : statsQ.isError ? (
-        <ErrorState error={statsQ.error} />
+        <ErrorState error={statsQ.error} onRetry={() => void statsQ.refetch()} />
       ) : !stats ? (
         <EmptyState>통계 데이터가 없습니다.</EmptyState>
       ) : (
@@ -118,7 +135,9 @@ export function Sales() {
               <CardContent className="pt-3.5">
                 <div className="text-[11px] text-muted">이번 달 매출 (진행)</div>
                 <div className="my-0.5 text-[21px] font-black">{formatCurrency(thisMonth?.amount)}</div>
-                <div className="text-[10.5px] text-muted">{thisMonth?.month ?? "—"}</div>
+                <div className="text-[10.5px] text-muted">
+                  {formatMonthLabel(thisMonth?.month, true)}
+                </div>
               </CardContent>
             </Card>
             {/* v1.5 재정의: 미수금 = 연체(due 경과 미납 회차)만 — 미도래 미납은 서브라인으로 분리.
@@ -204,7 +223,7 @@ export function Sales() {
                 {membersQ.isLoading ? (
                   <Spinner />
                 ) : membersQ.isError ? (
-                  <ErrorState error={membersQ.error} />
+                  <ErrorState error={membersQ.error} onRetry={() => void membersQ.refetch()} />
                 ) : !productBreakdown.length ? (
                   <EmptyState>집계할 회원권 데이터가 없습니다.</EmptyState>
                 ) : (
@@ -227,7 +246,7 @@ export function Sales() {
                 {membersQ.isLoading ? (
                   <Spinner />
                 ) : membersQ.isError ? (
-                  <ErrorState error={membersQ.error} />
+                  <ErrorState error={membersQ.error} onRetry={() => void membersQ.refetch()} />
                 ) : !channelBreakdown.length ? (
                   <EmptyState>집계할 회원 데이터가 없습니다.</EmptyState>
                 ) : (
@@ -299,12 +318,17 @@ export function Sales() {
                 평균만 봅니다 — 비교표는 대표 전용입니다. 이번 기간에 집계 대상이 없는 칸은
                 "—"입니다(0%가 아니라 비교 자체가 불가능한 행이라는 뜻).
               </p>
-              {/* 구버전 서버(분모를 안 싣던 v2.1 이전)에서 표 전체가 "—"가 되면 대표는 고장으로
-                  읽는다 — 그 상태만 골라 한 줄로 설명한다. v2.1 서버에선 나타나지 않는다. */}
+              {/* 두 열이 통째로 "—"가 되면 대표는 고장으로 읽는다 — 그 상태만 골라 한 줄로
+                  설명한다(구버전 서버가 분모를 안 싣던 v2.1 이전 조건. v2.1부터는 안 뜬다).
+                  종전 문구는 두 가지가 틀렸다: ① "감췄어요"라고 했지만 열은 그대로 있고 값만
+                  "—"다(화면과 다른 말) ② 원인이 서버 버전이라 대표가 할 수 있는 일이 없는데
+                  마치 조치를 기다리는 것처럼 읽혔다. 지금은 **보이는 것 그대로** 설명하고,
+                  대신 "나머지 숫자는 믿어도 된다"는 실제로 쓸모 있는 정보를 준다. */}
               {stats.by_trainer?.some((t) => t.noshow_d === undefined || t.hw_d === undefined) && (
                 <p className="mt-1 text-[10.5px] text-warn">
-                  노쇼율·HW 완료율의 집계 기준을 서버가 아직 함께 주지 않아 두 열을 감췄어요 —
-                  "성과 0"과 "집계 대상 0"을 가를 수 없어 값을 추측해 채우지 않습니다.
+                  이번에는 노쇼율·HW 완료율을 계산할 기준 건수가 함께 오지 않아 두 열을 "—"로 비워
+                  뒀어요 — 0%로 채우면 노쇼는 잘한 것처럼, HW는 못한 것처럼 보여서 추측해 넣지
+                  않습니다. 정산액·재등록률은 평소대로 보셔도 됩니다.
                 </p>
               )}
             </CardContent>
@@ -354,7 +378,7 @@ function MonthlyChart({ monthly }: { monthly: MonthlyRevenue[] }) {
       ))}
       {points.map((p, i) => (
         <text key={i} x={p.x} y={H - 4} fontSize={9} fill="#8b8fa3" textAnchor="middle">
-          {p.m.month}
+          {formatMonthLabel(p.m.month, false)}
         </text>
       ))}
     </svg>
@@ -388,7 +412,7 @@ function RefundCalculatorCard() {
         <CardTitle className="flex items-center gap-2">
           <Calculator className="h-4 w-4 text-brand" /> 환불 계산기 (정책 예시)
         </CardTitle>
-        <Badge tone="ok">서버와 같은 공식</Badge>
+        <Badge tone="ok">실제 환불과 같은 공식</Badge>
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -430,13 +454,18 @@ function RefundCalculatorCard() {
           </span>
         </div>
         <p className="mt-2 text-[10.5px] text-muted">
-          위약금율은 {MAX_PENALTY_PCT}%가 상한이에요(약관규제법 리스크) — 설정 화면에서도 그 위로는
-          저장되지 않고, 계약서에 인쇄되는 값과 실제 공제액이 같습니다. 정가 공제 옵션은 없습니다 —
-          법원·소비자원 모두 <b>할인 후 실제 거래가</b>가 기준이에요(P5). 특정 회원의 실제 회원권
-          환불은 회원 상세 화면에서 처리하세요(백엔드 검증을 거칩니다).
+          {/* 내부 티켓 표기(P5 = 정가 공제 금지)와 구현 용어(백엔드 검증·서버)는 코드 주석에만
+              남긴다 — 대표에게 필요한 것은 "이 카드는 예시고, 진짜 계산은 어디서 하는지"다. */}
+          위약금율은 {MAX_PENALTY_PCT}%가 상한이에요 — 설정 화면에서도 그 위로는 저장되지 않고,
+          계약서에 인쇄되는 값과 실제 공제액이 같습니다. 정가로 공제하는 선택지는 없습니다 —
+          법원·소비자원 모두 <b>할인 후 실제 거래가</b>를 기준으로 봅니다. 여기는 정책을 확인해
+          보는 계산기예요. 특정 회원의 실제 환불은 <b>회원 관리</b>에서 그 회원권을 열어
+          처리하세요 — 그때는 그 회원의 실제 결제·사용 기록으로 다시 계산되고, 그 값이 정산
+          기준이 됩니다.
           <br />
-          <b>분할 납부 중 해지</b>라면 여기 숫자와 달라집니다 — 서버는 시작 금액을 <b>지금까지 실제로
-          받은 금액</b>(계약금액이 상한)으로 잡고, 회당 단가와 위약금만 계약금액 기준으로 계산해요.
+          <b>분할 납부 중 해지</b>라면 여기 숫자와 달라집니다 — 실제 환불은 <b>지금까지 실제로
+          받은 금액</b>(계약금액이 상한)에서 시작하고, 회당 단가와 위약금만 계약금액 기준으로
+          계산해요.
         </p>
       </CardContent>
     </Card>

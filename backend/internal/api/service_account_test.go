@@ -212,8 +212,19 @@ func TestDeleteMyAccountPurgesAndRetains(t *testing.T) {
 	if passes, _ := s.store.ListPassesByMember(ctx, testCenter, mem.ID); len(passes) != 1 {
 		t.Errorf("회원권이 %d건 — 계약 기록은 5년 보존 대상이다", len(passes))
 	}
-	if contracts, _ := s.store.ListContracts(ctx, testCenter, mem.ID, ""); len(contracts) != 1 {
-		t.Errorf("계약이 %d건 — 5년 보존 대상이다", len(contracts))
+	contracts, _ := s.store.ListContracts(ctx, testCenter, mem.ID, "")
+	if len(contracts) != 1 {
+		t.Fatalf("계약이 %d건 — 5년 보존 대상이다", len(contracts))
+	}
+	// 보존은 **문서** 보존이다(v2.17): 발급 자동 계약(sent)은 서명 주체가 파기됐으므로 voided로
+	// 종결된 채 남는다. sent인 채 남으면 어드민 미서명 카운트에 영원히 행동 불가능한 항목으로
+	// 잡힌다(P37·P38 적대 리뷰 [H] — 이 스위트가 종전에 "건드리지 않는다"만 검사하던 자리).
+	if contracts[0].Status != domain.ContractStatusVoided {
+		t.Errorf("탈퇴 후 미서명 계약 = %q, want voided — '서명 대기'가 거짓으로 남는다", contracts[0].Status)
+	}
+	if contracts[0].SentAt == nil || contracts[0].FirstSentAt == nil {
+		t.Errorf("void가 발송 증적을 지웠다: sent_at=%v first_sent_at=%v — 상태만 바뀌어야 한다",
+			contracts[0].SentAt, contracts[0].FirstSentAt)
 	}
 
 	// ---- 미래 예약은 무차감 취소 ----
@@ -296,6 +307,12 @@ func TestDeleteMyAccountLeavesDataIntactWhenExternalPurgeFails(t *testing.T) {
 			if _, err := s.store.GetUserIndex(ctx, "u-"+mem.ID); err != nil {
 				t.Errorf("UserIndex가 사라졌다(%v) — 호출자가 자기 탈퇴를 마저 끝낼 수 없다", err)
 			}
+			// 계약도 무접촉이어야 한다(v2.17 자리 검증): void 스윕은 외부 파기 **뒤**다 —
+			// 주체 파기가 확정되기 전에 무효화하면, 탈퇴가 좌초됐을 때 살아 있는 회원의
+			// 계약이 이유 없이 voided로 남는다.
+			if cs, _ := s.store.ListContracts(ctx, testCenter, mem.ID, ""); len(cs) != 1 || cs[0].Status != domain.ContractStatusSent {
+				t.Errorf("외부 파기 실패인데 계약이 이미 무효화됐다(%d건, 첫 건 status 확인) — %+v", len(cs), cs)
+			}
 		})
 	}
 }
@@ -315,15 +332,219 @@ func TestDeleteMyAccountAllowedWithRemainingSessions(t *testing.T) {
 	}
 }
 
+// 탈퇴는 미서명 계약을 종결한다(v2.17, P40). 서명 주체(Firebase 계정)가 파기되므로 draft/sent의
+// "서명 대기"는 더 이상 사실이 아니다 — 남겨두면 어드민 미서명 카운트에 영원히 행동 불가능한
+// 항목으로 잡힌다(P37·P38 적대 리뷰 [H]). signed는 성립했던 거래의 법적 기록이라 불가침이고,
+// 문서 수는 변하지 않는다(void는 삭제가 아니다 — 5년 보존은 문서 보존).
+func TestDeleteMyAccountVoidsUnsignedContracts(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	mem, pass := seedWithdrawableMember(t, s) // 발급 자동 계약 = sent(buildContractForPass)
+
+	// 구권 픽스처 2건 — store.CreateContract는 시딩 전용 경로(패스 문서 없는 계약도 실데이터에
+	// 존재: TransitionContract가 pass=nil로 판정한다). draft는 void 대상, signed는 불가침 대조군.
+	now := time.Now().UTC()
+	draftID, err := s.store.CreateContract(ctx, testCenter, &domain.Contract{
+		MemberID: mem.ID, PassID: "p-old-draft", Product: "PT 10회(구권)", PaidAmount: 300_000,
+		Status: domain.ContractStatusDraft,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// v2.21(P44): 자필 서명 이미지가 있는 signed — 탈퇴 비파기가 서명 이미지까지 포함하는지
+	// (계약 문서 내 저장이 5년 보존을 자동 상속하는지, P44 결정 2)를 함께 고정한다.
+	signedID, err := s.store.CreateContract(ctx, testCenter, &domain.Contract{
+		MemberID: mem.ID, PassID: "p-old-signed", Product: "PT 30회(구권)", PaidAmount: 1_500_000,
+		Status: domain.ContractStatusSigned, SignedAt: &now, SignerIP: "1.2.3.4",
+		SignaturePNG:    "aWNvbg==",
+		SignatureSHA256: "2222222222222222222222222222222222222222222222222222222222222222",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.DeleteMyAccount(ctx, memberP(mem.ID))
+	if err != nil {
+		t.Fatalf("DeleteMyAccount: %v", err)
+	}
+	if res.Retained.Contracts != 3 {
+		t.Errorf("retained.contracts = %d, want 3 — void가 문서를 지웠다면 보존 의무 위반", res.Retained.Contracts)
+	}
+
+	contracts, err := s.store.ListContracts(ctx, testCenter, mem.ID, "")
+	if err != nil || len(contracts) != 3 {
+		t.Fatalf("계약 %d건(err=%v), want 3", len(contracts), err)
+	}
+	for _, c := range contracts {
+		switch c.ID {
+		case draftID:
+			if c.Status != domain.ContractStatusVoided {
+				t.Errorf("draft 계약 = %q, want voided", c.Status)
+			}
+		case signedID:
+			if c.Status != domain.ContractStatusSigned || c.SignedAt == nil || c.SignerIP != "1.2.3.4" {
+				t.Errorf("signed 계약이 훼손됐다: %q(signed_at=%v, ip=%q) — 법적 기록은 불가침",
+					c.Status, c.SignedAt, c.SignerIP)
+			}
+			if c.SignaturePNG != "aWNvbg==" || c.SignatureSHA256 == "" {
+				t.Errorf("탈퇴가 서명 이미지를 파기했다: png=%q hash=%q — 서명 이미지는 계약 문서의 일부로 비파기(P44)",
+					c.SignaturePNG, c.SignatureSHA256)
+			}
+		default: // 발급 자동 계약(sent)
+			if c.PassID != pass.ID {
+				t.Fatalf("예상 밖의 계약: %+v", c)
+			}
+			if c.Status != domain.ContractStatusVoided {
+				t.Errorf("sent 계약 = %q, want voided", c.Status)
+			}
+		}
+	}
+	// 어드민 "미서명" 축(sent 필터)에서 이 회원이 사라졌는지 — 이 결함의 증상 그 자체였다.
+	if sent, _ := s.store.ListContracts(ctx, testCenter, mem.ID, domain.ContractStatusSent); len(sent) != 0 {
+		t.Errorf("탈퇴 후 sent 계약이 %d건 — 어드민 미서명 카운트에 영원히 잡힌다", len(sent))
+	}
+}
+
+// void 스윕 도중의 부분 실패는 전체를 500으로 멈추고(가명화·UserIndex 비접촉 — 재시도 자격
+// 보존), 같은 토큰의 재시도는 이미 voided를 스킵하고 나머지만 마저 종결한다(멱등). P22의
+// 실행 순서 규약 안에서 4단계 void가 안전한지를 결정적으로 재현한다.
+func TestDeleteMyAccountVoidSweepRetryIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	s, h := newHookedService(t)
+	mem, _ := seedWithdrawableMember(t, s) // 자동 계약(sent) — ID 오름차순으로 스윕의 1번째
+	if _, err := s.store.CreateContract(ctx, testCenter, &domain.Contract{
+		MemberID: mem.ID, PassID: "p-old", Status: domain.ContractStatusDraft,
+	}); err != nil { // 스윕의 2번째 — 부분 실패를 만들려면 후보가 둘 필요하다
+		t.Fatal(err)
+	}
+	h.reset()
+
+	boom := errors.New("firestore unavailable")
+	h.fail = func(op string, n int) error {
+		if op == "TransitionContract" && n == 2 {
+			return boom // 첫 계약은 voided로 커밋, 두 번째에서 끊는다 — 부분 성공 잔존 재현
+		}
+		return nil
+	}
+	if _, err := s.DeleteMyAccount(ctx, memberP(mem.ID)); !errors.Is(err, boom) {
+		t.Fatalf("부분 실패 DeleteMyAccount = %v, want %v", err, boom)
+	}
+	cs, _ := s.store.ListContracts(ctx, testCenter, mem.ID, "") // ID 오름차순(ListContracts 규약)
+	if len(cs) != 2 || cs[0].Status != domain.ContractStatusVoided || cs[1].Status != domain.ContractStatusDraft {
+		t.Fatalf("부분 실패 상태 = %+v, want [voided, draft] — 각 void는 독립 CAS다", cs)
+	}
+	after, err := s.store.GetMember(ctx, testCenter, mem.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.IsWithdrawn() {
+		t.Errorf("void 스윕 실패인데 이미 가명화됐다 — 스윕(4단계)이 가명화(5단계)보다 앞이어야 미완료가 보인다")
+	}
+	if _, err := s.store.GetUserIndex(ctx, "u-"+mem.ID); err != nil {
+		t.Errorf("UserIndex가 사라졌다(%v) — 재시도 자격을 잃는다", err)
+	}
+
+	h.fail = nil
+	res, err := s.DeleteMyAccount(ctx, memberP(mem.ID)) // 같은 토큰으로 재시도(P22)
+	if err != nil {
+		t.Fatalf("재시도: %v", err)
+	}
+	if !res.Deleted || res.Retained.Contracts != 2 {
+		t.Errorf("재시도 응답 = %+v, want deleted + retained.contracts 2", res)
+	}
+	for _, c := range mustListContracts(t, s, mem.ID) {
+		if c.Status != domain.ContractStatusVoided {
+			t.Errorf("재시도 후 계약 %s = %q, want voided", c.ID, c.Status)
+		}
+	}
+	// 멱등의 형태까지 고정한다: 첫 시도 2회(성공 1 + 실패 1) + 재시도 1회(남은 draft) = 총 3회.
+	// 4회 이상이면 재시도가 이미 voided인 계약에 트랜잭션을 다시 열고 있다는 뜻이다(사전 판정 누락).
+	if got := h.callCount("TransitionContract"); got != 3 {
+		t.Errorf("TransitionContract 호출 = %d회, want 3 — 이미 voided는 스냅샷 판정에서 걸러져야 한다", got)
+	}
+}
+
+func mustListContracts(t *testing.T, s *Service, memberID string) []domain.Contract {
+	t.Helper()
+	cs, err := s.store.ListContracts(context.Background(), testCenter, memberID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cs
+}
+
+// 후보 선정 뒤·CAS 직전에 끼어든 서명은 스킵(보존)된다 — 트랜잭션 안 재판정이 sentinel
+// (errWithdrawalVoidSkip)로 "쓰지 않고 통과"를 표현하는 자리(P40).
+// TestRefundVoidSkipsContractSignedMidflight의 탈퇴판이다. 계약 보존은 스킵 판정이지 탈퇴의
+// 실패가 아니므로 탈퇴 자체는 완주해야 한다.
+func TestDeleteMyAccountVoidSkipsContractSignedMidflight(t *testing.T) {
+	ctx := context.Background()
+	s, h := newHookedService(t)
+	mem, _ := seedWithdrawableMember(t, s)
+	cs, err := s.ListContracts(ctx, ownerP(), mem.ID, "")
+	if err != nil || len(cs) != 1 {
+		t.Fatalf("계약 목록: %v %d건", err, len(cs))
+	}
+	cid := cs[0].ID
+	h.reset()
+
+	reached, release := make(chan struct{}), make(chan struct{})
+	h.before = latchOnFirstWrite(reached, release)
+
+	delErr := make(chan error, 1)
+	go func() {
+		_, err := s.DeleteMyAccount(ctx, memberP(mem.ID))
+		delErr <- err
+	}()
+	select {
+	case <-reached: // 스윕이 후보(sent)를 담고 첫 TransitionContract 직전에 멈춰 있다
+	case <-time.After(5 * time.Second):
+		// 래치가 안 열리면 스윕이 쓰기에 도달하지 않은 것이다(후보 선정 오류·스윕 소실).
+		// 여기서 끊지 않으면 go test 전체 타임아웃(10분)까지 행이다 — 실패를 빨리 말한다.
+		t.Fatal("void 스윕이 TransitionContract에 도달하지 않았다")
+	}
+	// 마지막 순간의 서명 — 계정 파기 후에도 ID 토큰은 최대 1시간 살아 있다(provision.go).
+	if _, err := s.SignContract(ctx, memberP(mem.ID), cid, "1.2.3.4", nil); err != nil {
+		t.Fatalf("서명: %v", err)
+	}
+	close(release)
+	if err := <-delErr; err != nil {
+		t.Fatalf("막판 서명이 탈퇴를 실패시켰다: %v — 보존은 스킵이지 에러가 아니다", err)
+	}
+	h.before = nil
+
+	saved, err := h.Store.GetContract(ctx, testCenter, cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Status != domain.ContractStatusSigned || saved.SignedAt == nil || saved.SignerIP != "1.2.3.4" {
+		t.Fatalf("끼어든 서명이 무효화됐다: %s(signed_at=%v, ip=%q) — signed는 보존(v1.5)",
+			saved.Status, saved.SignedAt, saved.SignerIP)
+	}
+	if after, _ := s.store.GetMember(ctx, testCenter, mem.ID); after == nil || !after.IsWithdrawn() {
+		t.Errorf("탈퇴가 완주하지 못했다: %+v", after)
+	}
+}
+
 // 탈퇴 회원에게 새 의무·새 데이터를 붙이지 못한다(스태프 경로 — 탈퇴자는 스스로 호출할 수 없다).
 func TestWithdrawnMemberBlocksNewWrites(t *testing.T) {
 	s := newTestService()
 	ctx := context.Background()
 	kst := time.Now().In(domain.KST)
-	mem, _ := seedWithdrawableMember(t, s)
+	mem, pass := seedWithdrawableMember(t, s)
 	if _, err := s.DeleteMyAccount(ctx, memberP(mem.ID)); err != nil {
 		t.Fatal(err)
 	}
+
+	t.Run("계약 생성", func(t *testing.T) {
+		// v2.17 급소: 탈퇴 void가 "패스당 유효 계약 1건" 가드의 분모(비voided)를 비우므로,
+		// 탈퇴 가드가 없으면 같은 패스에 새 draft가 다시 생긴다 — 서명 주체가 없어 영원히
+		// 미서명인 계약을 방금 닫은 자리에서 재생산하는 유일한 경로였다.
+		_, err := s.CreateContract(ctx, ownerP(), ContractCreateRequest{MemberID: mem.ID, PassID: pass.ID})
+		if !errors.Is(err, errBadRequest) {
+			t.Errorf("탈퇴 회원 계약 생성 = %v, want 400", err)
+		}
+	})
 
 	t.Run("회원권 발급", func(t *testing.T) {
 		_, err := s.CreatePass(ctx, ownerP(), PassCreateRequest{

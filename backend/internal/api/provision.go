@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 
 	gcs "cloud.google.com/go/storage"
@@ -65,6 +66,106 @@ type MediaPurger interface {
 	// (부분 실패·과거 버그) 서버는 그 존재조차 모른다 — 메타에서 출발하는 어떤
 	// 경로로도 닿을 수 없다. 버킷 쪽에서 거꾸로 훑어야만 보인다.
 	ListObjects(ctx context.Context, prefix string) ([]string, error)
+}
+
+// MediaUploader — 서버가 Cloud Storage에 파일을 **올리는** 경계(v2.25, P51). MediaPurger의
+// 거울상이다: 규칙이 클라이언트 쓰기를 막아 둔 경로(`staff/photos/**`는 `allow read, write:
+// if false`)에 Admin SDK만이 쓸 수 있고, 그 주석이 적어 둔 *"서버가 올리고 클라이언트는
+// 다운로드 토큰 URL로 읽는다"*를 실재하게 한다.
+//
+// **파기(MediaPurger)와 합치지 않은 이유**: 둘의 미설정 시 동작이 정반대여야 한다.
+// 파기는 버킷이 없으면 조용한 no-op으로 떨어져도 서비스가 돌아야 하지만(예약·결제가 멈출
+// 이유가 없다), 업로드는 no-op이 되는 순간 **"저장했어요"라고 말하고 아무것도 저장하지 않는
+// 거짓말**이 된다. 그래서 이쪽은 미설정이면 명시적으로 실패한다(ErrUploadUnavailable → 503).
+type MediaUploader interface {
+	// Upload — 오브젝트를 쓰고 **인증 없이 열리는 다운로드 URL**을 돌려준다.
+	// 규칙이 이 경로의 클라이언트 read까지 막고 있으므로 SDK 경로로는 못 읽는다 —
+	// Firebase 다운로드 토큰 URL만이 유일한 읽기 수단이다(규칙 주석의 설계 그대로).
+	Upload(ctx context.Context, path, contentType string, data []byte) (url string, err error)
+}
+
+// ErrUploadUnavailable — 업로드 경계가 구성되지 않음(503 매핑). "잘못된 요청"이 아니라
+// **서버 설정 문제**라서 4xx로 내리지 않는다: 대표가 사진을 바꿔도 고쳐지지 않고,
+// 고칠 사람은 배포 설정을 쥔 쪽이다.
+var ErrUploadUnavailable = errors.New("api: upload unavailable")
+
+// MediaUploader — 인증 모드에 맞는 업로드 구현. MediaPurger와 같은 자리에서 갈리지만
+// **폴백이 no-op이 아니다** — 미구성이면 호출마다 503을 내는 구현을 준다.
+func (a *Authenticator) MediaUploader(ctx context.Context, bucket string) MediaUploader {
+	if a.fbApp == nil {
+		// 로컬 개발(FIREBASE_PROJECT 미설정)이 여기로 온다. 문구가 **두 값을 모두** 말해야
+		// 한다 — 이 상태에서는 STORAGE_BUCKET만 채워도 열리지 않는다(Admin SDK 앱 자체가 없다).
+		return unconfiguredUploader{reason: "사진 업로드가 설정되지 않았어요(서버에 FIREBASE_PROJECT·STORAGE_BUCKET 설정이 필요해요)"}
+	}
+	if bucket == "" {
+		log.Printf("경고: STORAGE_BUCKET 미설정 — 트레이너 프로필 사진 업로드(POST /v1/staff/{uid}/photo)가 503으로 거부됩니다. 버킷 이름을 설정하세요")
+		return unconfiguredUploader{reason: "사진 업로드 저장소가 설정되지 않았어요(관리자에게 STORAGE_BUCKET 설정을 요청해주세요)"}
+	}
+	client, err := a.fbApp.Storage(ctx)
+	if err != nil {
+		log.Printf("경고: Storage 클라이언트 초기화 실패(%v) — 트레이너 프로필 사진 업로드가 거부됩니다", err)
+		return unconfiguredUploader{reason: "사진 저장소에 연결할 수 없어요(관리자 확인 필요)"}
+	}
+	handle, err := client.Bucket(bucket)
+	if err != nil {
+		log.Printf("경고: Storage 버킷 %q 접근 실패(%v) — 트레이너 프로필 사진 업로드가 거부됩니다", bucket, err)
+		return unconfiguredUploader{reason: "사진 저장소에 연결할 수 없어요(관리자 확인 필요)"}
+	}
+	return firebaseMediaUploader{bucket: handle, bucketName: bucket}
+}
+
+// unconfiguredUploader — 업로드 경계 미구성. **조용한 성공을 절대 만들지 않는다**:
+// dev no-op이 가짜 URL을 돌려주면 어드민은 "저장됨"을 보고, 회원 앱은 깨진 이미지를 보고,
+// 아무도 원인에 도달하지 못한다(P22가 체형사진에서 실제로 겪은 실패 모양 — 조용한 no-op).
+type unconfiguredUploader struct{ reason string }
+
+func (u unconfiguredUploader) Upload(_ context.Context, _, _ string, _ []byte) (string, error) {
+	return "", errors.Join(ErrUploadUnavailable, errors.New(u.reason))
+}
+
+// firebaseMediaUploader — Admin SDK(GCS 클라이언트)로 오브젝트를 쓰고 다운로드 토큰을 붙인다.
+type firebaseMediaUploader struct {
+	bucket     *gcs.BucketHandle
+	bucketName string // 다운로드 URL 조립에 필요하다(핸들에서 되뽑지 않는다)
+}
+
+// Upload — 오브젝트 쓰기 + `firebaseStorageDownloadTokens` 메타데이터 부여.
+//
+// 이 메타데이터 키가 Firebase 콘솔의 "다운로드 URL 생성"과 **같은 메커니즘**이다: 값이 붙어
+// 있으면 `firebasestorage.googleapis.com/v0/b/{bucket}/o/{path}?alt=media&token={token}`이
+// 보안 규칙을 거치지 않고 열린다. 규칙이 이 경로의 read를 막아 둔 것과 모순이 아니라 설계다
+// (storage.rules 주석: "토큰 URL은 규칙을 거치지 않으므로 여기서는 전면 차단이 맞다").
+//
+// 캐시: 파일명에 난수가 들어가 **내용이 바뀌면 경로도 바뀐다**(immutable). 그래서 길게 캐시해도
+// 옛 사진이 남지 않는다 — 오히려 짧게 잡으면 회원 앱이 프로필을 열 때마다 원본을 다시 받는다.
+func (u firebaseMediaUploader) Upload(ctx context.Context, path, contentType string, data []byte) (string, error) {
+	token, err := randomHex(16) // 32자 — 추측으로 열 수 없어야 하는 유일한 방어선이다
+	if err != nil {
+		return "", err
+	}
+	w := u.bucket.Object(path).NewWriter(ctx)
+	w.ContentType = contentType
+	w.CacheControl = "public, max-age=31536000, immutable"
+	w.Metadata = map[string]string{"firebaseStorageDownloadTokens": token}
+	if _, err := w.Write(data); err != nil {
+		_ = w.Close()
+		return "", fmt.Errorf("storage write %q: %w", path, err)
+	}
+	// Close가 실제 업로드를 완료시킨다 — 여기 에러를 삼키면 쓰지 않은 파일의 URL을 돌려준다.
+	if err := w.Close(); err != nil {
+		return "", fmt.Errorf("storage close %q: %w", path, err)
+	}
+	return fmt.Sprintf("https://firebasestorage.googleapis.com/v0/b/%s/o/%s?alt=media&token=%s",
+		u.bucketName, url.PathEscape(path), token), nil
+}
+
+// randomHex — crypto/rand n바이트의 hex 문자열(2n자).
+func randomHex(n int) (string, error) {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 // Provisioner — 인증 모드에 맞는 구현. Firebase 모드면 Authenticator가 이미 초기화한 Admin SDK
