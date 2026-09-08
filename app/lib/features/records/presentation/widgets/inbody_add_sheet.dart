@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:rise_member/core/widgets/rise_sheet.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rise_member/core/api/member_api.dart';
@@ -31,18 +32,21 @@ import 'package:rise_member/features/records/presentation/records_view_model.dar
 /// 따른다: 키보드 인셋 패딩 · `_submitting` 잠금 · 사전 판정 버튼 잠금 · 제출
 /// 직전 이중 방어 · 성공 시 pop+스낵바 · 실패 시 시트 유지+인라인 에러.
 Future<void> showInbodyAddSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
-    context: context,
-    // 루트 Navigator에 띄운다 — 기본값(false)이면 셸 내부 Navigator에 올라가
-    // **하단 탭바가 시트와 스크림 위에 남는다**(실기기 점검에서 발견, P09).
-    useRootNavigator: true,
-    isScrollControlled: true,
-    builder: (_) => const _InbodyAddSheet(),
+  // 제출 중 잠금 신호(P56 M1) — 이 시트가 그 결함의 대표 사례였다: 6칸을 채우고 저장 →
+  // 드래그 → 서버 400 → **입력도 사라지고 아무 말도 없다**(rise_sheet.dart 헤더).
+  final submitting = ValueNotifier(false);
+  return showRiseSheet<void>(
+    context,
+    submitting: submitting,
+    builder: (_) => _InbodyAddSheet(submitting: submitting),
   );
 }
 
 class _InbodyAddSheet extends ConsumerStatefulWidget {
-  const _InbodyAddSheet();
+  const _InbodyAddSheet({required this.submitting});
+
+  /// 제출 중 신호 — 래퍼의 잠금과 같은 객체.
+  final ValueNotifier<bool> submitting;
 
   @override
   ConsumerState<_InbodyAddSheet> createState() => _InbodyAddSheetState();
@@ -53,16 +57,13 @@ class _InbodyAddSheetState extends ConsumerState<_InbodyAddSheet> {
   /// 서버가 보는 "오늘"과 하루 어긋난다(DateFmt 시간축 규약).
   DateTime _date = DateFmt.todayKst();
 
-  final _controllers = {
-    for (final m in InbodyMetric.values) m: TextEditingController(),
-  };
+  final _controllers = {for (final m in InbodyMetric.values) m: TextEditingController()};
 
   /// 칸별 포커스 — errorText가 "지금 만지는 칸인지"에 달려 있어 직접 소유한다.
-  final _focusNodes = {
-    for (final m in InbodyMetric.values) m: FocusNode(),
-  };
+  final _focusNodes = {for (final m in InbodyMetric.values) m: FocusNode()};
 
-  bool _submitting = false;
+  /// 저장소는 [widget.submitting] 하나다(rise_sheet.dart `submitting` 절).
+  bool get _submitting => widget.submitting.value;
 
   /// 서버가 돌려준 거부/실패 문구. 사전 판정과 구분해 둔다 — 입력을 고치면
   /// 사라져야 하는 값이라 값·날짜가 바뀔 때 지운다.
@@ -114,12 +115,11 @@ class _InbodyAddSheetState extends ConsumerState<_InbodyAddSheet> {
         ..removeListener(_onFocusChanged)
         ..dispose();
     }
+    widget.submitting.dispose();
     super.dispose();
   }
 
-  Map<InbodyMetric, String> get _raw => {
-        for (final e in _controllers.entries) e.key: e.value.text,
-      };
+  Map<InbodyMetric, String> get _raw => {for (final e in _controllers.entries) e.key: e.value.text};
 
   @override
   Widget build(BuildContext context) {
@@ -133,13 +133,12 @@ class _InbodyAddSheetState extends ConsumerState<_InbodyAddSheet> {
     // 회원에겐 아무 방법이 없는 막다른 길이 된다(camera_view_model 규약).
     return switch (profile) {
       AsyncLoading() => const _SheetShell(
-          child: Padding(
-            padding: EdgeInsets.symmetric(vertical: 24),
-            child: Center(child: CircularProgressIndicator(color: AppColors.red)),
-          ),
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 24),
+          child: Center(child: CircularProgressIndicator(color: AppColors.brand)),
         ),
-      AsyncData(:final value) when value.consent?.sensitive != true =>
-        const _ConsentRequiredBody(),
+      ),
+      AsyncData(:final value) when value.consent?.sensitive != true => const _ConsentRequiredBody(),
       _ => _form(context),
     };
   }
@@ -171,9 +170,9 @@ class _InbodyAddSheetState extends ConsumerState<_InbodyAddSheet> {
             // 문구를 갈지 않는다 — 있는 곳에서만 있다고 말한다.
             _photoFillAvailable
                 ? '결과지에 인쇄된 숫자 6개를 그대로 옮겨 적어주세요\n'
-                    '아래 버튼으로 결과지 사진에서 읽어와 채울 수도 있어요'
+                      '아래 버튼으로 결과지 사진에서 읽어와 채울 수도 있어요'
                 : '결과지에 인쇄된 숫자 6개를 그대로 옮겨 적어주세요\n'
-                    '사진으로 자동 입력하는 기능은 아직 없어요',
+                      '사진으로 자동 입력하는 기능은 아직 없어요',
             style: const TextStyle(fontSize: 11, color: AppColors.muted, height: 1.5),
           ),
           const SizedBox(height: 14),
@@ -332,15 +331,18 @@ class _InbodyAddSheetState extends ConsumerState<_InbodyAddSheet> {
     } else {
       // 과장 금지: 실측에서 오인식이 실제로 났다(P20). 확인을 요청하는 문장은
       // 항상 붙는다 — 6칸을 다 채웠어도.
-      _readNote = '사진에서 ${result.values.length}칸을 채웠어요. 읽은 값은 꼭 확인해주세요 — '
+      _readNote =
+          '사진에서 ${result.values.length}칸을 채웠어요. 읽은 값은 꼭 확인해주세요 — '
           '사진 상태에 따라 틀리거나 비어 있을 수 있어요';
     }
   }
 
   Future<InbodyPhotoSource?> _pickPhotoSource() {
-    return showModalBottomSheet<InbodyPhotoSource>(
-      context: context,
-      useRootNavigator: true,
+    return showRiseSheet<InbodyPhotoSource>(
+      context,
+      isScrollControlled: false,
+      // 이 시트는 종전부터 `SafeArea`로 하단을 스스로 처리해 왔다 — 래퍼는
+      // `viewInsets`만 손대고 `SafeArea`는 `padding`을 읽으므로 겹치지 않는다.
       builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -388,14 +390,13 @@ class _InbodyAddSheetState extends ConsumerState<_InbodyAddSheet> {
     // unsupported(플러그인 없음)는 막지 않는다 — image_picker가 실패하면 "읽지
     // 못했어요"로 떨어진다(qr_scan_screen과 같은 규약: 앱이 서버·OS보다 먼저
     // 판정하지 않는다).
-    if (result == CameraPermissionResult.granted ||
-        result == CameraPermissionResult.unsupported) {
+    if (result == CameraPermissionResult.granted || result == CameraPermissionResult.unsupported) {
       return true;
     }
     if (!mounted) return false;
-    final retry = await showModalBottomSheet<bool>(
-      context: context,
-      useRootNavigator: true,
+    final retry = await showRiseSheet<bool>(
+      context,
+      isScrollControlled: false,
       builder: (sheetContext) => SafeArea(
         child: CameraPermissionView(
           result: result,
@@ -418,21 +419,21 @@ class _InbodyAddSheetState extends ConsumerState<_InbodyAddSheet> {
   }
 
   static String? _helperFor(InbodyMetric metric) => switch (metric) {
-        InbodyMetric.weight => null,
-        InbodyMetric.smm => '골격근량',
-        // 체/제 한 글자 차이에 단위가 둘 다 kg라 결과지를 옮겨 적을 때 실제로
-        // 섞인다(backend/internal/domain/measurement.go가 사람 입력자에게 하는
-        // 것과 같은 경고). 상시 노출한다 — 틀린 뒤에 말하면 늦다.
-        InbodyMetric.bfm => '체지방량 — 제지방량(FFM) 아니에요',
-        InbodyMetric.pbf => '체지방률',
-        // 770/970 계열 결과지는 같은 자리에 내장지방 '단면적'(cm², 100 근처)을
-        // 인쇄해 그대로 옮겨 적는 실수가 실제로 난다. 서버는 범위 초과 400에
-        // 같은 힌트를 붙이지만(measurement.go), 앱이 같은 범위를 사전 판정해
-        // 요청이 아예 안 나가므로 그 문구가 회원에게 닿을 길이 없다 — 여기
-        // 상시 노출이 그 힌트의 유일한 전달 경로다(BFM 헬퍼와 같은 판단).
-        InbodyMetric.vfl => '내장지방 레벨 — 단면적(cm²) 아니에요',
-        InbodyMetric.bmr => '기초대사량',
-      };
+    InbodyMetric.weight => null,
+    InbodyMetric.smm => '골격근량',
+    // 체/제 한 글자 차이에 단위가 둘 다 kg라 결과지를 옮겨 적을 때 실제로
+    // 섞인다(backend/internal/domain/measurement.go가 사람 입력자에게 하는
+    // 것과 같은 경고). 상시 노출한다 — 틀린 뒤에 말하면 늦다.
+    InbodyMetric.bfm => '체지방량 — 제지방량(FFM) 아니에요',
+    InbodyMetric.pbf => '체지방률',
+    // 770/970 계열 결과지는 같은 자리에 내장지방 '단면적'(cm², 100 근처)을
+    // 인쇄해 그대로 옮겨 적는 실수가 실제로 난다. 서버는 범위 초과 400에
+    // 같은 힌트를 붙이지만(measurement.go), 앱이 같은 범위를 사전 판정해
+    // 요청이 아예 안 나가므로 그 문구가 회원에게 닿을 길이 없다 — 여기
+    // 상시 노출이 그 힌트의 유일한 전달 경로다(BFM 헬퍼와 같은 판단).
+    InbodyMetric.vfl => '내장지방 레벨 — 단면적(cm²) 아니에요',
+    InbodyMetric.bmr => '기초대사량',
+  };
 
   Future<void> _pickDate() async {
     final today = DateFmt.todayKst();
@@ -471,7 +472,7 @@ class _InbodyAddSheetState extends ConsumerState<_InbodyAddSheet> {
       return;
     }
     setState(() {
-      _submitting = true;
+      widget.submitting.value = true;
       _error = null;
     });
 
@@ -481,13 +482,11 @@ class _InbodyAddSheetState extends ConsumerState<_InbodyAddSheet> {
       case Ok():
         final messenger = ScaffoldMessenger.of(context);
         Navigator.of(context).pop();
-        messenger.showSnackBar(
-          riseSnackBar('인바디 기록을 저장했어요', kind: RiseSnackKind.ok),
-        );
+        messenger.showSnackBar(riseSnackBar('인바디 기록을 저장했어요', kind: RiseSnackKind.ok));
       case Err(:final failure):
         // 실패면 시트를 닫지 않는다 — 6칸을 다시 채우게 만들지 않기 위해서다.
         setState(() {
-          _submitting = false;
+          widget.submitting.value = false;
           _error = failure.message;
         });
     }

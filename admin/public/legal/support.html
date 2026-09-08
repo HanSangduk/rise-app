@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="index,follow">
+<meta name="description" content="라이즈 컨디셔닝 회원 앱 고객 지원 — 문의 채널, 답변 시간, 로그인·예약·기록·계정 삭제에 관한 자주 묻는 질문">
+<title>고객 지원 — 라이즈 컨디셔닝 회원 앱</title>
+<style>
+:root{
+  --bg:#14181f; --bg-soft:#181d25; --panel:#1c222c; --panel-2:#222a36;
+  --line:#2b3441; --line-soft:#232b37;
+  --text:#d7dde6; --dim:#a6b2c2; --faint:#7d8a9c;
+  --accent:#7db3f0; --ok:#86c48f; --warn:#e0af68; --danger:#e2726e;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,
+    "Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+  font-size:16px; line-height:1.78; word-break:keep-all; overflow-wrap:anywhere;
+  letter-spacing:-.003em;
+}
+.wrap{max-width:72ch; margin:0 auto; padding:0 20px 96px}
+header.doc{padding:64px 0 30px; border-bottom:1px solid var(--line)}
+.eyebrow{font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); font-weight:700; margin:0 0 10px}
+h1{font-size:clamp(27px,4.8vw,35px); line-height:1.3; margin:0 0 14px; font-weight:800; letter-spacing:-.02em}
+h2{font-size:21px; margin:44px 0 14px; font-weight:750; letter-spacing:-.015em; color:#e9eef5}
+h2 .n{color:var(--faint); font-weight:700; font-size:14px; letter-spacing:.11em; margin-right:8px}
+.meta{margin:0; color:var(--dim); font-size:14.8px}
+p{margin:0 0 14px}
+ul,ol{margin:0 0 14px; padding-left:1.3em}
+li{margin:0 0 6px}
+a{color:var(--accent); text-decoration:none}
+a:hover{text-decoration:underline}
+.cards{display:grid; gap:14px; margin:18px 0 0}
+.card{
+  display:block; padding:20px 22px; border:1px solid var(--line); border-radius:12px;
+  background:var(--panel); color:var(--text);
+}
+a.card:hover{border-color:var(--accent); background:var(--panel-2); text-decoration:none}
+.card .n{display:block; font-size:12.6px; font-weight:700; letter-spacing:.11em; text-transform:uppercase; color:var(--faint); margin-bottom:7px}
+.card .h{display:block; font-size:19px; font-weight:750; letter-spacing:-.012em; margin-bottom:6px; color:#e9eef5}
+.card .d{display:block; font-size:14.8px; line-height:1.68; color:var(--dim)}
+.card.primary{border-left:3px solid var(--accent)}
+.card.primary .h{color:var(--accent)}
+.card.primary .big{font-size:22px; font-weight:800; letter-spacing:-.01em; color:#e9eef5; display:block; margin:2px 0 6px}
+.callout{margin:20px 0; padding:15px 18px; border-radius:10px; background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--accent); font-size:15.3px; line-height:1.72}
+.callout>:last-child{margin-bottom:0}
+.callout .t{display:block; font-weight:750; margin-bottom:6px; color:var(--accent); font-size:14.5px}
+.callout.ok{border-left-color:var(--ok)} .callout.ok .t{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn)} .callout.warn .t{color:var(--warn)}
+details{border:1px solid var(--line); border-radius:10px; background:var(--panel); margin:0 0 10px; padding:0 18px}
+details[open]{background:var(--panel-2)}
+summary{cursor:pointer; padding:14px 0; font-weight:700; color:#e9eef5; list-style:none; display:flex; gap:10px; align-items:baseline}
+summary::-webkit-details-marker{display:none}
+summary::before{content:"+"; content:"+" / ""; color:var(--accent); font-weight:800; width:1em; flex:none}
+details[open] summary::before{content:"–"; content:"–" / ""}
+details .body{padding:0 0 16px 1.6em; color:var(--text); font-size:15.3px}
+details .body p:last-child{margin-bottom:0}
+.path{display:inline-block; padding:.05em .5em; border-radius:6px; background:rgba(125,179,240,.12); border:1px solid rgba(125,179,240,.35); font-size:.93em; font-weight:600; color:#cfe3fb; white-space:nowrap}
+table{width:100%; border-collapse:collapse; margin:8px 0 14px; font-size:15px}
+th,td{text-align:left; padding:10px 12px; border-bottom:1px solid var(--line-soft); vertical-align:top}
+th{color:var(--dim); font-weight:600; width:34%}
+footer.doc{margin-top:52px; padding-top:26px; border-top:1px solid var(--line); color:var(--faint); font-size:14px}
+footer.doc p{margin:0 0 8px}
+footer.doc a{margin-right:14px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <p class="eyebrow">라이즈 컨디셔닝 회원 앱</p>
+  <h1>고객 지원</h1>
+  <p class="meta">iOS · Android 「라이즈 컨디셔닝 - PT 회원 앱」 이용 중 궁금한 점이나 문제를 여기서 해결하세요.
+  아래 채널로 문의하시면 <b>영업일 기준 1~2일 안에</b> 답변드립니다.</p>
+</header>
+
+<h2><span class="n">01</span>문의하기</h2>
+<div class="cards">
+  <a class="card primary" href="mailto:richramsang@gmail.com?subject=%5B%EB%9D%BC%EC%9D%B4%EC%A6%88%20%EC%95%B1%20%EB%AC%B8%EC%9D%98%5D">
+    <span class="n">이메일 문의</span>
+    <span class="big">richramsang@gmail.com</span>
+    <span class="d">앱 오류, 로그인 문제, 기능 문의, 개인정보·계정 관련 요청 모두 이 주소로 보내주세요.
+    영업일 기준 1~2일 안에 답변드립니다. (이 링크를 누르면 메일 앱이 열립니다)</span>
+  </a>
+  <div class="card" id="center-contact" hidden>
+    <span class="n">센터 문의</span>
+    <span class="h" data-biz="biz_name"></span>
+    <span class="d">
+      <span id="center-phone-row" hidden>전화 <a id="center-phone-link" href="#"><span data-biz="phone"></span></a><br></span>
+      <span id="center-email-row" hidden>이메일 <a id="center-email-link" href="#"><span data-biz="email"></span></a><br></span>
+      <span id="center-address-row" hidden>주소 <span data-biz="address"></span><br></span>
+      회원권·예약·수업에 관한 문의는 센터 데스크와 담당 코치가 가장 빠르게 도와드립니다.
+    </span>
+  </div>
+  <div class="card">
+    <span class="n">센터에서 직접</span>
+    <span class="h">데스크 · 담당 코치</span>
+    <span class="d">회원권 잔여 횟수, 예약 변경, 수업 일정처럼 센터 운영과 관련된 일은 방문 시 데스크나
+    담당 코치에게 바로 말씀해 주세요. 앱에 보이는 회원권과 기록은 센터가 관리하는 정보를 그대로 보여드리는 것입니다.</span>
+  </div>
+</div>
+
+<div class="callout">
+  <span class="t">문의할 때 함께 알려주시면 빨리 해결됩니다</span>
+  <ul>
+    <li>기기와 운영체제 (예: iPhone 15 · iOS 26.1 / Galaxy S24 · Android 16)</li>
+    <li>앱 버전 — iPhone은 <span class="path">설정 → 일반 → iPhone 저장 공간 → 라이즈</span>, Android는 <span class="path">설정 → 애플리케이션 → 라이즈</span>에서 확인할 수 있습니다</li>
+    <li>센터에 등록한 휴대폰 번호의 <b>뒷자리 4자리</b> (전체 번호는 보내지 않으셔도 됩니다)</li>
+    <li>어떤 화면에서 무엇을 했을 때 무슨 문제가 생겼는지, 가능하면 화면 캡처와 발생 시각</li>
+  </ul>
+</div>
+
+<h2><span class="n">02</span>자주 묻는 질문</h2>
+
+<details>
+  <summary>로그인이 안 돼요 · 인증번호가 오지 않아요</summary>
+  <div class="body">
+    <p>이 앱은 <b>라이즈 컨디셔닝에 등록된 회원 전용</b>입니다. 앱 안에서 따로 회원가입을 하지 않고,
+    센터에 등록된 휴대폰 번호로 인증하면 회원 정보가 자동으로 연결됩니다.</p>
+    <ul>
+      <li>센터에 등록한 휴대폰 번호를 <b>010-1234-5678</b> 형식으로 입력했는지 확인해 주세요. 국가 선택은 없고 한국 번호만 지원합니다.</li>
+      <li>인증번호가 오지 않으면 <b>30초 뒤</b> 활성화되는 <b>재전송</b>을 눌러 주세요. 통신사 스팸 차단함도 확인해 주세요.</li>
+      <li>"아직 연결된 센터가 없어요"가 뜨면 센터에 등록된 번호와 다른 번호이거나 아직 등록 전입니다. 화면의 <b>가입 요청 보내기</b>로 이름을 남기거나 센터로 연락해 주세요. 센터가 승인하면 앱에서 자동으로 연결됩니다.</li>
+      <li>번호를 바꾸셨다면 센터 데스크에서 번호를 갱신한 뒤 새 번호로 다시 인증하면 됩니다.</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>회원권 잔여 횟수나 유효기간이 다르게 보여요</summary>
+  <div class="body">
+    <p>앱의 회원권 정보는 센터가 기록한 결제·출석 내역을 그대로 보여드립니다. 실제와 다르다면 센터 데스크에 말씀해
+    주세요. 센터가 정정하면 앱을 아래로 당겨 새로고침했을 때 바로 반영됩니다.</p>
+  </div>
+</details>
+
+<details>
+  <summary>예약을 취소하거나 바꾸고 싶어요</summary>
+  <div class="body">
+    <p><span class="path">예약</span> 탭의 <b>내 예약</b>에서 예약 옆 <b>취소</b>를 누르면 취소됩니다. 무료 취소 마감(수업 시작 몇 시간 전까지)은
+    센터 정책에 따르며 예약 화면에 함께 표시됩니다. <b>마감이 지난 뒤에도 앱에서 취소할 수 있지만 세션 1회가 차감</b>됩니다.
+    차감 관련 조정은 센터 데스크에 문의해 주세요.</p>
+  </div>
+</details>
+
+<details>
+  <summary>인바디 기록이나 체형 사진을 지우고 싶어요</summary>
+  <div class="body">
+    <p><span class="path">기록</span> 탭에서 <b>회원님이 직접 입력한</b> 인바디 기록과 체형 사진을 하나씩 삭제할 수 있습니다
+    (코치가 입력한 인바디 기록은 센터에 요청해 주세요). 체형 사진은 사진을 눌러 크게 본 화면에서 삭제하며, 회원이 직접 삭제한
+    사진은 <b>즉시 완전히 파기</b>되고 복구되지 않습니다. 건강 관련 기록의 수집·이용 동의는 <span class="path">마이 → 동의 관리</span>에서
+    언제든 철회할 수 있습니다. 철회하면 새 인바디·체형 사진 저장과 코치·센터의 체형 사진 열람이 즉시 차단되고, 이미 저장된 기록은
+    회원 본인이 계속 볼 수 있습니다. 자세한 내용은
+    <a href="./sensitive-consent.html">민감정보(건강정보) 수집·이용 동의</a>를 참고해 주세요.</p>
+  </div>
+</details>
+
+<details>
+  <summary>계정을 삭제하고 싶어요</summary>
+  <div class="body">
+    <p>앱의 <span class="path">마이 → 회원탈퇴</span>에서 직접 삭제할 수 있고, 별도 연락 없이 즉시 처리됩니다. 앱을 쓸 수 없는
+    상황이면 위 이메일로 요청해 주셔도 됩니다. 삭제되는 항목과 법령에 따라 일정 기간 보존되는 항목은
+    <a href="./account-deletion.html">계정·데이터 삭제 요청 안내</a>에 정리되어 있습니다.</p>
+  </div>
+</details>
+
+<details>
+  <summary>내 개인정보는 어떻게 다뤄지나요</summary>
+  <div class="body">
+    <p>수집 항목, 보유 기간, 처리 위탁, 정보주체의 권리는 <a href="./privacy.html">개인정보처리방침</a>에, 체형 사진과 체성분처럼
+    민감한 건강 정보의 별도 동의는 <a href="./sensitive-consent.html">민감정보 수집·이용 동의</a>에 있습니다.
+    이 앱은 광고·분석·추적 SDK를 쓰지 않으며, 회원이 직접 입력하거나 촬영한 정보만 센터의 서버에 저장합니다.</p>
+  </div>
+</details>
+
+<details>
+  <summary>앱이 느리거나 화면이 멈춰요</summary>
+  <div class="body">
+    <ul>
+      <li>App Store · Google Play에서 앱을 <b>최신 버전으로 업데이트</b>해 주세요.</li>
+      <li>Wi-Fi나 셀룰러 연결을 확인하고 앱을 완전히 종료한 뒤 다시 실행해 주세요.</li>
+      <li>그래도 반복되면 위 "문의할 때 함께 알려주시면" 항목과 함께 이메일로 보내주세요. 확인 후 답변드립니다.</li>
+    </ul>
+  </div>
+</details>
+
+<details>
+  <summary>카메라 · 동작 센서 권한은 왜 필요한가요</summary>
+  <div class="body">
+    <p>카메라는 <b>체형 분석 사진 촬영</b>과 <b>데스크 체크인 QR 읽기</b>에만, 동작 센서는 촬영할 때 폰의 기울기를 잡아주는
+    <b>수평 안내</b>에만 씁니다. 권한을 거부해도 예약·기록 조회 등 다른 기능은 그대로 사용할 수 있습니다.</p>
+  </div>
+</details>
+
+<h2><span class="n">03</span>답변 시간과 처리 기준</h2>
+<table>
+  <tr><th>답변 시간</th><td>영업일 기준 1~2일 이내 (주말·공휴일 접수분은 다음 영업일부터)</td></tr>
+  <tr><th>개인정보 열람·정정·삭제 요청</th><td>접수 확인 회신은 영업일 기준 3일 이내, 처리 완료는 정당한 사유가 없는 한 <b>10일 이내</b>에 결과를 알려드립니다</td></tr>
+  <tr><th>앱 오류 신고</th><td>재현되면 다음 업데이트에 반영하고, 신고하신 분께 결과를 회신합니다</td></tr>
+</table>
+
+<div class="callout ok">
+  <span class="t">앱 사용법 한눈에</span>
+  <p><span class="path">홈</span> 내 회원권·다음 예약·Home Work 체크 &nbsp;·&nbsp; <span class="path">예약</span> 수업 예약과 취소 &nbsp;·&nbsp;
+  <span class="path">촬영</span> 체형 분석 사진 &nbsp;·&nbsp; <span class="path">기록</span> 운동·인바디·체형 분석 &nbsp;·&nbsp;
+  <span class="path">마이</span> 회원권·결제·계약·동의 관리·회원탈퇴</p>
+</div>
+
+<footer class="doc">
+  <p><a href="./index.html">약관 및 정책</a><a href="./terms.html">이용약관</a><a href="./privacy.html">개인정보처리방침</a><a href="./account-deletion.html">계정·데이터 삭제</a></p>
+  <p>라이즈 컨디셔닝 회원 앱 고객 지원 · 지원 이메일 richramsang@gmail.com</p>
+</footer>
+
+</div>
+<script>
+/* 센터 연락처 채우기 — GET /api/v1/public/business (무인증 · 동일 오리진 · 계약 v2.13).
+ *
+ * 법정 문서 5장과 같은 출처를 쓰되 규칙이 하나 다르다: **값이 있는 줄만 보인다.**
+ * 문서들은 "(항목명 미등록)" 자리표시를 두어 미기재를 드러내는 게 목적이지만, 지원 페이지에
+ * 빈 자리가 보이면 "문의할 곳이 없는 페이지"가 된다(App Store 1.5 리젝 사유가 정확히 그것이었다).
+ * 그래서 카드 전체를 hidden으로 두고 전화·이메일·주소 중 하나라도 오면 그때 연다.
+ * 이메일 카드는 정적이라 이 요청과 무관하게 항상 보인다 — 실패해도 문의 수단은 남는다.
+ */
+(function () {
+  var card = document.getElementById("center-contact");
+  if (!card) return;
+  var ctl = typeof AbortController === "function" ? new AbortController() : null;
+  var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 6000);
+
+  function put(key, value) {
+    var els = card.querySelectorAll('[data-biz="' + key + '"]');
+    for (var i = 0; i < els.length; i++) els[i].textContent = value;
+  }
+  function clean(v) { return typeof v === "string" ? v.trim() : ""; }
+
+  /* **이 문서가 어느 센터의 고지인지는 URL이 정한다**(계약 v2.33). 여러 센터가 이 앱을 쓰므로
+   * 사업자 정보를 한 센터로 고정하면 나머지 센터의 법정 고지가 통째로 거짓이 된다.
+   * `?center=`가 없으면 서버가 기본 센터를 준다(배포돼 있는 구 링크 호환). 모르는 센터면 404이고,
+   * 그때는 아래 catch가 자리표시자를 그대로 남긴다 — 남의 사업자 정보를 대신 인쇄하지 않는다. */
+  var qsCenter = new URLSearchParams(location.search).get("center");
+  var bizUrl = "/api/v1/public/business" + (qsCenter ? "?center=" + encodeURIComponent(qsCenter) : "");
+
+  fetch(bizUrl, ctl ? { signal: ctl.signal } : undefined)
+    .then(function (res) { return res.ok ? res.json() : null; })
+    .then(function (data) {
+      if (!data || typeof data !== "object") return;
+      var phone = clean(data.phone), email = clean(data.email), address = clean(data.address);
+      var name = clean(data.biz_name);
+      if (!phone && !email && !address) return;   /* 아직 등록 전 — 카드를 열지 않는다 */
+      put("biz_name", name || "라이즈 컨디셔닝");
+      if (phone) {
+        put("phone", phone);
+        document.getElementById("center-phone-link").href = "tel:" + phone.replace(/[^0-9+]/g, "");
+        document.getElementById("center-phone-row").hidden = false;
+      }
+      if (email) {
+        put("email", email);
+        document.getElementById("center-email-link").href = "mailto:" + email;
+        document.getElementById("center-email-row").hidden = false;
+      }
+      if (address) {
+        put("address", address);
+        document.getElementById("center-address-row").hidden = false;
+      }
+      card.hidden = false;
+    })
+    .catch(function () { /* 이메일 카드가 이미 있다 — 조용히 넘긴다 */ })
+    .then(function () { clearTimeout(timer); });
+})();
+</script>
+<script>
+/* 센터 승계 — 같은 폴더의 다른 법정 문서로 갈 때 `?center=`를 잃지 않게 한다(계약 v2.33).
+ * 잃으면 회원이 이용약관에서 개인정보처리방침으로 한 번 넘어가는 순간 **다른 센터의 고지**를
+ * 읽게 된다. 링크를 손으로 6장에 박지 않고 여기서 한 번에 붙인다. */
+(function () {
+  var center = new URLSearchParams(location.search).get("center");
+  if (!center) return;
+  var links = document.querySelectorAll('a[href^="./"]');
+  for (var i = 0; i < links.length; i++) {
+    var href = links[i].getAttribute("href");
+    if (href.indexOf("center=") !== -1) continue;
+    links[i].setAttribute("href", href + (href.indexOf("?") === -1 ? "?" : "&") + "center=" + encodeURIComponent(center));
+  }
+})();
+</script>
+</body>
+</html>

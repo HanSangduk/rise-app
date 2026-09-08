@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -108,9 +109,9 @@ func TestReconcileKeepsSoftDeletedFiles(t *testing.T) {
 	if _, err := s.RestoreBodyPhoto(ctx, ownerP(), bp.ID); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
-	list, _ := s.ListBodyPhotos(ctx, ownerP(), mem.ID)
-	if len(list) != 1 {
-		t.Fatalf("복원 후 %d장", len(list))
+	listing, _ := s.ListBodyPhotos(ctx, ownerP(), mem.ID, false)
+	if len(listing.Full) != 1 {
+		t.Fatalf("복원 후 %d장", len(listing.Full))
 	}
 }
 
@@ -121,7 +122,7 @@ func TestReconcileOwnerOnly(t *testing.T) {
 	mem := consentingMember(t, s)
 
 	for name, p := range map[string]Principal{
-		"회원":  memberP(mem.ID),
+		"회원":   memberP(mem.ID),
 		"트레이너": trainerP(),
 	} {
 		if _, err := s.ReconcileBodyPhotos(ctx, p, mem.ID, false); err == nil {
@@ -142,7 +143,8 @@ func TestReconcileIgnoresOtherMembersFolder(t *testing.T) {
 }
 
 func TestReconcileEmptyBucketIsNotAnError(t *testing.T) {
-	// dev 모드(파기 경계가 no-op)에서도 500이 나면 안 된다.
+	// **구성된** 버킷이 비어 있는 것은 에러가 아니다(recordingPurger = 구성된 버킷의 대역).
+	// 미구성(unconfiguredPurger)은 다르다 — 아래 TestReconcileRefusesWhenPurgerUnconfigured.
 	ctx := context.Background()
 	s := newTestService().WithMediaPurger(&recordingPurger{})
 	mem := consentingMember(t, s)
@@ -153,6 +155,49 @@ func TestReconcileEmptyBucketIsNotAnError(t *testing.T) {
 	}
 	if len(res.Orphans) != 0 || res.Deleted != 0 {
 		t.Fatalf("빈 버킷인데 %+v", res)
+	}
+}
+
+// 파기 경계 **미구성**은 "빈 버킷"이 아니다(v2.28, P56 A4).
+//
+// 종전엔 강등 구현(devMediaPurger)의 ListObjects가 nil,nil을 돌려줘 STORAGE_BUCKET 미설정
+// 서버에서 훑기가 항상 "고아 0건"이었다 — 이 도구는 바로 그 no-op이 남긴 고아 50개(v2.15)
+// 때문에 만들어졌는데 같은 강등이 도구까지 조용히 무력화했다. "버킷에 아무것도 없다"(위
+// 테스트)와 "버킷을 볼 수 없다"(이 테스트)를 갈라 고정한다.
+//
+// **뮤테이션 표적**: unconfiguredPurger.ListObjects를 옛 `nil, nil`로 되돌리면 여기서 죽는다.
+func TestReconcileRefusesWhenPurgerUnconfigured(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService() // 파기 경계 미주입 = unconfiguredPurger(NewService 기본값)
+	mem := consentingMember(t, s)
+	seedPhoto(t, s, mem.ID, "stand")
+
+	for _, apply := range []bool{false, true} {
+		res, err := s.ReconcileBodyPhotos(ctx, ownerP(), mem.ID, apply)
+		if !errors.Is(err, ErrMediaListUnavailable) {
+			t.Fatalf("미구성 훑기(apply=%v) = (%+v, %v), want ErrMediaListUnavailable — nil,nil이면 '고아 0건'이라는 거짓 보고가 된다",
+				apply, res, err)
+		}
+	}
+}
+
+// 같은 미구성 경계로 **탈퇴는 막히지 않는다** — 두 동사의 실패 모양이 일부러 다르다(P51 결정:
+// 파기 실패가 탈퇴를 막으면 안 된다). 훑기는 조회라 크게 실패해도 잃는 것이 없지만, 탈퇴는
+// 자기 개인정보를 지울 권리(§36)라 배포 설정 하나에 막히면 그쪽이 더 큰 거짓이다.
+//
+// **뮤테이션 표적**: unconfiguredPurger.DeleteObjects를 에러로 바꾸면 여기서 죽는다.
+func TestUnconfiguredPurgerDoesNotBlockWithdrawal(t *testing.T) {
+	ctx := context.Background()
+	s := newTestService() // unconfiguredPurger
+	mem := consentingMember(t, s)
+	seedPhoto(t, s, mem.ID, "stand")
+
+	res, err := s.DeleteMyAccount(ctx, memberP(mem.ID))
+	if err != nil {
+		t.Fatalf("미구성 파기 경계가 탈퇴를 막았다: %v", err)
+	}
+	if !res.Deleted || res.Purged.BodyPhotos != 1 {
+		t.Fatalf("탈퇴 결과 = %+v, want deleted + body_photos 1(메타는 지워진다 — 파일은 기동 로그 경고가 알린다)", res)
 	}
 }
 

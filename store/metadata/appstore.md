@@ -28,22 +28,42 @@
 기준으로 재답변 필요. "건강 관련 주제" 문항은 개인 피트니스 기록(의료 아님)으로 답변.
 
 ## URL
-- 지원 URL: https://rize-218c1.web.app/legal/index.html
+- 지원 URL: https://rize-218c1.web.app/legal/support.html
+  (P60 · 2026-09-04 교체 — 종전 `legal/index.html`은 문의 수단이 "(미정)" 자리표시뿐이라 Guideline 1.5로 리젝됐다.
+  지원 페이지는 이메일 문의를 **정적으로** 싣고 센터 전화·주소는 사업자 정보가 등록된 뒤에만 표시한다.)
 - 마케팅 URL(선택): https://rize-218c1.web.app
-- 개인정보처리방침 URL: https://rize-218c1.web.app/legal/privacy.html
+- 개인정보처리방침 URL: https://rize-218c1.web.app/legal/app-privacy.html
+  (P66 · 2026-09-06 교체 — 이 앱은 **여러 센터가 함께 쓴다**. 종전 `privacy.html`은 특정 센터 하나를
+  개인정보처리자로 선언하는 문서라, 두 번째 센터가 들어오는 순간 나머지 센터 회원에게 거짓 고지가 된다.
+  앱 스토어에 거는 것은 **앱 운영자(한상덕) 방침**이고, 센터별 방침은 앱 마이 탭에서 자기 센터 것이 열린다.)
+
+> ⚠ **제출 전 필수**: 이 URL들이 지금은 **"(사업자명 미정)" 플레이스홀더를 그대로 보여준다.**
+> 법정 문서 5장은 `GET /api/v1/public/business`로 사업자 정보를 받아 채우는데(상호가 바뀔 때
+> 5장을 따로 고치다 하나를 빠뜨리는 사고를 막으려 그렇게 설계했다), 프로덕션 응답이
+> 전 필드 빈 문자열 · `complete:false`다(2026-08-30 실측).
+> 심사자가 개인정보처리방침을 열면 미완성 문서를 보게 된다 → Guideline 5.1.1 리젝 사유이고,
+> 보호책임자 연락처 공백은 국내 개인정보보호법 고지 요건 미달이다.
+> **어드민 > 설정 > 사업자 정보 12개 항목**을 채우면 5장이 한 번에 정상화된다.
+
+## 저작권 (Copyright) — 버전 정보 탭
+`2026 한상덕`
+- **URL이 아니라 텍스트다** — Apple이 이 칸에 URL을 넣지 말라고 명시한다. 형식은
+  "권리 취득 연도 + 권리 보유자", © 기호 불필요, 170자 이내.
+- 사업자 등록 후 법인이 권리 보유자가 되면 상호로 교체(나중 버전에서 변경 가능).
 
 ## 심사 노트 (App Review Information) — ASO B 최종본
 ```
 [About this app]
 이 앱은 피트니스 센터 "라이즈 컨디셔닝"의 등록 회원 전용 앱입니다.
 계정은 센터가 회원 등록 시 생성·승인하므로 앱 내 신규 가입 기능은 없습니다
-(특정 시설 회원 전용). 심사를 위해 아래 데모 계정을 준비했습니다.
+(특정 시설 회원 전용 — 미등록 번호는 센터에 "가입 요청"만 보낼 수 있고, 센터 승인 전에는
+기능이 열리지 않습니다). 심사를 위해 아래 데모 계정을 준비했습니다.
 개발사는 본 서비스의 운영 주체로서 직접 제출합니다.
 
 [Demo account]
-1) 로그인 화면에서 국가를 Korea(+82)로 선택
-2) 전화번호: 010-1234-5678 입력 → SMS 인증코드: 123456
-   (Firebase Auth 테스트 번호 — 실제 SMS는 발송되지 않으며 위 코드로 로그인됩니다)
+1) 로그인 화면에 전화번호 010-0000-0000 입력 (국가 선택은 없고 한국 번호만 지원합니다.
+   하이픈은 있어도 없어도 됩니다.)
+2) "인증번호 받기" → SMS 인증코드: 000000 (실제 SMS가 발송되지 않는 가공 번호입니다.)
 3) 로그인하면 회원권·예약·홈워크·인바디 추이·체형 사진·수업 기록이 채워진
    승인된 테스트 회원으로 자동 연결됩니다.
 
@@ -66,7 +86,42 @@
 
 [Account deletion — 5.1.1(v)]
 - 마이 > 회원탈퇴에서 앱 내 계정 삭제를 제공합니다.
+- 센터에 아직 연결되지 않은 계정(가입 요청 대기·미등록 번호)도 센터 연결 화면 하단의
+  "계정 삭제"에서 인증 계정과 보낸 가입 요청을 삭제할 수 있습니다.
 ```
 
 ## 심사 담당자 연락처
-- 이름: 람 / 이메일: ramsang@stra.ai
+- 이름: 람 / 이메일: richramsang@gmail.com
+
+## 심사 회신 · 재제출 노트 (2026-09-04 — 1.0 (3) 리젝 대응, P60)
+
+App Store Connect의 리젝 메시지에 답글로 붙이고, 빌드 1.0 (4)를 연결해 재제출한다. 영문이 기본이고
+아래 한국어 요약은 내부 확인용이다.
+
+> ⚠ **발송 전 두 가지가 끝나야 한다.** ① `https://rize-218c1.web.app/legal/support.html`이 라이브에서 실제 지원
+> 페이지로 열리는지(`curl -s <URL> | grep -c richramsang@gmail.com` ≠ 0) ② **1.0 (4) IPA(또는 TestFlight)를 실제 iPhone에
+> 설치해 심사 계정으로 로그인 → 홈·예약·기록·마이를 한 번 돌려본다.** 문안의 "verified on a physical iPhone"은
+> 그 뒤에만 참이다.
+
+```
+Thank you for the detailed review.
+
+Guideline 2.1(a) — Root cause identified: build 1.0 (3) was produced with an incorrect
+build configuration that pointed the app at a non-production server address, so it could
+not load any data after launch. Build 1.0 (4) is built with the correct production
+configuration, and we added an automated check to our release process so this cannot
+recur. We verified 1.0 (4) on a physical iPhone with the demo account: sign-in, home,
+booking, records (workout, InBody, body check), and profile all load correctly.
+
+Guideline 1.5 — The Support URL now points to a dedicated support page,
+https://rize-218c1.web.app/legal/support.html, with a support email address, response
+times, and FAQs covering sign-in, bookings, records, and account deletion. The page is
+publicly accessible without sign-in and works without JavaScript.
+
+Demo account (unchanged): enter phone number 010-0000-0000 on the sign-in screen
+(Korean numbers only, no country selector), then SMS code 000000.
+```
+
+한국어 요약: 2.1(a)는 스크린샷 캡처 도구가 남긴 Xcode 설정(테스트 진입점 + localhost API)으로 빌드된
+바이너리가 원인 — 릴리스 스크립트 단일 경로 + 빌드 페이즈 가드 + 아카이브 검사로 재발 차단(내부 사정은
+회신에 적지 않는다 — Apple은 원인 요약과 수정 사실만 필요하다). 1.5는 지원 URL을 전용 지원 페이지로 교체.

@@ -39,6 +39,9 @@ import {
   Textarea,
 } from "@/components/ui";
 import { useAuth } from "@/lib/auth";
+// 앱 가입 요청 큐(P69) — 이 화면 최상단에 마운트(대표 전용). 회원 목록·직원 목록은 이 화면이 이미
+// 들고 있어 prop으로 내려 중복 감지에 쓴다(같은 쿼리 키라 추가 요청은 없다).
+import { JoinRequestQueue } from "@/features/JoinRequests";
 import {
   useContracts,
   useCreateMember,
@@ -61,7 +64,9 @@ import {
   addDays,
   formatCurrency,
   formatPercent,
+  formatPhoneKR,
   isStaffActive,
+  normalizePhoneKR,
   staffLabel,
   todayStr,
 } from "@/lib/format";
@@ -117,7 +122,15 @@ const UNKNOWN_LABEL = "확인 필요";
 /// 두 곳을 함께 고쳐야 하는 값이므로 옮길 일이 생기면 Schedule.tsx와 같이 옮긴다.
 const UNRESOLVED_STAFF = "(담당 미확인)";
 
-export function Members({ focusMemberId }: { focusMemberId?: string | null }) {
+// focusJoinRequestId — 대시보드 "가입 요청 대기" 줄의 이름 클릭 → 상단 큐에서 그 행 강조(P69). 같은
+// 리마운트 규약이라 초기값처럼 써도 되지만 큐 컴포넌트가 직접 받아 "이미 처리됨"까지 판정한다.
+export function Members({
+  focusMemberId,
+  focusJoinRequestId,
+}: {
+  focusMemberId?: string | null;
+  focusJoinRequestId?: string | null;
+}) {
   const { me } = useAuth();
   const isOwner = me?.role === "owner";
   const membersQ = useMembers();
@@ -147,11 +160,15 @@ export function Members({ focusMemberId }: { focusMemberId?: string | null }) {
       // 전화번호는 **양쪽 다 숫자만 남겨** 비교한다. 종전엔 저장값(010-1234-5678)에
       // 입력값(01012345678)을 그대로 includes해서 "없음"이 떴고, 그 결과 이미 있는 회원을
       // 새로 등록하는 중복이 생겼다 — 번호는 앱 자동 매칭(P48)의 키라 중복이 특히 아프다.
-      const digits = needle.replace(/[^0-9]/g, "");
+      // **숫자만 남기기로는 부족했다**(P69): 가입 요청 승인은 앱이 보낸 표기를 회원 phone으로 그대로
+      // 굳히므로 `+821012345678` 회원이 생기는데, `821012345678`에는 `01012345678`이 부분문자열로
+      // 없어 `010…` 검색이 그 회원을 못 찾았다 — 그래서 방금 승인한 회원이 "없는 회원"으로 보이고
+      // 데스크가 다시 등록해 중복이 났다. 양쪽을 서버와 같은 규칙(normalizePhoneKR)으로 접는다.
+      const digits = normalizePhoneKR(needle);
       list = list.filter(
         (m) =>
           m.name.toLowerCase().includes(needle) ||
-          (digits !== "" && m.phone.replace(/[^0-9]/g, "").includes(digits)),
+          (digits !== "" && normalizePhoneKR(m.phone).includes(digits)),
       );
     }
     return list;
@@ -188,8 +205,36 @@ export function Members({ focusMemberId }: { focusMemberId?: string | null }) {
       <p className="mt-0.5 mb-3.5 text-xs text-muted">
         {isOwner
           ? "회원권은 트레이너에게 묶입니다 — 담당별 필터, 회원권·원장까지 확인할 수 있습니다."
-          : "내 담당 회원만 표시됩니다 — 다른 코치의 회원은 이 목록에 나오지 않습니다."}
+          : // 트레이너에겐 큐를 마운트하지 않는다(서버가 owner 전용 — 403). 대신 "왜 안 보이는지"를
+            // 한 문장으로 — 데스크를 지키는 트레이너가 회원의 "보냈는데요" 앞에서 헤매지 않게.
+            "내 담당 회원만 표시됩니다 — 다른 코치의 회원은 이 목록에 나오지 않습니다. 앱 가입 요청 승인은 대표 계정에서 합니다."}
       </p>
+
+      {/* 앱 가입 요청 큐(P69) — 회원 표 **위**, 화면 폭 전체. 대표만: 서버 API 세 개(목록·승인·거절)가
+          전부 owner 전용이라 트레이너에게 마운트하면 "눌러보고 403"이 된다. 0건이어도 한 줄로 남아
+          위치를 학습시킨다(JoinRequests.tsx). */}
+      {isOwner && (
+        <JoinRequestQueue
+          members={membersQ.data}
+          membersError={membersQ.isError}
+          staff={staffQ.data}
+          focusRequestId={focusJoinRequestId}
+          onOpenMember={(id, { withdrawn }) => {
+            // 상세는 왼쪽 목록에 **보이는** 회원만 띄우므로(아래 selected 규약) 검색·필터를 그 회원이
+            // 보이는 상태로 맞춘다 — 탈퇴자는 전용 칩에서만 보인다.
+            setQ("");
+            setTrainerFilter(withdrawn ? "withdrawn" : "all");
+            setSelectedId(id);
+          }}
+          onApproved={(m) => {
+            // 승인 직후 새 회원을 선택해 담당 배정·회원권 발급(회원 상세의 기존 동선)으로 바로 잇는다.
+            // 새 회원은 미배정·활성이라 "전체" 필터에서 보인다; 검색어가 남아 있으면 가려지므로 지운다.
+            setQ("");
+            setTrainerFilter("all");
+            setSelectedId(m.id);
+          }}
+        />
+      )}
 
       <div className="grid gap-3 lg:grid-cols-[3fr_2fr]">
         <Card>
@@ -465,7 +510,9 @@ function MemberDetail({
       <CardContent>
         {isWithdrawn(member) && <WithdrawnNotice withdrawnAt={member.withdrawn_at} />}
         <div className="mb-2.5 text-[11.5px] text-muted">
-          {member.phone} · 진입경로 {member.channel || "—"} ·{" "}
+          {/* 표기 통일(P69) — 승인으로 생긴 회원은 phone이 `+82…`일 수 있다. 원문은 title에. */}
+          <span title={member.phone}>{formatPhoneKR(member.phone) || member.phone || "—"}</span> ·
+          진입경로 {member.channel || "—"} ·{" "}
           {member.app_linked ? (
             <span className="inline-flex items-center gap-0.5 text-ok">
               앱 연결됨 <Check className="h-3 w-3" />

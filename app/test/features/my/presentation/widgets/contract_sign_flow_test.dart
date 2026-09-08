@@ -68,13 +68,12 @@ void main() {
     ContractItem c, {
     FakeAssetBundle? bundle,
     void Function(ContractItem contract)? onViewSigned,
+    CenterPolicy policy = CenterPolicy.fallback,
   }) async {
     final container = ProviderContainer.test(
       overrides: [
         myRepositoryProvider.overrideWithValue(repo),
-        centerPolicyProvider.overrideWithValue(
-          const AsyncValue.data(CenterPolicy.fallback),
-        ),
+        centerPolicyProvider.overrideWithValue(AsyncValue.data(policy)),
       ],
     );
     container.read(sessionProvider.notifier).set(
@@ -131,6 +130,69 @@ void main() {
     });
     await tester.pumpAndSettle();
   }
+
+  group('정산 박스 — 정책을 못 받았으면 숫자를 말하지 않는다 (P56 H3)', () {
+    // 이 박스 바로 아래서 "위 계약 내용을 확인했으며 동의합니다"를 받는다. 폴백 24시간을
+    // 사실처럼 찍으면 센터 실제 마감이 48시간일 때 그 문구에 동의한 회원이 30시간 전
+    // 취소로 차감되고, 그 문구를 근거로 다툰다. `isFallback`의 dartdoc이 적은 사고다.
+    const serverPolicy = CenterPolicy(
+      slotCapacity: 3,
+      cancelCutoffHours: 48,
+      graceOnce: true,
+      penaltyRate: 0.05,
+      expiringDays: 7,
+      maxHoldsPerPass: 2,
+      maxHoldTotalDays: 30,
+    );
+
+    testWidgets('폴백이면 취소 마감 시간을 찍지 않고 모른다고 말한다', (tester) async {
+      await openSign(tester, sent); // 기본 = CenterPolicy.fallback
+
+      expect(find.textContaining('24시간'), findsNothing, reason: '폴백 24시간을 사실처럼 말했다');
+      expect(find.textContaining('센터 정책을 확인하지 못했어요'), findsOneWidget);
+      expect(find.textContaining('계약서 본문의 기준을 따라요'), findsOneWidget);
+      // 위약금율은 계약 스냅샷(0.1)이라 폴백과 무관하게 그대로 말한다.
+      expect(find.text('10%'), findsOneWidget);
+    });
+
+    testWidgets('서버 값이면 그 시간을 말한다 — 과잉 차단이 아니다', (tester) async {
+      await openSign(tester, sent, policy: serverPolicy);
+
+      expect(find.textContaining('48시간 전까지 무료로 취소'), findsOneWidget);
+      expect(find.textContaining('확인하지 못했어요'), findsNothing);
+    });
+
+    testWidgets('스냅샷 없는 레거시 계약 + 폴백이면 위약금율도 모른다고 말한다', (tester) async {
+      // 서버 refundBasis는 스냅샷 → 현재 정책 순으로 고른다. 둘 다 없는 상태에서 폴백
+      // 10%를 찍으면, 센터 실제 요율이 5%일 때 회원은 더 큰 위약금에 동의한 셈이 된다.
+      const legacy = ContractItem(
+        id: 'c-legacy',
+        passId: 'p1',
+        product: 'PT 20회',
+        paidAmount: 1200000,
+        status: 'sent',
+      );
+      await openSign(tester, legacy);
+
+      expect(find.text('10%'), findsNothing, reason: '폴백 요율을 사실처럼 말했다');
+      expect(find.text('확인하지 못했어요'), findsOneWidget); // 요약 행의 값
+      expect(find.textContaining('위약금율은 센터 정책을 확인하지 못했어요'), findsOneWidget);
+    });
+
+    testWidgets('스냅샷 없는 레거시 계약 + 서버 정책이면 현재 요율로 말한다 — refundBasis와 같은 순서', (tester) async {
+      const legacy = ContractItem(
+        id: 'c-legacy',
+        passId: 'p1',
+        product: 'PT 20회',
+        paidAmount: 1200000,
+        status: 'sent',
+      );
+      await openSign(tester, legacy, policy: serverPolicy);
+
+      expect(find.text('5%'), findsOneWidget);
+      expect(find.textContaining('확인하지 못했어요'), findsNothing);
+    });
+  });
 
   group('2단 전환 — 서명하기는 제출이 아니라 서명 단계 진입이다(결정 5)', () {
     testWidgets('동의 → 서명하기 → 2단: 확인 라인·교부 고지·패드가 서고 요약·체크는 접힌다', (tester) async {

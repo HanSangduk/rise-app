@@ -33,7 +33,8 @@ class MyViewModel extends _$MyViewModel {
   Future<MySummary> build() async {
     final memberId = ref.watch(sessionProvider)?.memberId;
     if (memberId == null) {
-      throw const AuthFailure('로그인이 필요해요');
+      // 셸이 떠 있는 채 세션이 비었다 — 리스너가 이동 중이라 문구가 아닌 타입만 낸다(P64).
+      throw const SessionGoneFailure();
     }
     final repo = ref.watch(myRepositoryProvider);
     return _unwrap(await repo.load(memberId));
@@ -76,7 +77,7 @@ class MyViewModel extends _$MyViewModel {
 
   Future<Result<void>> updateConsent({required bool general, required bool sensitive}) async {
     final memberId = ref.read(sessionProvider)?.memberId;
-    if (memberId == null) return const Err(AuthFailure('로그인이 필요해요'));
+    if (memberId == null) return const Err(SessionGoneFailure());
     final repo = ref.read(myRepositoryProvider);
     final result = await repo.updateConsent(memberId: memberId, general: general, sensitive: sensitive);
     if (result case Ok()) refresh();

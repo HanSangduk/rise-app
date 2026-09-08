@@ -174,18 +174,43 @@ void main() {
     });
 
     testWidgets('문구가 "1회 소진"과 상한 실값을 말한다', (tester) async {
-      await pump(tester, PassList(passes: [heldPass()], onHoldTap: () {}));
+      // 서버가 준 정책 — 폴백으로 재면 상한을 말하지 않는 게 정답이다(P56 H1, 아래 테스트).
+      await pump(
+        tester,
+        PassList(passes: [heldPass()], onHoldTap: () {}),
+        policy: const CenterPolicy(
+          slotCapacity: 3,
+          cancelCutoffHours: 24,
+          graceOnce: true,
+          penaltyRate: 0.10,
+          expiringDays: 7,
+          maxHoldsPerPass: 2,
+          maxHoldTotalDays: 30,
+        ),
+      );
 
       await tester.tap(find.text('재개'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('이번 일시정지 1회는 쓴 것으로 남아요'), findsOneWidget);
-      // 정책 실값(fallback = 2회) + 이 패스가 쓴 횟수(1회).
+      // 정책 실값(서버 2회) + 이 패스가 쓴 횟수(1회).
       expect(find.textContaining('최대 2회 중 1회를 썼어요'), findsOneWidget);
       // 되돌아가는 유효기간도 말한다(서버 ResumeHold가 안 쓴 날짜를 회수한다).
       // hold.to를 "만료일"로 오독하게 쓰지 않는지도 함께 고정한다.
       expect(find.textContaining('실제로 쉰 날짜만 남기고 다시 당겨져요'), findsOneWidget);
       expect(find.textContaining('정지 예정일'), findsOneWidget);
+    });
+
+    testWidgets('정책을 못 받았으면 "최대 N회"를 지어내지 않는다 — 쓴 횟수만 (P56 H1)', (tester) async {
+      await pump(tester, PassList(passes: [heldPass()], onHoldTap: () {})); // 기본 = 폴백
+
+      await tester.tap(find.text('재개'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('이번 일시정지 1회는 쓴 것으로 남아요'), findsOneWidget);
+      expect(find.textContaining('최대 2회'), findsNothing, reason: '폴백 상한을 사실처럼 말했다');
+      expect(find.textContaining('지금까지 1회를 썼어요'), findsOneWidget); // 이 회원권의 사실
+      expect(find.textContaining('센터 정책을 확인하지 못했어요'), findsOneWidget);
     });
 
     testWidgets('"더 쉬기"면 재개하지 않는다', (tester) async {

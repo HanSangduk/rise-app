@@ -37,6 +37,7 @@ func (h *Handlers) CreateContract(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	setAccessSubject(r.Context(), c.MemberID) // 접속기록 정보주체(v2.30)
 	writeJSON(w, http.StatusOK, c)
 }
 

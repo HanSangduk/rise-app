@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rise_member/core/widgets/rise_sheet.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rise_member/core/network/api_result_guard.dart';
 import 'package:rise_member/core/result/result.dart';
@@ -10,17 +11,21 @@ import 'package:rise_member/features/consult/presentation/consult_providers.dart
 /// 재등록 요청 시트(계약 v2.20, P42) — 보내는 건 의사 표시 하나다. 결제·상품·가격은
 /// 여기 없다(데스크 상담의 몫 — 앱은 "손들었다"를 전달할 뿐, 추천안 §의도적으로 안 하는 것).
 Future<void> showConsultRequestSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
-    context: context,
-    // 루트 Navigator — 셸 내부에 띄우면 하단 탭바가 시트 위에 남는다(P09).
-    useRootNavigator: true,
-    isScrollControlled: true,
-    builder: (_) => const _ConsultRequestSheet(),
+  // 제출 중 잠금 신호(P56 M1) — 요청이 날아가는 동안 닫히면 409("이미 보낸 요청이
+  // 있어요")조차 못 보고 회원은 또 보낸다(rise_sheet.dart 헤더).
+  final submitting = ValueNotifier(false);
+  return showRiseSheet<void>(
+    context,
+    submitting: submitting,
+    builder: (_) => _ConsultRequestSheet(submitting: submitting),
   );
 }
 
 class _ConsultRequestSheet extends ConsumerStatefulWidget {
-  const _ConsultRequestSheet();
+  const _ConsultRequestSheet({required this.submitting});
+
+  /// 제출 중 신호 — 래퍼의 잠금과 같은 객체.
+  final ValueNotifier<bool> submitting;
 
   @override
   ConsumerState<_ConsultRequestSheet> createState() =>
@@ -29,12 +34,15 @@ class _ConsultRequestSheet extends ConsumerStatefulWidget {
 
 class _ConsultRequestSheetState extends ConsumerState<_ConsultRequestSheet> {
   final _noteController = TextEditingController();
-  bool _submitting = false;
+
+  /// 저장소는 [widget.submitting] 하나다(rise_sheet.dart `submitting` 절).
+  bool get _submitting => widget.submitting.value;
   String? _error;
 
   @override
   void dispose() {
     _noteController.dispose();
+    widget.submitting.dispose();
     super.dispose();
   }
 
@@ -97,7 +105,7 @@ class _ConsultRequestSheetState extends ConsumerState<_ConsultRequestSheet> {
 
   Future<void> _submit() async {
     setState(() {
-      _submitting = true;
+      widget.submitting.value = true;
       _error = null;
     });
     // 이 CTA는 전부 재등록 맥락에서 열린다 — kind는 renewal 고정(consult는 서버가
@@ -120,7 +128,7 @@ class _ConsultRequestSheetState extends ConsumerState<_ConsultRequestSheet> {
       case Err(:final failure):
         // 409(이미 pending)도 서버 문구 그대로 — "이미 보낸 요청이 있어요…"가 정답 그 자체다.
         setState(() {
-          _submitting = false;
+          widget.submitting.value = false;
           _error = failure.message;
         });
         // CTA 상태도 갱신 — 이 기기가 몰랐던 pending(다른 기기에서 보냄)이 원인일 수 있다.

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rise_member/features/auth/presentation/center_confirm_screen.dart';
 import 'package:rise_member/core/api/dto/staff_dto.dart';
 import 'package:rise_member/core/api/staff_directory.dart';
 import 'package:rise_member/core/icons/rise_icon.dart';
@@ -66,7 +67,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('인증번호 입력'), findsNothing);
-    expect(find.text('센터 선택'), findsOneWidget); // CenterConfirmScreen
+    expect(find.byType(CenterConfirmScreen), findsOneWidget);
     expect(repo.matchJoinCount, 1);
   });
 
@@ -99,7 +100,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repo.matchJoinCount, 1);
-    expect(find.text('센터 선택'), findsOneWidget);
+    expect(find.byType(CenterConfirmScreen), findsOneWidget);
   });
 
   testWidgets('자동 진행에 실패하면 화면에 남고 사유를 보여준다 — "확인"은 계속 살아 있다',
@@ -187,8 +188,13 @@ class _FakeAuthRepository implements AuthRepository {
       const Ok(null);
 
   @override
-  Future<Result<void>> requestJoin({required String name, required String phone}) async =>
+  Future<Result<void>> requestJoin({required String name, required String phone, String centerId = ''}) async =>
       const Ok(null);
+
+  /// v2.33 — 센터 목록. 이 스위트들은 선택 UI를 다루지 않으므로 빈 목록(= 고를 것 없음)이다.
+  @override
+  Future<Result<List<CenterDirectory>>> fetchJoinCenters() async =>
+      const Ok(<CenterDirectory>[]);
 
   @override
   Future<Result<AppSession>> loadSession() async => const Err(MemberNotLinkedFailure());

@@ -189,3 +189,90 @@ export function addDays(dateStr: string, delta: number): string {
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
+
+// ── 전화번호 정규화·표기(P69) ─────────────────────────────────────────────
+// 백엔드 `domain.NormalizePhone`(backend/internal/domain/phone.go)을 **그대로 이식**한 비교 키.
+// 3계층이 같은 번호를 다른 표기로 말한다 — 어드민은 국내 표기("010-1234-5678"), 앱의 Firebase
+// 토큰은 E.164("+821012345678"). 가입 요청의 phone은 앱이 친 원문이라 둘 중 무엇이든 올 수 있고,
+// 승인은 그 표기를 회원 phone으로 그대로 굳힌다. 숫자만 남기는 비교는 이 둘을 영원히 불일치시킨다
+// (`821012345678`에는 `01012345678`이 부분문자열로 없다) — 회원 관리 검색이 승인으로 생긴
+// `+82…` 회원을 못 찾던 결함의 원인.
+//
+// 규칙(서버와 동형): 숫자만 → "82" 접두면 떼고 선행 0 복원("820…"이면 이미 국내 표기라 그대로) →
+// 0 없이 "10"으로 시작하는 10자리는 엑셀에서 선행 0이 떨어진 휴대폰 번호라 0을 붙인다.
+// 9자리·8자리(대표번호)는 손대지 않는다 — 추측하면 남의 번호에 매칭된다(서버 주석과 같은 판단).
+//
+//	"+82 10-1234-5678" → "01012345678"
+//	"010-1234-5678"    → "01012345678"
+//	"+82 2 123 4567"   → "021234567"
+//	"+8201012345678"   → "01012345678"
+//	"1012345678"       → "01012345678"
+//
+// 반환값은 **비교 키**다. 화면 표기는 아래 formatPhoneKR, 저장은 원문 그대로.
+export function normalizePhoneKR(s: string | null | undefined): string {
+  const digits = (s ?? "").replace(/[^0-9]/g, "");
+  if (digits.startsWith("82") && digits.length > 2) {
+    const rest = digits.slice(2);
+    return rest.startsWith("0") ? rest : `0${rest}`;
+  }
+  if (digits.length === 10 && digits.startsWith("10")) return `0${digits}`;
+  return digits;
+}
+
+// 사람이 읽는 국내 표기 — 큐 행·회원 표·회원 상세가 **같은 함수**를 쓴다(경로마다 표기가 달랐다:
+// 원문 그대로 vs E.164). 정규화 뒤 그룹핑:
+//   휴대폰·11자리 지역번호  010-1234-5678 / 031-1234-5678   (3-4-4)
+//   서울 02                 02-123-4567 / 02-1234-5678       (2-3-4 / 2-4-4)
+//   10자리 지역번호         031-123-4567                     (3-3-4)
+// 규칙이 안 맞는 길이(대표번호·해외·불량)는 하이픈 없이 숫자만 — 틀린 그룹핑은 없는 것보다 나쁘다.
+// 빈 입력은 빈 문자열(호출부가 "—"를 고른다).
+export function formatPhoneKR(s: string | null | undefined): string {
+  const n = normalizePhoneKR(s);
+  if (!n) return "";
+  if (n.startsWith("02")) {
+    if (n.length === 9) return `02-${n.slice(2, 5)}-${n.slice(5)}`;
+    if (n.length === 10) return `02-${n.slice(2, 6)}-${n.slice(6)}`;
+    return n;
+  }
+  if (n.startsWith("0")) {
+    if (n.length === 11) return `${n.slice(0, 3)}-${n.slice(3, 7)}-${n.slice(7)}`;
+    if (n.length === 10) return `${n.slice(0, 3)}-${n.slice(3, 6)}-${n.slice(6)}`;
+  }
+  return n;
+}
+
+// 가운데 그룹 마스킹 — "010-****-4321". 동명이인 힌트에서 대표가 **눈으로 대조**할 만큼만 보여준다
+// (신청자와 다른 사람의 번호를 통째로 큐에 띄우지 않는다). 그룹핑이 안 되는 번호는 뒤 4자리만 남긴다.
+export function maskPhoneKR(s: string | null | undefined): string {
+  const f = formatPhoneKR(s);
+  if (!f) return "";
+  const parts = f.split("-");
+  if (parts.length === 3) return `${parts[0]}-${"*".repeat(parts[1].length)}-${parts[2]}`;
+  return `${"*".repeat(Math.max(0, f.length - 4))}${f.slice(-4)}`;
+}
+
+// ── 상대 시각(P69) ───────────────────────────────────────────────────────
+// "방금" / "n분 전" / "n시간 전" / "어제" / "n일 전". 기준은 브라우저 시계(daysSince와 같은 규칙 —
+// 서버·브라우저 시차의 분 단위 오차는 이 용도에 무해). 파싱 실패는 null — 호출부가 원문을 쓴다.
+// "어제"는 달력 날짜가 아니라 24~48h 구간이다: 큐의 관심사는 "얼마나 기다렸나"라 경과 시간이 맞다.
+export function formatRelativeKo(iso: string, now: number = Date.now()): string | null {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  const diffMin = Math.max(0, Math.round((now - t) / 60_000));
+  if (diffMin < 1) return "방금";
+  if (diffMin < 60) return `${diffMin}분 전`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}시간 전`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay === 1) return "어제";
+  return `${diffDay}일 전`;
+}
+
+// 절대 시각 — "9월 8일 (월) 22:31". 상대 시각의 title(툴팁)용. 파싱 실패는 원문.
+export function formatDateTimeKo(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 (${DOW[d.getDay()]}) ${hh}:${mm}`;
+}

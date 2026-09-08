@@ -31,6 +31,10 @@ type recordingProvisioner struct {
 	devUserProvisioner
 	deleted  []string
 	failWith error
+	// failDisable — DisableUser 실패 주입(v2.31). 퇴사 ①(계정 잠금)이 실패했을 때 ③ 사진 파기가
+	// 일어나지 않아야 한다는 순서를 고정하는 유일한 수단이다 — dev 구현은 항상 nil이라 주입이 없으면
+	// "③을 ① 앞으로" 뮤턴트가 모든 테스트를 통과한다.
+	failDisable error
 }
 
 func (r *recordingProvisioner) DeleteUser(_ context.Context, uid string) error {
@@ -39,6 +43,10 @@ func (r *recordingProvisioner) DeleteUser(_ context.Context, uid string) error {
 	}
 	r.deleted = append(r.deleted, uid)
 	return nil
+}
+
+func (r *recordingProvisioner) DisableUser(_ context.Context, _ string) error {
+	return r.failDisable
 }
 
 // recordingMedia — MediaPurger 스파이. Storage 원본 파일 파기는 v2.9가 "파기 수단이 0"이라고
@@ -53,6 +61,9 @@ type recordingMedia struct {
 func (r *recordingMedia) ListObjects(_ context.Context, _ string) ([]string, error) {
 	return r.objects, nil
 }
+
+// 구성된 버킷의 대역(recordingPurger와 같은 이유).
+func (r *recordingMedia) Configured() bool { return true }
 
 func (r *recordingMedia) DeleteObjects(_ context.Context, paths []string) (int, error) {
 	if r.failWith != nil {
@@ -100,6 +111,23 @@ func seedWithdrawableMember(t *testing.T, s *Service) (*domain.Member, *domain.P
 		t.Fatalf("SaveHwCheck: %v", err)
 	}
 
+	// 파기 대상 — 회원발 요청 큐 2종(v2.26 · P53). 종전 픽스처에 이 둘이 없었기 때문에
+	// 스위트 전체가 초록인 채로 이름·전화번호·자유 메모가 살아남았다. 스토어로 직접 심는다
+	// (서비스 경로는 토큰 번호 대조·pending 중복 409를 거치는데, 여기서 검증할 것은 그 규칙이
+	// 아니라 파기다 — 다른 픽스처들과 같은 방식).
+	if _, err := s.store.CreateJoinRequest(ctx, &store.JoinRequest{
+		CenterID: testCenter, UID: "u-" + mem.ID, Name: "김민지", Phone: "010-1234-5678",
+		Status: store.JoinPending,
+	}); err != nil {
+		t.Fatalf("CreateJoinRequest: %v", err)
+	}
+	if _, err := s.store.CreateConsultRequest(ctx, testCenter, &store.ConsultRequest{
+		MemberID: mem.ID, Kind: store.ConsultKindRenewal, Note: "무릎이 아파서 상담받고 싶어요",
+		Status: store.ConsultPending,
+	}); err != nil {
+		t.Fatalf("CreateConsultRequest: %v", err)
+	}
+
 	// 보존 대상 — 결제·계약(패스와 원장 issue는 seedMemberWithPass가 이미 만들었다).
 	if _, err := s.CreatePayment(ctx, ownerP(), PaymentCreateRequest{
 		MemberID: mem.ID, PassID: pass.ID, Method: "card", Total: 1_000_000,
@@ -142,7 +170,12 @@ func TestDeleteMyAccountPurgesAndRetains(t *testing.T) {
 
 	// ---- 파기: 건강·이용 기록 ----
 	if got := res.Purged; got.BodyPhotos != 1 || got.Inbody != 1 || got.WorkoutLogs != 1 || got.HwChecks != 1 {
-		t.Errorf("purged = %+v — 6종 중 0인 항목은 스토어의 컬렉션 이름을 의심하라", got)
+		t.Errorf("purged = %+v — 0인 항목은 스토어의 컬렉션 이름을 의심하라", got)
+	}
+	// 요청 큐 2종(v2.26 · P53) — 여기 숫자가 0이면 이름·번호·메모가 그대로 살아 있다.
+	if got := res.Purged; got.JoinRequests != 1 || got.ConsultRequests != 1 {
+		t.Errorf("purged.join_requests=%d consult_requests=%d, want 1/1 — 각각 이름·전화번호와 자유 메모다",
+			got.JoinRequests, got.ConsultRequests)
 	}
 	if photos, _ := s.store.ListBodyPhotos(ctx, testCenter, mem.ID); len(photos) != 0 {
 		t.Errorf("체형사진이 %d건 남았다", len(photos))
@@ -252,6 +285,221 @@ func TestDeleteMyAccountPurgesAndRetains(t *testing.T) {
 	}
 }
 
+// 회원발 요청 큐 2종의 파기(v2.26 · P53) — 이 결함의 본체.
+//
+// 종전 탈퇴는 이 둘을 남긴 채 "지웠다"고 보고했다. 두 컬렉션이 각각 다른 이유로 스윕 밖에
+// 있었다: join_requests는 **최상위 + uid 키**(센터 스코프 스윕이 구조적으로 닿지 못한다),
+// consult_requests는 v2.11 이후에 생겨 **스윕 목록에 오르지 못했다**(닿을 수 있었는데 안 봤다).
+//
+// 이웃 회원·이웃 신청자를 함께 심는 이유: "전부 지운다"로 고치면 테스트는 통과하고 남의
+// 데이터가 사라진다. 파기의 정확성은 남는 쪽이 함께 증명한다.
+func TestDeleteMyAccountPurgesRequestQueues(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	mem, _ := seedWithdrawableMember(t, s) // 가입 요청 1 + 상담 요청 1을 품는다
+
+	// 같은 센터의 이웃 회원 — 상담 요청 보유(탈퇴자와 무관하게 남아야 한다).
+	otherID, err := s.store.SaveMember(ctx, testCenter, &domain.Member{
+		Name: "이서준", Phone: "010-9999-0000", Status: domain.MemberStatusActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.CreateConsultRequest(ctx, testCenter, &store.ConsultRequest{
+		MemberID: otherID, Kind: store.ConsultKindConsult, Note: "식단 상담 원해요",
+		Status: store.ConsultPending,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 아직 회원이 아닌 이웃 신청자 — 가입 요청만 있다(member_id가 없는 사람도 남아야 한다).
+	if _, err := s.store.CreateJoinRequest(ctx, &store.JoinRequest{
+		CenterID: testCenter, UID: "u-applicant", Name: "박지훈", Phone: "010-7777-7777",
+		Status: store.JoinPending,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 탈퇴자의 두 번째 가입 요청(거절된 것) — 상태와 무관하게 이름·번호를 품으므로 함께 파기.
+	if _, err := s.store.CreateJoinRequest(ctx, &store.JoinRequest{
+		CenterID: testCenter, UID: "u-" + mem.ID, Name: "김민지", Phone: "010-1234-5678",
+		Status: store.JoinRejected,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.DeleteMyAccount(ctx, memberP(mem.ID))
+	if err != nil {
+		t.Fatalf("DeleteMyAccount: %v", err)
+	}
+
+	// ---- 보고한 건수가 실제와 같은가(응답을 믿지 않고 다시 읽는다) ----
+	if res.Purged.JoinRequests != 2 {
+		t.Errorf("purged.join_requests = %d, want 2(pending + rejected)", res.Purged.JoinRequests)
+	}
+	if res.Purged.ConsultRequests != 1 {
+		t.Errorf("purged.consult_requests = %d, want 1", res.Purged.ConsultRequests)
+	}
+
+	// ---- 실제로 사라졌는가 ----
+	jrs, err := s.store.ListJoinRequests(ctx, testCenter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, jr := range jrs {
+		if jr.UID == "u-"+mem.ID {
+			t.Errorf("탈퇴자의 가입 요청이 남았다: name=%q phone=%q — JoinApprove 한 번이면 "+
+				"파기한 이름·번호가 새 회원 레코드로 되살아난다", jr.Name, jr.Phone)
+		}
+	}
+	if rows, _ := s.store.ListConsultRequests(ctx, testCenter, mem.ID); len(rows) != 0 {
+		t.Errorf("탈퇴자의 상담 요청이 %d건 남았다 — note는 회원이 직접 쓴 자유 서술이다", len(rows))
+	}
+
+	// ---- 남의 것은 온전한가 ----
+	if len(jrs) != 1 || jrs[0].UID != "u-applicant" || jrs[0].Phone != "010-7777-7777" {
+		t.Errorf("이웃 신청자의 가입 요청 = %+v, want u-applicant 1건 온전 — uid로 좁혀지지 않았다", jrs)
+	}
+	otherConsults, _ := s.store.ListConsultRequests(ctx, testCenter, otherID)
+	if len(otherConsults) != 1 || otherConsults[0].Note != "식단 상담 원해요" {
+		t.Errorf("이웃 회원 상담 요청 = %+v, want 1건 온전 — member_id로 좁혀지지 않았다", otherConsults)
+	}
+}
+
+// ⑤단계 부분 실패 → **가명화 전에** 멈추고, 같은 토큰의 재시도가 마저 끝낸다(P22 순서 규약).
+//
+// 이 자리를 실측하는 이유: 가입 요청 파기가 ⑥(가명화)보다 **뒤**에 있었다면 실패한 순간
+// 회원 문서는 이미 탈퇴 상태라 재시도가 "이미 탈퇴 처리된 계정이에요"(400)로 막히고,
+// 이름·전화번호가 영구히 남는다 — 고치려던 결함이 형태만 바꿔 되돌아온다.
+func TestDeleteMyAccountJoinPurgeFailureKeepsRetryEligible(t *testing.T) {
+	ctx := context.Background()
+	s, h := newHookedService(t)
+	mem, _ := seedWithdrawableMember(t, s)
+	h.reset()
+
+	boom := errors.New("firestore unavailable")
+	h.fail = func(op string, _ int) error {
+		if op == "DeleteJoinRequestsByUID" {
+			return boom
+		}
+		return nil
+	}
+	if _, err := s.DeleteMyAccount(ctx, memberP(mem.ID)); !errors.Is(err, boom) {
+		t.Fatalf("DeleteMyAccount = %v, want %v", err, boom)
+	}
+
+	after, err := s.store.GetMember(ctx, testCenter, mem.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.IsWithdrawn() {
+		t.Error("가입 요청 파기 실패인데 이미 가명화됐다 — ⑤가 ⑥보다 앞이어야 재시도가 400에 막히지 않는다")
+	}
+	if _, err := s.store.GetUserIndex(ctx, "u-"+mem.ID); err != nil {
+		t.Errorf("UserIndex가 사라졌다(%v) — 호출자가 자기 탈퇴를 마저 끝낼 수 없다", err)
+	}
+	if rows, _ := s.store.ListConsultRequests(ctx, testCenter, mem.ID); len(rows) != 1 {
+		t.Errorf("상담 요청 = %d건, want 1 — ⑥(스토어 스윕)은 아직 돌지 않았어야 한다", len(rows))
+	}
+
+	h.fail = nil
+	res, err := s.DeleteMyAccount(ctx, memberP(mem.ID)) // 같은 토큰으로 재시도
+	if err != nil {
+		t.Fatalf("재시도: %v", err)
+	}
+	if res.Purged.JoinRequests != 1 || res.Purged.ConsultRequests != 1 {
+		t.Errorf("재시도 purged = %+v, want join/consult 각 1 — 첫 시도가 아무것도 못 지웠으므로 전량이 여기서 잡힌다",
+			res.Purged)
+	}
+	jrs, _ := s.store.ListJoinRequests(ctx, testCenter)
+	if len(jrs) != 0 {
+		t.Errorf("재시도 후에도 가입 요청이 %d건 남았다: %+v", len(jrs), jrs)
+	}
+	if rows, _ := s.store.ListConsultRequests(ctx, testCenter, mem.ID); len(rows) != 0 {
+		t.Errorf("재시도 후에도 상담 요청이 %d건 남았다", len(rows))
+	}
+}
+
+// **Contract.Vars의 이름·전화번호는 탈퇴가 지우지 않는다** — 의도된 잔존을 고정한다(P53 결정 3).
+//
+// 이 테스트는 "지워지는지"가 아니라 **"지우지 않기로 한 결정"**을 못박는다. 누군가 나중에
+// 파기 스윕을 vars까지 넓히면 여기서 빨간불이 켜지고, 그 순간 아래 근거를 읽고 판단하게 된다:
+//
+//	① 봉인이 vars를 덮는다 — sha256 = SHA-256(template_version + "\n" + canonical_json(vars))
+//	   (§D ②). vars에서 한 글자만 바꿔도 재계산 대조가 깨져 **서명된 계약의 사후 변조 검출이
+//	   영구히 불가능**해진다. 봉인을 함께 다시 계산하는 것은 더 나쁘다 — 변조와 구별되지 않는다.
+//	② 계약서의 당사자 표시는 그 문서를 계약서이게 하는 내용이다. 5년 보존(전자상거래법
+//	   시행령 §6①)의 목적이 "그 거래가 있었다"의 입증인데, 당사자가 빈칸인 처분문서는 그
+//	   목적을 잃는다. 같은 법 §6②는 거래기록과 함께 식별정보 보존을 **명시적으로 허용**한다.
+//
+// P22가 회원 문서에서 "성명 보존"을 일부러 쓰지 않은 것과 모순처럼 보이지만 아니다: 그쪽에서
+// 이름은 **거래 기록을 가리키는 색인**이라 없어도 기록이 완전했고, 여기서 이름은 **문서의
+// 내용**이다. 대신 이 잔존은 고지의 대상이다(개인정보처리방침·계정삭제 안내 — P53 참조).
+func TestWithdrawalKeepsContractVarsIdentity(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	ver, _ := withIssuableContractVariants(t)
+	seedContractBusiness(t, s)
+	seedFacility(t, s, domain.FacilityStatusReported, "제2026-강남-0001호", "서울보증 인허가보증보험, 보장한도 1억원")
+	mem, _ := seedWithdrawableMember(t, s) // 결제 기록까지 포함 — 스탬프 재료가 이미 완비다
+
+	// 완전 스탬프 → 서명(봉인 생성). 서명까지 가야 sha256이 vars를 덮는다(§D ②).
+	c := autoContractOf(t, s, mem.ID)
+	sent, err := s.SendContract(ctx, ownerP(), c.ID)
+	if err != nil {
+		t.Fatalf("재발송(스탬프): %v", err)
+	}
+	if sent.TemplateVersion != ver || sent.Vars["회원명"] != "김민지" {
+		t.Fatalf("픽스처 전제가 깨졌다: version=%q 회원명=%q", sent.TemplateVersion, sent.Vars["회원명"])
+	}
+	phoneInVars := sent.Vars["회원 전화번호"]
+	if phoneInVars == "" {
+		t.Fatal("픽스처 전제가 깨졌다: vars에 회원 전화번호가 없다")
+	}
+	signed, err := s.SignContract(ctx, memberP(mem.ID), c.ID, "1.2.3.4", nil)
+	if err != nil {
+		t.Fatalf("서명: %v", err)
+	}
+	sealBefore := signed.SHA256
+	if sealBefore == "" {
+		t.Fatal("픽스처 전제가 깨졌다: 서명했는데 봉인이 비었다")
+	}
+
+	if _, err := s.DeleteMyAccount(ctx, memberP(mem.ID)); err != nil {
+		t.Fatalf("DeleteMyAccount: %v", err)
+	}
+
+	// ---- 회원 문서 쪽은 실제로 비었다(대조군 — 두 저장 위치가 다른 취급을 받는다) ----
+	after, err := s.store.GetMember(ctx, testCenter, mem.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Name != domain.WithdrawnMemberName || after.Phone != "" {
+		t.Fatalf("회원 문서 가명화가 안 됐다: %+v", after)
+	}
+
+	// ---- 계약 스냅샷 쪽은 그대로다(결정 3) ----
+	saved, err := s.store.GetContract(ctx, testCenter, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Status != domain.ContractStatusSigned {
+		t.Fatalf("서명된 계약이 무효화됐다: %q — signed는 불가침(v1.5)", saved.Status)
+	}
+	if saved.Vars["회원명"] != "김민지" || saved.Vars["회원 전화번호"] != phoneInVars {
+		t.Errorf("계약 vars의 이름·번호가 바뀌었다: 회원명=%q 전화번호=%q\n"+
+			"이 값을 지우기로 결정을 바꾼 것이라면 위 주석 ①②를 읽고 봉인 재검증 계약을 함께 설계하라",
+			saved.Vars["회원명"], saved.Vars["회원 전화번호"])
+	}
+
+	// ---- 봉인이 **여전히 검증된다**(재현성·변조 검출이 살아 있다) ----
+	if saved.SHA256 != sealBefore {
+		t.Errorf("봉인 값이 바뀌었다: %q → %q — 탈퇴는 계약 문서를 건드리지 않아야 한다", sealBefore, saved.SHA256)
+	}
+	if got := contractSeal(saved.TemplateVersion, saved.Vars); got != saved.SHA256 {
+		t.Errorf("봉인 재계산 불일치: %q != 저장값 %q — vars가 바뀌면 사후 변조 검출이 영구히 불가능해진다",
+			got, saved.SHA256)
+	}
+}
+
 // 스태프는 이 경로를 쓸 수 없다. 뚫리면 대표의 UserIndex가 사라져 **센터가 영구히 잠긴다**
 // (owner 전용 API가 전부 막히고 Firestore 직접 편집 외에 복구 경로가 없다 — v2.0 락아웃 가드).
 func TestDeleteMyAccountRejectsStaff(t *testing.T) {
@@ -265,11 +513,118 @@ func TestDeleteMyAccountRejectsStaff(t *testing.T) {
 
 // 가입 매칭 전(member_id 미연결) 계정은 지울 회원 레코드가 없다 → 404.
 // 200을 돌려주면 "탈퇴했다"는 응답이 실제로는 아무것도 하지 않은 응답이 된다.
-func TestDeleteMyAccountRequiresLinkedMember(t *testing.T) {
+// **C-3 회귀(v2.27): 미연결 계정도 자기 이름·전화번호를 지울 수 있어야 한다.**
+//
+// 종전엔 이 자리가 `p.MemberID == "" → store.ErrNotFound`(404)로 **진입부터 막혀** 있었고,
+// 근거는 "지울 대상이 없다"였다. 사실이 아니었다: join_requests에는 신청자가 직접 적은
+// **이름·전화번호 원본**이 담기고(POST /v1/join/request), Firebase 계정에는 인증된 번호가
+// 있다. v2.26이 만든 파기 경로(DeleteJoinRequestsByUID)에 도달할 길이 **회원이 된 사람에게만**
+// 열려 있었던 것이다 — 개인정보보호법 §36(삭제 요구권)이 정면으로 겨냥하는 상태다.
+//
+// 이 테스트를 지우면 그 404가 조용히 되돌아온다. 그때 앱의 대기 화면에는 계정 삭제 버튼이
+// 있고, 그 버튼이 404를 받는다.
+func TestDeleteMyAccountUnlinkedPurgesJoinRequest(t *testing.T) {
 	s := newTestService()
-	p := Principal{UID: "u-new", Role: domain.RoleMember, CenterID: testCenter}
-	if _, err := s.DeleteMyAccount(context.Background(), p); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("미연결 계정 DeleteMyAccount = %v, want ErrNotFound", err)
+	ctx := context.Background()
+	prov := &recordingProvisioner{}
+	s.users = prov
+
+	// 대기실 계정: 가입 요청만 냈고 아직 승인되지 않았다(회원 레코드·UserIndex 없음).
+	applicant := Principal{UID: "u_lobby", Role: domain.RoleMember, CenterID: testCenter}
+	if _, err := s.JoinRequestCreate(ctx, applicant, JoinRequestBody{Name: "박지훈", Phone: "010-3333-2222"}); err != nil {
+		t.Fatal(err)
+	}
+	// 이웃 신청자 — 남의 요청까지 쓸어가면 안 된다(uid 스코프).
+	neighbour := Principal{UID: "u_other", Role: domain.RoleMember, CenterID: testCenter}
+	if _, err := s.JoinRequestCreate(ctx, neighbour, JoinRequestBody{Name: "이서준", Phone: "010-9999-0000"}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.DeleteMyAccount(ctx, applicant)
+	if err != nil {
+		t.Fatalf("미연결 계정 탈퇴 = %v, want 성공(§36 삭제 요구권)", err)
+	}
+	if !res.Deleted || res.MemberID != "" {
+		t.Errorf("응답 = %+v, want deleted=true member_id=\"\"", res)
+	}
+	if res.Purged.JoinRequests != 1 {
+		t.Errorf("purged.join_requests = %d, want 1 — 이름·전화번호가 실제로 지워져야 한다", res.Purged.JoinRequests)
+	}
+	// ②단계(Firebase 계정)가 실제로 불렸는가 — 안 부르면 계정 안의 전화번호가 남고,
+	// 같은 번호로 다시 로그인하면 같은 uid를 되받는다.
+	if len(prov.deleted) != 1 || prov.deleted[0] != "u_lobby" {
+		t.Errorf("Firebase DeleteUser 호출 = %v, want [u_lobby]", prov.deleted)
+	}
+
+	// 실제 저장소를 다시 읽어 대조한다(응답의 건수를 믿지 않는다).
+	list, err := s.store.ListJoinRequests(ctx, testCenter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].UID != "u_other" || list[0].Phone != "010-9999-0000" {
+		t.Errorf("남은 가입 요청 = %+v, want 이웃 1건 온전 — uid로 좁혀지지 않았다", list)
+	}
+}
+
+// 스태프는 미연결 분기로도 들어올 수 없다 — 가드 ①은 v2.27에서도 무변경이다.
+// (owner/trainer는 member_id가 늘 비어 있어, 분기 순서가 뒤집히면 대표가 자기 계정을 지우고
+// **센터가 대표를 잃는다** — 되돌릴 API가 없다.)
+func TestDeleteMyAccountStaffStillForbiddenAfterUnlinkedBranch(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	for _, p := range []Principal{ownerP(), trainerP()} {
+		if _, err := s.DeleteMyAccount(ctx, p); !errors.Is(err, ErrForbidden) {
+			t.Errorf("%s DeleteMyAccount = %v, want ErrForbidden", p.Role, err)
+		}
+	}
+	// superadmin도 마찬가지(IsMember가 아니다).
+	if _, err := s.DeleteMyAccount(ctx, superadminP()); !errors.Is(err, ErrForbidden) {
+		t.Errorf("superadmin DeleteMyAccount = %v, want ErrForbidden", err)
+	}
+}
+
+// 미연결 분기의 **단계 순서**: 외부(Firebase)가 DB보다 앞이라, 파기가 중간에 실패해도 같은
+// ID 토큰으로 재시도가 된다(P22 순서 규약 — 전체 흐름과 같은 이유). ⑤가 실패하면 ⑦
+// (UserIndex 제거)까지 가지 않아야 한다 — 가면 호출자가 권한을 잃고 자기 탈퇴를 못 끝낸다.
+func TestDeleteMyAccountUnlinkedKeepsRetryEligibleOnFailure(t *testing.T) {
+	ctx := context.Background()
+	s, h := newHookedService(t)
+	applicant := Principal{UID: "u_lobby", Role: domain.RoleMember, CenterID: testCenter}
+	if _, err := s.JoinRequestCreate(ctx, applicant, JoinRequestBody{Name: "박지훈", Phone: "010-3333-2222"}); err != nil {
+		t.Fatal(err)
+	}
+	// 대기실 상태로 인덱스가 심긴 계정(member_id 없이) — ⑦이 지울 대상이 실재하는 경우.
+	if err := s.store.SaveUserIndex(ctx, &store.UserIndex{
+		UID: "u_lobby", Role: domain.RoleMember, CenterID: testCenter,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.reset()
+
+	boom := errors.New("firestore unavailable")
+	h.fail = func(op string, _ int) error {
+		if op == "DeleteJoinRequestsByUID" {
+			return boom
+		}
+		return nil
+	}
+	if _, err := s.DeleteMyAccount(ctx, applicant); !errors.Is(err, boom) {
+		t.Fatalf("DeleteMyAccount = %v, want %v", err, boom)
+	}
+	if _, err := s.store.GetUserIndex(ctx, "u_lobby"); err != nil {
+		t.Errorf("UserIndex가 사라졌다(%v) — ⑦이 ⑤보다 뒤여야 재시도가 가능하다", err)
+	}
+
+	h.fail = nil
+	res, err := s.DeleteMyAccount(ctx, applicant) // 같은 토큰으로 재시도
+	if err != nil {
+		t.Fatalf("재시도: %v", err)
+	}
+	if res.Purged.JoinRequests != 1 {
+		t.Errorf("재시도 purged.join_requests = %d, want 1", res.Purged.JoinRequests)
+	}
+	if _, err := s.store.GetUserIndex(ctx, "u_lobby"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("재시도 후 UserIndex = %v, want ErrNotFound", err)
 	}
 }
 
@@ -679,7 +1034,10 @@ func TestDeleteMeWireContract(t *testing.T) {
 		}
 	}
 	purged, _ := body["purged"].(map[string]any)
-	for _, key := range []string{"body_photos", "inbody", "workout_logs", "hw_checks", "checkins", "recurrings"} {
+	for _, key := range []string{
+		"body_photos", "inbody", "workout_logs", "hw_checks", "checkins", "recurrings",
+		"consult_requests", "join_requests", // v2.26 · P53
+	} {
 		if _, ok := purged[key]; !ok {
 			t.Errorf("purged에 %q 키가 없다", key)
 		}
@@ -691,10 +1049,30 @@ func TestDeleteMeWireContract(t *testing.T) {
 		}
 	}
 
-	// 탈퇴 후 같은 uid로 다시 부르면 404다(UserIndex가 사라져 member_id를 잃는다) —
-	// "이미 지웠다"가 200으로 다시 보고되지 않는다.
-	if again := deleteReq(t, r, "/v1/me", "u-app", "member"); again.Code != http.StatusNotFound {
-		t.Errorf("두 번째 DELETE /v1/me = %d, want 404", again.Code)
+	// 탈퇴 후 같은 uid로 다시 부르면 **200 + 전부 0**이다(v2.27에서 404에서 바뀌었다).
+	//
+	// 왜 바뀌었나: 탈퇴는 UserIndex를 지우므로 그 토큰의 principal은 member_id가 없는 상태가
+	// 된다 — 그것은 **아직 연결되지 않은 대기실 계정과 완전히 같은 모양**이다(둘 다 role=member,
+	// member_id=""). 서버가 둘을 구별할 수단이 없고, 대기실 계정에는 지울 것이 실재하므로
+	// (join_requests의 이름·전화번호 + Firebase 계정 — C-3의 근거) 그 경로는 반드시 열려야 한다.
+	// 그래서 이쪽도 같은 경로를 탄다.
+	//
+	// "이미 지웠다"가 200으로 다시 보고되는 것 아닌가 — 아니다. 이 응답이 말하는 것은 "이
+	// 계정에 남은 것이 없다"이고 그것은 사실이다(purged 전부 0, member_id는 빈 문자열). 실제로
+	// 이 호출이 가능한 창은 Firebase 계정 삭제 후 ID 토큰이 살아 있는 최대 1시간뿐이다.
+	again := deleteReq(t, r, "/v1/me", "u-app", "member")
+	if again.Code != http.StatusOK {
+		t.Fatalf("두 번째 DELETE /v1/me = %d %s, want 200(대기실 계정과 같은 경로)", again.Code, again.Body.String())
+	}
+	var second map[string]any
+	if err := json.Unmarshal(again.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if second["member_id"] != "" {
+		t.Errorf("두 번째 응답 member_id = %v, want \"\" — 가리킬 회원이 없다", second["member_id"])
+	}
+	if p, _ := second["purged"].(map[string]any); p["join_requests"] != float64(0) {
+		t.Errorf("두 번째 응답 purged.join_requests = %v, want 0 — 지울 것이 남아 있지 않다", p["join_requests"])
 	}
 }
 

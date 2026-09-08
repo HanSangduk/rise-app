@@ -125,7 +125,7 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> with WidgetsBinding
       ),
       body: SafeArea(
         child: switch (permission) {
-          null => const Center(child: CircularProgressIndicator(color: AppColors.red)),
+          null => const Center(child: CircularProgressIndicator(color: AppColors.brand)),
           CameraPermissionResult.denied || CameraPermissionResult.permanentlyDenied =>
             CameraPermissionView(
               result: permission,

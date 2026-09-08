@@ -88,7 +88,8 @@ class BookingViewModel extends _$BookingViewModel {
   Future<BookingScreenData> build() async {
     final memberId = ref.watch(sessionProvider)?.memberId;
     if (memberId == null) {
-      throw const AuthFailure('로그인이 필요해요');
+      // 셸이 떠 있는 채 세션이 비었다 — 리스너가 이동 중이라 문구가 아닌 타입만 낸다(P64).
+      throw const SessionGoneFailure();
     }
 
     final date = ref.watch(selectedBookingDateProvider);
@@ -165,7 +166,7 @@ class BookingViewModel extends _$BookingViewModel {
 
   Future<Result<void>> book({required String slotKey, required String passId}) async {
     final memberId = ref.read(sessionProvider)?.memberId;
-    if (memberId == null) return const Err(AuthFailure('로그인이 필요해요'));
+    if (memberId == null) return const Err(SessionGoneFailure());
 
     final repo = ref.read(bookingRepositoryProvider);
     final result = await repo.book(slotKey: slotKey, memberId: memberId, passId: passId);

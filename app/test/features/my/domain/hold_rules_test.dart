@@ -429,4 +429,110 @@ void main() {
       expect(a.headline, isNot(contains('-')));
     });
   });
+
+  group('capsUnknown — 정책을 못 받았으면 상한 검사를 건너뛴다 (P56 H4)', () {
+    // `centerPolicyProvider`는 조회 실패 시 폴백(2회/30일)을 **데이터로** 준다. 그 숫자로
+    // 판정하면 센터 실제 정책이 5회/90일인데 홀딩 2건을 쓴 회원의 신청을 앱이 막는다 —
+    // 파일 헤더가 금지한 "서버가 통과시킬 신청을 앱이 막는" 동작이다.
+    final twoUsed = pass(holds: [hold(1, 3, month: 3), hold(1, 3, month: 5)]); // 2회 · 6일
+
+    test('폴백 상한(2회)에 걸리는 신청도 capsUnknown이면 통과 — 서버가 판정한다', () {
+      final blocked = HoldRules.evaluate(
+        pass: twoUsed,
+        from: DateTime(2026, 9, 2),
+        to: DateTime(2026, 9, 5),
+        today: today,
+        maxHoldsPerPass: 2,
+        maxHoldTotalDays: 30,
+      );
+      expect(blocked, isA<HoldCountExceeded>(), reason: '대조군 — 상한을 알면 종전대로 막는다');
+
+      final passed = HoldRules.evaluate(
+        pass: twoUsed,
+        from: DateTime(2026, 9, 2),
+        to: DateTime(2026, 9, 5),
+        today: today,
+        maxHoldsPerPass: 2,
+        maxHoldTotalDays: 30,
+        capsUnknown: true,
+      );
+      expect(passed, isA<HoldAllowed>());
+      expect((passed as HoldAllowed).days, 4, reason: '일수 계산은 그대로 — 미리보기가 쓴다');
+    });
+
+    test('총 일수 상한도 마찬가지로 건너뛴다', () {
+      final longUsed = pass(holds: [hold(1, 28, month: 3)]); // 28일 사용
+      final state = HoldRules.evaluate(
+        pass: longUsed,
+        from: DateTime(2026, 9, 2),
+        to: DateTime(2026, 9, 11), // +10일 → 38일 > 30
+        today: today,
+        maxHoldsPerPass: 2,
+        maxHoldTotalDays: 30,
+        capsUnknown: true,
+      );
+      expect(state, isA<HoldAllowed>());
+    });
+
+    test('정책과 무관한 검사(상태·구간·겹침)는 capsUnknown이어도 그대로 막는다', () {
+      // 과거 시작 — 서버 ValidateHoldWindow의 사실 판정이지 정책이 아니다.
+      expect(
+        HoldRules.evaluate(
+          pass: pass(),
+          from: DateTime(2026, 8, 30),
+          to: DateTime(2026, 9, 2),
+          today: today,
+          maxHoldsPerPass: 2,
+          maxHoldTotalDays: 30,
+          capsUnknown: true,
+        ),
+        isA<HoldStartsInPast>(),
+      );
+      // 겹침.
+      expect(
+        HoldRules.evaluate(
+          pass: pass(holds: [hold(1, 10)]),
+          from: DateTime(2026, 9, 5),
+          to: DateTime(2026, 9, 12),
+          today: today,
+          maxHoldsPerPass: 2,
+          maxHoldTotalDays: 30,
+          capsUnknown: true,
+        ),
+        isA<HoldOverlapsExisting>(),
+      );
+      // 상태.
+      expect(
+        HoldRules.evaluate(
+          pass: pass(status: 'expired'),
+          from: DateTime(2026, 9, 2),
+          to: DateTime(2026, 9, 5),
+          today: today,
+          maxHoldsPerPass: 2,
+          maxHoldTotalDays: 30,
+          capsUnknown: true,
+        ),
+        isA<HoldPassNotActive>(),
+      );
+    });
+
+    test('잔여 요약은 "확인하지 못했어요" — 폴백 숫자도 "제한 없음"도 말하지 않는다', () {
+      final a = HoldRules.allowance(
+        pass: twoUsed,
+        maxHoldsPerPass: 2,
+        maxHoldTotalDays: 30,
+        capsUnknown: true,
+      );
+      expect(a.headline, '남은 일시정지를 확인하지 못했어요');
+      expect(a.detail, contains('지금까지 2회 · 6일 쉬었어요')); // 사실인 것만
+      expect(a.detail, contains('센터 정책에 따라 판정')); // 다음 행동
+      expect(a.remainingCount, isNull);
+      expect(a.remainingDays, isNull);
+      expect(a.exhausted, isFalse, reason: '모르는 상한으로 소진을 선언하면 안 된다');
+      final text = a.headline + a.detail!;
+      expect(text, isNot(contains('최대')));
+      expect(text, isNot(contains('30일')));
+      expect(text, isNot(contains('제한 없음')), reason: '무제한은 서버가 준 사실일 때만');
+    });
+  });
 }

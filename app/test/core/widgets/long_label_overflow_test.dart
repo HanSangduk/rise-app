@@ -195,7 +195,7 @@ void main() {
         const Row(
           children: [
             Expanded(child: Text('앞 텍스트가 자리를 다 먹는 상황')),
-            Flexible(child: RiseBadge('아주 긴 상품명 · 잔여 8', variant: RiseBadgeVariant.red)),
+            Flexible(child: RiseBadge('아주 긴 상품명 · 잔여 8', variant: RiseBadgeVariant.brand)),
           ],
         ),
         scale: maxScale,

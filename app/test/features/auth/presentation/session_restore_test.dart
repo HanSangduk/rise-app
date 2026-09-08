@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rise_member/core/result/failure.dart';
 import 'package:rise_member/core/result/result.dart';
 import 'package:rise_member/core/session/app_session.dart';
+import 'package:rise_member/core/session/session_provider.dart';
 import 'package:rise_member/features/auth/presentation/session_restore.dart';
 
 // P2R — 세션 복원이 loadSession() 실패를 전부 같게 취급하던 문제.
@@ -45,39 +46,37 @@ void main() {
 
   group('restoreLandingRoute — 판정별 착지', () {
     test('connected면 홈', () {
-      expect(
-        restoreLandingRoute(outcome: RestoreOutcome.connected, hasPending: false),
-        '/home',
-      );
+      expect(restoreLandingRoute(outcome: RestoreOutcome.connected), '/home');
     });
 
-    test('notLinked + 대기 기록 → 승인 대기 화면으로 복귀', () {
+    // P64 검증 반영 — 종전엔 로컬 대기 기록이 없으면 null(전화번호 화면)이라, 같은 회원·
+    // 같은 서버 상태가 캐시 유무로 갈렸다(캐시 있음 → 재검증 → 대기실 / 캐시 없음 → SMS
+    // 재인증). 뮤테이션: notLinked를 null로 되돌리면 아래 두 테스트가 죽는다.
+    test('notLinked → 대기실 — 로컬 대기 기록이 없어도 전화번호 화면으로 밀지 않는다', () {
       expect(
-        restoreLandingRoute(outcome: RestoreOutcome.notLinked, hasPending: true),
+        restoreLandingRoute(outcome: RestoreOutcome.notLinked),
         '/login/center-confirm',
+        reason: 'Firebase 신원은 살아 있다 — SMS 재인증을 시킬 이유가 없고, 대기실이 서버 상태를 보여 준다',
       );
     });
 
-    test('notLinked + 기록 없음 → 온보딩(null)', () {
+    test('notLinked 착지는 재검증 경로(sessionEndRoute)와 한 규칙이다', () {
       expect(
-        restoreLandingRoute(outcome: RestoreOutcome.notLinked, hasPending: false),
-        isNull,
+        restoreLandingRoute(outcome: RestoreOutcome.notLinked),
+        sessionEndRoute(SessionEndReason.notLinked),
+        reason: '캐시 유무로 착지가 갈리면 같은 사람이 켤 때마다 다른 화면을 본다',
       );
     });
 
     test('unknown이면 대기 기록이 없어도 온보딩으로 밀지 않는다', () {
       // 인증을 처음부터 다시 시키는 대신 재확인할 수 있는 화면에 세운다.
-      expect(
-        restoreLandingRoute(outcome: RestoreOutcome.unknown, hasPending: false),
-        '/login/center-confirm',
-      );
+      expect(restoreLandingRoute(outcome: RestoreOutcome.unknown), '/login/center-confirm');
     });
 
-    test('unknown + 대기 기록도 같은 화면 — 대기 카드로 그려진다', () {
-      expect(
-        restoreLandingRoute(outcome: RestoreOutcome.unknown, hasPending: true),
-        '/login/center-confirm',
-      );
+    test('notLinked·unknown 어느 쪽도 null(전화번호 화면)을 돌려주지 않는다', () {
+      for (final o in [RestoreOutcome.notLinked, RestoreOutcome.unknown]) {
+        expect(restoreLandingRoute(outcome: o), isNotNull, reason: '$o — 신원이 살아 있는 착지다');
+      }
     });
   });
 }

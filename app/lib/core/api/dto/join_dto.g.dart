@@ -29,6 +29,11 @@ _MeResponseDto _$MeResponseDtoFromJson(Map<String, dynamic> json) =>
       centerId: json['center_id'] as String,
       memberId: json['member_id'] as String?,
       name: json['name'] as String?,
+      joinRequest: json['join_request'] == null
+          ? null
+          : JoinRequestStatusDto.fromJson(
+              json['join_request'] as Map<String, dynamic>,
+            ),
     );
 
 Map<String, dynamic> _$MeResponseDtoToJson(_MeResponseDto instance) =>
@@ -38,4 +43,21 @@ Map<String, dynamic> _$MeResponseDtoToJson(_MeResponseDto instance) =>
       'center_id': instance.centerId,
       'member_id': instance.memberId,
       'name': instance.name,
+      'join_request': instance.joinRequest,
     };
+
+_JoinRequestStatusDto _$JoinRequestStatusDtoFromJson(
+  Map<String, dynamic> json,
+) => _JoinRequestStatusDto(
+  status: json['status'] as String,
+  centerId: json['center_id'] as String? ?? '',
+  createdAt: json['created_at'] as String,
+);
+
+Map<String, dynamic> _$JoinRequestStatusDtoToJson(
+  _JoinRequestStatusDto instance,
+) => <String, dynamic>{
+  'status': instance.status,
+  'center_id': instance.centerId,
+  'created_at': instance.createdAt,
+};

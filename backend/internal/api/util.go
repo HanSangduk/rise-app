@@ -40,6 +40,42 @@ type errBody struct {
 	Error string `json:"error"`
 }
 
+// errBodyWithCode — 표준 {error} 위에 기계 판독용 `code`를 얹은 확장 본문(v2.28, P56 B12).
+//
+// 지금 쓰는 곳은 **라우터 404 하나**다. 종전엔 라우터 404("이 배포에 그 경로가 없다")와 리소스
+// 404("그 id가 없다")가 status·body까지 동일해서, 어드민의 "404 = 아직 미배포" 규약이 원리적으로
+// 성립할 수 없었다 — 좀비 요청 경합의 리소스 404를 "거절 기능 미배포"로 접어 대표에게
+// *"그동안은 승인만 처리하세요"*라고 안내했고, 그 승인이 P55 C-2(회원 기록 전부 상실)다.
+// 리소스 404는 **무변경**이다(code 없음): 어드민은 `code === "route_not_found"`로만 미배포를
+// 판정하고, code가 없는 404는 전부 "그 id가 없다"로 읽는다. 사람이 읽는 `error` 문구를
+// 판별자로 쓰지 않는 이유는 문구는 바뀌어도 되는 값이기 때문이다.
+type errBodyWithCode struct {
+	Error string `json:"error"`
+	Code  string `json:"code"`
+}
+
+// codeRouteNotFound — 라우터 404의 code 값. 어드민 갈래가 이 문자열로 분기한다(계약 v2.28).
+// **바꾸지 말 것** — 어드민 상수와 글자 단위로 맞춰져 있다.
+const codeRouteNotFound = "route_not_found"
+
+// codeMediaNotConfigured — 파기 경계 미구성 503의 code 값(계약 v2.28). 어드민이 code 없는 503을
+// 전달 경로 장애로 읽어 재시도를 권하므로 "재시도로 안 낫는 설정 문제"를 기계가 읽게 한다.
+const codeMediaNotConfigured = "media_not_configured"
+
+// codeJoinPending — 가입 요청 중복 409의 code 값(계약 v2.34, P69). 앱이 이 코드로 "서버에 내
+// pending이 살아 있다"를 확정해 대기 화면으로 돌아간다 — 문구는 바뀌어도 되는 값이라
+// 판별자로 쓰지 않는다(codeRouteNotFound와 같은 규약). **바꾸지 말 것**.
+const codeJoinPending = "join_pending"
+
+// joinPendingError — POST /v1/join/request의 pending 중복(v2.27의 409를 v2.34가 본문으로 확장).
+// ErrConflict로 풀리므로(Is) 기존 `errors.Is(err, ErrConflict)` 판정은 그대로 성립한다.
+type joinPendingError struct{ centerID string }
+
+func (e *joinPendingError) Error() string {
+	return "이미 보낸 가입 요청이 있어요 — 센터에서 확인하면 연결돼요"
+}
+func (e *joinPendingError) Is(target error) bool { return target == ErrConflict }
+
 // friendlyDomainMessages — 도메인 sentinel 에러의 사용자향 한국어 문구. 계약의 에러 메시지는
 // 클라이언트가 그대로 화면에 띄우므로 영문 내부 문구("domain: ...")를 흘리지 않는다.
 var friendlyDomainMessages = []struct {
@@ -73,6 +109,17 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		}{Error: blocked.msg, Blockers: blocked.blockers})
 		return
 	}
+	// 가입 요청 pending 중복(v2.34) — {error, code, center_id}. 구앱은 error만 읽고, 새 앱은
+	// code로 "내 요청이 살아 있다"를 확정해 그 센터의 대기 화면으로 돌아간다.
+	var pending *joinPendingError
+	if errors.As(err, &pending) {
+		writeJSON(w, http.StatusConflict, struct {
+			Error    string `json:"error"`
+			Code     string `json:"code"`
+			CenterID string `json:"center_id"`
+		}{Error: pending.Error(), Code: codeJoinPending, CenterID: pending.centerID})
+		return
+	}
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, errBody{Error: "찾을 수 없음"})
@@ -82,6 +129,10 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		errors.Is(err, domain.ErrTrainerBusy),
 		errors.Is(err, ErrConflict):
 		writeJSON(w, http.StatusConflict, errBody{Error: userMessage(err)})
+	case errors.Is(err, ErrMediaListUnavailable):
+		// 503 + code(v2.28) — 어드민이 code 없는 503을 "전달 경로 장애(transport)"로 읽어 재시도를
+		// 권하므로, "서버 설정 문제"임을 기계가 읽을 수 있게 표시한다. 재시도로는 안 낫는 503이다.
+		writeJSON(w, http.StatusServiceUnavailable, errBodyWithCode{Error: userMessage(err), Code: codeMediaNotConfigured})
 	case errors.Is(err, ErrUploadUnavailable):
 		// 503 — 요청은 옳고 **서버가 준비되지 않았다**(v2.25). 400으로 내리면 대표가
 		// 사진을 계속 바꿔 보며 원인을 찾지 못한다. 고칠 사람은 배포 설정을 쥔 쪽이다.

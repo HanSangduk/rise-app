@@ -185,7 +185,13 @@ class CameraViewModel extends _$CameraViewModel {
   /// 셔터 → 동의 확인 → 촬영 → 업로드(P8).
   Future<void> capture() async {
     final session = ref.read(sessionProvider);
-    if (session == null) return;
+    // 세션이 비었다 — 조용히 끝내지 않는다(P64). 촬영 전이라 잃을 바이트는 없지만,
+    // 셔터에 아무 반응이 없는 것과 "이동 중"이라는 상태는 다르다. 아래 두 메서드와
+    // 같은 규약.
+    if (session == null) {
+      state = state.copyWith(submitting: false, error: const SessionGoneFailure());
+      return;
+    }
     // **확인을 기다리는 사진이 있으면 새로 찍지 않는다.** 지금은 확인 층이 화면을
     // 통째로 덮어 셔터가 눌릴 일이 없지만, 그 층을 부분 오버레이로 바꾸는 순간
     // 회원이 본 것과 다른 사진이 저장된다. 가드는 두 줄이고 그 회귀는 조용하다.
@@ -251,8 +257,18 @@ class CameraViewModel extends _$CameraViewModel {
   /// 검토 화면의 "이 사진으로 저장" — 이때 처음으로 네트워크가 움직인다.
   Future<void> confirmReview() async {
     final pending = state.review;
+    if (pending == null) return;
     final memberId = ref.read(sessionProvider)?.memberId;
-    if (pending == null || memberId == null) return;
+    if (memberId == null) {
+      // 세션이 비었다 — 이유만 세우고 상태는 무너뜨리지 않는다(P64). 종전엔 여기서
+      // 조용히 return해서 [이 사진으로 저장]을 탭한 회원이 아무 피드백도 못 받았다.
+      // `review`를 비우지 않는 건 **리스너가 화면을 내릴 때까지** 검토 층이 그대로 서
+      // 있게 하려는 것이지 사진을 살려 두겠다는 약속이 아니다 — 화면이 내려가면 이
+      // 뷰모델은 autoDispose로 사라지고 바이트도 함께 간다. 세션이 없는 사진은 올릴
+      // 주인이 없으니 그게 맞다.
+      state = state.copyWith(submitting: false, error: const SessionGoneFailure());
+      return;
+    }
     // **검토를 여기서 닫는다 — `_persist` 뒤가 아니라.** `lastSavedMessage`는
     // `copyWith`가 매번 비우는 일회성 필드라(위 클래스 정의), `_persist`가 세워 둔
     // 성공 문구를 뒤이은 `copyWith` 한 번이 지운다. 회원은 저장하고도 아무 확인도
@@ -276,8 +292,14 @@ class CameraViewModel extends _$CameraViewModel {
   /// 재시도 배너의 "다시 저장" — 새로 찍지 않고 손에 든 사진을 그대로 다시 올린다.
   Future<void> retryPendingUpload() async {
     final pending = state.pendingRetry;
+    if (pending == null) return;
     final memberId = ref.read(sessionProvider)?.memberId;
-    if (pending == null || memberId == null) return;
+    if (memberId == null) {
+      // confirmReview와 같은 규약 — 화면이 내려갈 때까지 `pendingRetry`를 무너뜨리지 않고
+      // 이유만 세운다(그 뒤 autoDispose로 사라지는 건 의도).
+      state = state.copyWith(submitting: false, error: const SessionGoneFailure());
+      return;
+    }
     state = state.copyWith(submitting: true, clearError: true, lastSavedMessage: null);
     await _persist(pending, memberId: memberId);
   }

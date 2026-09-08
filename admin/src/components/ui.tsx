@@ -20,7 +20,11 @@ type Variant = "default" | "outline" | "ghost" | "danger";
 type Size = "sm" | "md";
 
 const variants: Record<Variant, string> = {
-  default: "bg-brand text-white hover:bg-brand-2",
+  // 다크 UI의 기본(primary) 버튼은 **밝은 면 + 어두운 글자**다(P54). 종전 로즈는
+  // 어두워서 흰 글자를 받았지만, 브랜드 네이비 원색(`brand-2`)을 면으로 쓰면 패널
+  // 대비가 2.05:1이라 버튼이 배경에 묻힌다. 밝은 `brand`를 면으로 쓰고 글자를
+  // 배경색으로 뒤집으면 면 6.64:1 · 글자 7.14:1로 둘 다 선다.
+  default: "bg-brand text-bg hover:bg-brand-2 hover:text-white",
   outline: "border border-line bg-panel-2 text-ink hover:border-muted",
   ghost: "bg-transparent text-muted hover:bg-panel-2 hover:text-ink",
   danger: "bg-danger text-white hover:opacity-90",

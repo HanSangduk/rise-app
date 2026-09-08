@@ -9,7 +9,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>ai.stra.rize</string>
+	<string>com.han.rise</string>
 	<key>PROJECT_ID</key>
 	<string>rize-218c1</string>
 	<key>STORAGE_BUCKET</key>
@@ -25,6 +25,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:773077624928:ios:b700434a369d2acfb0fb05</string>
+	<string>1:773077624928:ios:3b39ab1c6c889eb0b0fb05</string>
 </dict>
 </plist>

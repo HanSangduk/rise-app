@@ -42,6 +42,7 @@ func (h *Handlers) CreateBooking(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	setAccessSubject(r.Context(), booking.MemberID) // 접속기록 정보주체(v2.30) — 본문에만 있는 id
 	writeJSON(w, http.StatusOK, booking)
 }
 
@@ -137,5 +138,6 @@ func (h *Handlers) Checkin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	setAccessSubject(r.Context(), booking.MemberID) // 접속기록 정보주체(v2.30) — 서버가 찾은 예약의 회원
 	writeJSON(w, http.StatusOK, booking)
 }

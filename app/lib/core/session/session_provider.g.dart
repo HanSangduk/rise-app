@@ -52,7 +52,7 @@ final class SessionProvider extends $NotifierProvider<Session, AppSession?> {
   }
 }
 
-String _$sessionHash() => r'd4c0e4c23afa0a4e62c84f0cdbe6844929cf807a';
+String _$sessionHash() => r'890c00ab374c11d50a8b2ff830a1de57fea6a1f0';
 
 /// 로그인 세션 — 로그인 플로우(join/confirm) 완료 시 채워지고,
 /// 셸(홈/예약/촬영/기록/마이) 이하 모든 화면이 memberId를 여기서 읽는다.

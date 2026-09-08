@@ -16,8 +16,28 @@ abstract final class LegalLinks {
     defaultValue: 'https://rize-218c1.web.app/legal',
   );
 
+  /// 앱 **운영자**(개발자) 개인정보처리방침 — 앱 스토어에 등록된 방침이 이것이다(P66).
+  ///
+  /// 아래 [privacy]와 다른 문서다: 이 앱은 여러 센터가 함께 쓰므로 특정 센터 하나를
+  /// 개인정보처리자로 선언한 문서를 앱 전체의 방침으로 걸 수 없다. 센터가 처리하는 기록의
+  /// 고지는 [privacy]가, 앱·서버 운영자가 직접 처리하는 것은 이 문서가 맡는다.
+  ///
+  /// **센터 파라미터를 붙이지 않는다** — 운영자는 하나뿐이라 센터에 따라 달라지지 않는다.
+  static const appPrivacy = '$_host/app-privacy.html';
+
   static const terms = '$_host/terms.html';
   static const privacy = '$_host/privacy.html';
   static const sensitiveConsent = '$_host/sensitive-consent.html';
   static const accountDeletion = '$_host/account-deletion.html';
+
+  /// **어느 센터의 고지인가**를 URL에 싣는다(계약 v2.33).
+  ///
+  /// 여러 센터가 이 앱을 쓰므로 법정 문서가 인쇄하는 사업자 정보(개인정보처리자·삭제 요청
+  /// 접수 창구)는 센터마다 다르다. 문서는 `?center=`를 그대로 서버에 넘겨 그 센터의 값을
+  /// 받는다 — 파라미터가 없으면 서버가 기본 센터를 준다.
+  ///
+  /// [centerId]가 비면 **원래 주소 그대로**다: 로그인 전(대기실)처럼 센터를 모르는 자리에서
+  /// 빈 파라미터를 붙이면 서버가 404를 주고 문서가 자리표시자만 남는다.
+  static String forCenter(String url, String centerId) =>
+      centerId.isEmpty ? url : '$url?center=${Uri.encodeQueryComponent(centerId)}';
 }

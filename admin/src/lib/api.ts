@@ -8,10 +8,13 @@ import { auth } from "./firebase";
 import type {
   BodyPhoto,
   BodyPhotoCreateRequest,
+  BodyPhotoListItem,
+  BodyPhotoReconcileResult,
   Booking,
   Center,
   CenterBusiness,
   CenterFacility,
+  CenterIdentity,
   CenterPolicy,
   CheckinQrToken,
   Contract,
@@ -47,6 +50,9 @@ import type {
   Stats,
   Weekday,
   WorkoutLog,
+  AdminCenter,
+  CenterCreateBody,
+  CenterCreated,
 } from "./types";
 
 // ||로 빈 문자열도 /api 폴백(??는 .env의 `VITE_API_BASE=` 빈 값을 그대로 통과시켜 프록시를 우회한다).
@@ -91,17 +97,48 @@ async function authHeader(): Promise<{ Authorization?: string }> {
 // 낸 실패라는 표시. 상류 502(Cloud Run 콜드스타트 등 일시적)와 달리 배포를 고치기 전까지
 // 100% 결정적으로 실패하므로 **재시도하면 안 된다** — 재시도는 진단만 늦추고(백오프 대기)
 // 요청 수를 4배로 만든다. main.tsx의 retry 술어가 이 플래그를 본다.
+//
+// code — 서버가 표준 {error} 옆에 실어 보내는 **기계 판독용 식별자**(계약 v2.28, 없으면 "").
+// 사람이 읽는 문구(message)는 같은데 뜻이 다른 응답을 가르는 유일한 수단이다. 첫 사례가
+// 라우터 404 `route_not_found`: 종전엔 "이 배포에 그 주소가 없다"(미배포)와 "그 id의 문서가
+// 없다"(이미 처리됨·경합)가 status도 본문도 같아서, 어드민이 후자를 전자로 읽고 대표에게
+// **"그동안은 승인만 처리하세요"라고 지시**했다 — 그 승인이 P55 C-2(회원 기록 전부 상실)다.
 export class ApiError extends Error {
   readonly status: number;
   readonly data: unknown;
   readonly transport: boolean;
-  constructor(message: string, status: number, data?: unknown, transport = false) {
+  readonly code: string;
+  constructor(message: string, status: number, data?: unknown, transport = false, code = "") {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.data = data;
     this.transport = transport;
+    this.code = code;
   }
+}
+
+// 라우터 404 식별자(계약 v2.28) — 서버 router.go NotFound 핸들러가 싣는 값과 **글자 단위로** 같아야 한다.
+export const ROUTE_NOT_FOUND_CODE = "route_not_found";
+// 파기 경계(STORAGE_BUCKET) 미구성 503의 식별자(계약 v2.28) — util.go codeMediaNotConfigured와 동일.
+export const MEDIA_NOT_CONFIGURED_CODE = "media_not_configured";
+
+// "이 배포에는 그 주소가 없다" — 어드민이 서버보다 먼저 올라간 창(배포 시차)의 유일한 판정.
+//
+// **404라는 사실만으로는 미배포라고 말하지 않는다.** 리소스 404(이미 처리된 요청·그 사이
+// 지워진 문서)와 status·본문이 같기 때문이다 — 그 오독이 P56 B6이었다. 전달 경로가 낸 404
+// (Hosting 폴백 → 비JSON, transport)도 여기 넣지 않는다: 그건 "이 엔드포인트가 없다"가 아니라
+// "API 전체가 안 닿는다"라 TRANSPORT_MSG가 이미 맞는 말을 한다.
+// 판정을 쓰는 자리: CheckinQr(발급 카드 접기) · Settings(사진 업로드 안내 · 거절 안내).
+export function isRouteNotFound(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 404 && e.code === ROUTE_NOT_FOUND_CODE;
+}
+
+// "서버에 파기 경계가 없다" — reconcile·purge의 503(P57 A4). 재시도로는 안 낫는 503이라 일반 장애
+// 문구("잠시 후 다시 시도")로 접으면 대표가 헛되이 다시 누른다. status가 아니라 code로만 판정한다 —
+// 같은 503이라도 향후 다른 사유(업로드 미구성 등)와 섞이지 않게(isRouteNotFound와 같은 규약).
+export function isMediaNotConfigured(e: unknown): boolean {
+  return e instanceof ApiError && e.code === MEDIA_NOT_CONFIGURED_CODE;
 }
 
 // ── 401 인터셉터(v2.0) ──────────────────────────────────────────────────
@@ -190,11 +227,14 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     let msg =
       STATUS_FALLBACK[res.status] ?? `지금 처리하지 못했어요 — 잠시 후 다시 시도해주세요 (${res.status})`;
     let data: unknown;
+    let code = "";
     if (isJSON) {
       try {
         data = await res.json();
-        const body = data as { error?: string };
+        const body = data as { error?: string; code?: unknown };
         if (body?.error) msg = body.error;
+        // code는 서버가 주는 경우에만(구서버·프록시 응답엔 없다) — 문자열 아닌 값은 버린다.
+        if (typeof body?.code === "string") code = body.code;
       } catch {
         /* 에러 바디가 JSON이 아니면 상태코드 폴백 유지 */
       }
@@ -208,7 +248,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
       throw new ApiError(msg, res.status, data, true /* transport */);
     }
     if (res.status === 401) onUnauthorized?.();
-    throw new ApiError(msg, res.status, data);
+    throw new ApiError(msg, res.status, data, false, code);
   }
   // 2xx인데 바디가 빈 응답(204 포함)은 undefined로 — res.json()의 SyntaxError가
   // 성공을 실패로 둔갑시키지 않게 한다.
@@ -260,9 +300,19 @@ export const api = {
     req<void>("/v1/join/confirm", { method: "POST", body: JSON.stringify({ member_id, confirm }) }),
   joinRequestSend: (center_id: string) =>
     req<void>("/v1/join/request", { method: "POST", body: JSON.stringify({ center_id }) }),
+  // 응답은 **승인으로 생긴 회원 문서**(handlers_me.go JoinApprove → writeJSON(mem)). 회원 관리 큐가
+  // 승인 직후 그 회원을 자동 선택해 담당 배정으로 잇는 데 쓴다(P69) — 종전엔 void로 버렸다.
   joinApprove: (request_id: string) =>
-    req<void>("/v1/join/approve", { method: "POST", body: JSON.stringify({ request_id }) }),
-  // [가정 2] 대기 중 가입 요청 목록(설정 화면). types.ts JoinRequest 참고.
+    req<Member>("/v1/join/approve", { method: "POST", body: JSON.stringify({ request_id }) }),
+  // [P55] 가입 요청 거절(owner 전용) — 승인의 대칭 동사. 서버가 **이름·번호를 비우고**
+  // status=rejected로 행만 남긴다(승인되지 않은 사람의 개인정보를 센터가 계속 들고 있을 근거가
+  // 없다 — 행 자체는 재요청 남용의 근거라 남는다). 응답 본문(갱신된 요청 문서)은 쓰지 않는다.
+  //
+  // 이 동사가 없던 동안 큐를 줄이는 방법은 승인뿐이었다 — 잘못 들어온 요청(남의 센터·중복 계정)도
+  // 승인해서 지우거나 영원히 쌓아 두는 두 선택지밖에 없었다.
+  joinReject: (request_id: string) =>
+    req<void>("/v1/join/reject", { method: "POST", body: JSON.stringify({ request_id }) }),
+  // [가정 2] 대기 중 가입 요청 목록(회원 관리 상단 큐·대시보드·네비 배지). types.ts JoinRequest 참고.
   joinRequests: () => req<JoinRequest[]>("/v1/join/requests"),
 
   // ── 재등록/상담 요청(계약 v2.20, P42) ─────────────────────────────────
@@ -393,9 +443,39 @@ export const api = {
     req<Payment>(`/v1/payments/${paymentId}/installments/${index}/pay`, { method: "POST" }),
 
   // ── 체형 분석 · 인바디 ──────────────────────────────────────────────
-  bodyPhotos: (member: string) => req<BodyPhoto[]>(`/v1/body-photos${qs({ member })}`),
+  // [v2.28] 한 엔드포인트가 두 모양 중 하나를 준다 — 동의 유효면 BodyPhoto[](Full), 스태프가 스코프
+  // 안에서 동의 때문에 막힌 회원이면 **403 대신 BodyPhotoMeta[]**(사진 바이트에 닿는 값 없음, 삭제
+  // 요청 처리용). 판별은 types.ts isFullBodyPhoto(storage_path 유무).
+  // include_deleted=true(스태프 전용 — 회원은 403): deleted_at이 찍힌 삭제분까지 내려준다. 어드민은
+  // 늘 스태프이고 휴지통(복원)이 이 값을 필요로 하므로 항상 켠다 — v2.28 이전 서버는 이 파라미터를
+  // 모른 채 살아 있는 것만 주므로(휴지통이 비어 보일 뿐) 깨지지 않는다.
+  bodyPhotos: (member: string, opts: { includeDeleted?: boolean } = {}) =>
+    req<BodyPhotoListItem[]>(
+      `/v1/body-photos${qs({ member, include_deleted: opts.includeDeleted ? "true" : undefined })}`,
+    ),
   createBodyPhoto: (b: BodyPhotoCreateRequest) =>
     req<BodyPhoto>("/v1/body-photos", { method: "POST", body: JSON.stringify(b) }),
+  // [v2.14] 체형사진 삭제 — **누가 눌렀느냐로 뜻이 갈린다.** 스태프(이 어드민)가 부르면 소프트
+  // 삭제: 응답은 deleted_at이 찍힌 사진 객체이고 30일 안에 restore로 되돌릴 수 있다. 회원 본인이
+  // 앱에서 부르면 즉시 파기(204) — 그쪽은 이 클라이언트가 부르지 않는다.
+  // P56 B1 이후 동의 철회 상태에서도 통한다(삭제는 철회 뒤에 **더** 필요한 동작 — DeleteInbody와 동형).
+  deleteBodyPhoto: (id: string) => req<BodyPhoto>(`/v1/body-photos/${id}`, { method: "DELETE" }),
+  // [v2.14] 유예 안 복원(스태프 전용). 기한이 지났으면 400 한국어("파기 기한이 지난 사진이에요").
+  // 동의 철회 중이면 403 — 복원은 열람 게이트를 그대로 탄다(삭제와 달리 사진을 되살리는 일이다).
+  restoreBodyPhoto: (id: string) =>
+    req<BodyPhoto>(`/v1/body-photos/${id}/restore`, { method: "POST" }),
+  // [v2.14] 기한 지난 사진 즉시 파기(owner 전용, 센터 전체, 한 번에 최대 25건). 응답 {purged}.
+  // 평소엔 조회에 얹힌 훑기가 바닥을 맡지만(서버 sweepBodyPhotoPurge), 대표가 "지금 당장"
+  // 지워야 할 때(회원 요청·감사 대응) 부를 수 있는 손잡이다.
+  purgeBodyPhotos: () => req<{ purged: number }>("/v1/body-photos/purge", { method: "POST" }),
+  // [v2.15] 정합 검사(owner 전용) — 버킷을 거꾸로 훑어 **메타가 없는 파일**(고아)을 찾는다.
+  // member 필수. apply 없이 부르면 조회만(orphans 목록), apply=true면 그 고아를 실제로 지운다 —
+  // 되돌릴 수 없어 화면이 두 단계로 가른다. 파기 경계가 미구성인 서버는 503(P57 A4)으로 거절한다.
+  reconcileBodyPhotos: (member: string, apply: boolean) =>
+    req<BodyPhotoReconcileResult>(
+      `/v1/body-photos/reconcile${qs({ member, apply: apply ? "true" : undefined })}`,
+      { method: "POST" },
+    ),
   inbody: (member: string) => req<Inbody[]>(`/v1/inbody${qs({ member })}`),
   // [v2.9] 서버 검증: 6지표 범위+교차(400 한국어 문구) · 미래 측정일 400(KST) · 같은 회원·
   // 같은 날 중복 409. source는 **실으면 안 된다**(DisallowUnknownFields 400 — 서버가
@@ -482,6 +562,17 @@ export const api = {
   // 응답은 GET /v1/center과 같은 모양(Center 전체)이라 캐시를 그대로 갈아끼울 수 있다.
   updateCenterBusiness: (business: CenterBusiness) =>
     req<Center>("/v1/center", { method: "PUT", body: JSON.stringify({ business }) }),
+  // [P55] 센터 신원 편집(owner 전용) — PUT /v1/center의 **세 번째 덩어리**(center).
+  //
+  // **3칸을 항상 전부 싣는다**(business와 같은 통 교체): 전화·주소는 잘못 적은 값을 비워서
+  // 지우는 일이 실제로 필요하고, 머지였다면 한 번 들어간 오타를 지울 방법이 없다.
+  // policy·business를 함께 싣지 않는다 — 서버는 **보낸 덩어리만** 처리하므로(handlers_me.UpdateCenter)
+  // 이 호출은 정책도 사업자 정보도 건드리지 않는다.
+  //
+  // 이름이 빈 값이면 서버가 400(domain.Center.Validate "센터 이름을 입력해주세요") — 화면이 같은
+  // 규칙으로 선차단하되 집행자는 서버다. 응답은 GET /v1/center과 같은 모양(Center 전체).
+  updateCenterIdentity: (center: CenterIdentity) =>
+    req<Center>("/v1/center", { method: "PUT", body: JSON.stringify({ center }) }),
   // [P42] 체육시설업 신고 상태 저장(owner 전용) — PUT /v1/center의 덩어리 머지가 아니라
   // **전용 엔드포인트**다: 바디는 facility 절 3필드를 통째로(top-level, {facility} 래핑 없음).
   // reported인데 신고번호가 비면 400 — 화면이 같은 규칙으로 선차단한다(서버가 최종 집행자).
@@ -498,4 +589,17 @@ export const api = {
   // 조회와 같은 모양으로 돌려준다). 바디 없음. 성공하는 순간 **이전 토큰은 즉시 무효**가 되어
   // 데스크에 붙어 있는 종이가 죽는다 — 화면이 2단 확인을 세우는 이유가 이 한 줄이다.
   rotateCheckinQr: () => req<CheckinQrToken>("/v1/center/checkin-qr/rotate", { method: "POST" }),
+
+  // ── 관리 평면(멀티센터) — superadmin 전용 ────────────────────────────
+  // 계약 v2.16. 서버는 superadmin이 아닌 신원에 403을 주고(`api.CreateCenter`), 반대로
+  // superadmin에게는 이 두 경로와 /v1/me 외 전부를 403으로 막는다(`superadminAllowedPath`).
+  //
+  // 목록은 **기본 센터 ∪ 상호 등록 센터**(v2.35) — 기본 센터는 상호가 비어도 name:"" 그대로
+  // 맨 앞에 온다(화면이 "상호 미등록"으로 그린다 — Centers.tsx). v2.34까지는 상호 등록 문서만
+  // 돌려줘 1호 고객 라이즈가 목록에서 사라져 있었다(P70).
+  adminCenters: () => req<AdminCenter[]>("/v1/admin/centers"),
+  // 센터 + 최초 owner를 한 요청으로. 409 = 이미 쓰는 센터 ID이거나, owner 이메일이 이미
+  // 다른 센터에 연결된 계정이다(서버가 UserIndex를 덮어써 원래 센터를 잃는 사고를 막는다).
+  createCenter: (body: CenterCreateBody) =>
+    req<CenterCreated>("/v1/admin/centers", { method: "POST", body: JSON.stringify(body) }),
 };

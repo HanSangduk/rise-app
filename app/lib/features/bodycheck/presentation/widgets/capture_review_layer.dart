@@ -52,14 +52,22 @@ class CaptureReviewLayer extends StatelessWidget {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              // poseLabel은 대표가 어드민에서 자유 입력하는 값이라(PoseSpec.labelFor)
+              // 길이를 앱이 통제하지 못한다 — Expanded 없이는 15px×배율 1.35에서
+              // 12자만 넘어도 좁은 화면에서 터졌다(P54). 포즈 칩 경로는 이미
+              // long_label_overflow_test가 지키는데 이 화면만 빠져 있었다.
               child: Row(
                 children: [
-                  Text(
-                    '$poseLabel · 이대로 저장할까요?',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
+                  Expanded(
+                    child: Text(
+                      '$poseLabel · 이대로 저장할까요?',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                 ],
@@ -124,11 +132,7 @@ class CaptureReviewLayer extends StatelessWidget {
 }
 
 class _ReviewButton extends StatelessWidget {
-  const _ReviewButton({
-    required this.label,
-    required this.filled,
-    required this.onPressed,
-  });
+  const _ReviewButton({required this.label, required this.filled, required this.onPressed});
 
   final String label;
   final bool filled;
@@ -142,13 +146,11 @@ class _ReviewButton extends StatelessWidget {
       height: 52,
       child: Material(
         color: filled
-            ? (disabled ? AppColors.red.withValues(alpha: 0.5) : AppColors.red)
+            ? (disabled ? AppColors.brand.withValues(alpha: 0.5) : AppColors.brand)
             : Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.card),
-          side: filled
-              ? BorderSide.none
-              : BorderSide(color: Colors.white.withValues(alpha: 0.45)),
+          side: filled ? BorderSide.none : BorderSide(color: Colors.white.withValues(alpha: 0.45)),
         ),
         child: InkWell(
           onTap: onPressed,

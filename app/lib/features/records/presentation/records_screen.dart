@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rise_member/core/api/member_api.dart';
 import 'package:rise_member/core/policy/center_policy_provider.dart';
 import 'package:rise_member/core/result/failure.dart';
+import 'package:rise_member/core/session/session_gone_view.dart';
 import 'package:rise_member/core/theme/app_colors.dart';
 import 'package:rise_member/core/theme/app_radius.dart';
 import 'package:rise_member/core/widgets/rise_button.dart';
@@ -41,18 +42,21 @@ class RecordsScreen extends ConsumerWidget {
           ),
           Expanded(
             child: async.when(
-              loading: () => const Center(child: CircularProgressIndicator(color: AppColors.red)),
-              error: (e, _) => RiseErrorView(
-                message: e is Failure ? e.message : null,
-                // 탭 공통 재시도 규약: 정책도 동반 재조회 — 실패 폴백이 세션 내내
-                // 고착되지 않게(center_policy_provider 주석 참조).
-                onRetry: () {
-                  ref.invalidate(centerPolicyProvider);
-                  ref.invalidate(recordsViewModelProvider);
-                },
-              ),
+              loading: () => const Center(child: CircularProgressIndicator(color: AppColors.brand)),
+              // 세션 소멸은 에러가 아니라 **전환 중**이다 — 재시도 버튼을 그리지 않는다(P64).
+              error: (e, _) => e is SessionGoneFailure
+                  ? const SessionGoneView()
+                  : RiseErrorView(
+                      message: e is Failure ? e.message : null,
+                      // 탭 공통 재시도 규약: 정책도 동반 재조회 — 실패 폴백이 세션 내내
+                      // 고착되지 않게(center_policy_provider 주석 참조).
+                      onRetry: () {
+                        ref.invalidate(centerPolicyProvider);
+                        ref.invalidate(recordsViewModelProvider);
+                      },
+                    ),
               data: (data) => RefreshIndicator(
-                color: AppColors.red,
+                color: AppColors.brand,
                 onRefresh: () async => ref.read(recordsViewModelProvider.notifier).refresh(),
                 child: ListView(
                   // 콘텐츠가 화면보다 짧아도 pull-to-refresh 당김이 동작하게.
@@ -123,7 +127,7 @@ class _Segmented extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 15),
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: t == selected ? AppColors.red : Colors.transparent,
+                    color: t == selected ? AppColors.brand : Colors.transparent,
                     // 8은 바깥 알약(10) 안쪽에 끼는 목업 값 — 토큰으로 올리지 않는다.
                     borderRadius: BorderRadius.circular(8),
                   ),

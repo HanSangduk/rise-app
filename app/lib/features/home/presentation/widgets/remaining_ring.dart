@@ -57,7 +57,7 @@ class _RingPainter extends CustomPainter {
     canvas.drawCircle(center, radius, bg);
 
     final fg = Paint()
-      ..color = AppColors.red
+      ..color = AppColors.brand
       ..style = PaintingStyle.stroke
       ..strokeWidth = _strokeWidth
       ..strokeCap = StrokeCap.round;

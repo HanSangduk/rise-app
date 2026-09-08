@@ -6,15 +6,24 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// ListBodyPhotos — GET /v1/body-photos?member=.
+// ListBodyPhotos — GET /v1/body-photos?member=&include_deleted=(v2.28).
+//
+// 응답 원소의 모양이 **동의 상태로 갈린다**: 유효하면 BodyPhoto(계약 원본), 철회 상태의 스태프에겐
+// BodyPhotoMeta(id·member_id·pose·direction·date·deleted_at? — storage_path·blurred 없음).
+// 배열 자체는 유지한다(회원 앱이 배열을 읽는다). 어느 쪽인지는 서비스가 정한다(BodyPhotoListing).
 func (h *Handlers) ListBodyPhotos(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
-	list, err := h.svc.ListBodyPhotos(r.Context(), p, queryParam(r, "member"))
+	listing, err := h.svc.ListBodyPhotos(r.Context(), p, queryParam(r, "member"),
+		queryParam(r, "include_deleted") == "true")
 	if err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, list)
+	if listing.Locked {
+		writeJSON(w, http.StatusOK, listing.Meta)
+		return
+	}
+	writeJSON(w, http.StatusOK, listing.Full)
 }
 
 // CreateBodyPhoto — POST /v1/body-photos(동의 검증, P8).
@@ -30,6 +39,7 @@ func (h *Handlers) CreateBodyPhoto(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	setAccessSubject(r.Context(), bp.MemberID) // 접속기록 정보주체(v2.30) — 민감정보 경로
 	writeJSON(w, http.StatusOK, bp)
 }
 
@@ -57,6 +67,7 @@ func (h *Handlers) CreateInbody(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	setAccessSubject(r.Context(), rec.MemberID) // 접속기록 정보주체(v2.30) — 민감정보 경로
 	writeJSON(w, http.StatusOK, rec)
 }
 

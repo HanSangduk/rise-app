@@ -111,7 +111,7 @@ API가 없어서). 즉 운영에서 일치해야 하는 값은 **백엔드 Cloud
 ## Firebase 실연동 (P06 — 완료)
 
 전화번호 인증이 **Firebase Phone Auth 실연동**입니다(프로젝트 `rize-218c1`, 번들·패키지
-`ai.stra.rize`). 스텁은 제거됐습니다.
+`com.han.rise`). 스텁은 제거됐습니다.
 
 - **초기화**: `lib/firebase_options.dart`(수기 유지 — 값 출처는 `android/app/google-services.json`
   · `ios/Runner/GoogleService-Info.plist`)를 `main()`에서 `Firebase.initializeApp(options:)`.

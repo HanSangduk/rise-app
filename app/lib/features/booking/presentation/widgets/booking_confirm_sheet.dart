@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rise_member/core/widgets/rise_sheet.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rise_member/core/api/dto/staff_dto.dart';
 import 'package:rise_member/core/result/result.dart';
@@ -19,13 +20,13 @@ Future<void> showBookingConfirmSheet(
   required String productLabel,
   StaffDto? trainer,
 }) {
-  return showModalBottomSheet<void>(
-    context: context,
-    // 루트 Navigator에 띄운다 — 기본값(false)이면 셸 내부 Navigator에 올라가
-    // **하단 탭바가 시트와 스크림 위에 남는다**(실기기 점검에서 발견, P09).
-    // 모달이 뜬 채로 다른 탭을 누를 수 있어 확정 전 화면을 벗어나게 된다.
-    useRootNavigator: true,
-    isScrollControlled: true,
+  // 제출 중 잠금 신호(P56 M1) — 시트 State가 값을 세우고 래퍼가 닫힘을 막는다.
+  // 예약 요청이 날아가는 동안 시트를 쓸어 내리면 성공·실패 어느 쪽도 회원에게 닿지
+  // 않고, 회원은 같은 슬롯을 다시 눌러 409를 본다(rise_sheet.dart 헤더).
+  final submitting = ValueNotifier(false);
+  return showRiseSheet<void>(
+    context,
+    submitting: submitting,
     builder: (_) => _BookingConfirmSheet(
       slotKey: slotKey,
       passId: passId,
@@ -33,6 +34,7 @@ Future<void> showBookingConfirmSheet(
       trainerLabel: trainerLabel,
       productLabel: productLabel,
       trainer: trainer,
+      submitting: submitting,
     ),
   );
 }
@@ -44,8 +46,12 @@ class _BookingConfirmSheet extends ConsumerStatefulWidget {
     required this.timeLabel,
     required this.trainerLabel,
     required this.productLabel,
+    required this.submitting,
     this.trainer,
   });
+
+  /// 제출 중 신호 — [showRiseSheet]의 잠금과 이 시트의 `_submitting`이 **같은 객체**다.
+  final ValueNotifier<bool> submitting;
 
   final String slotKey;
   final String passId;
@@ -61,8 +67,18 @@ class _BookingConfirmSheet extends ConsumerStatefulWidget {
 }
 
 class _BookingConfirmSheetState extends ConsumerState<_BookingConfirmSheet> {
-  bool _submitting = false;
+  /// 저장소는 [widget.submitting] 하나다 — bool 필드를 따로 두고 미러링하면 실패 분기
+  /// 한 곳에서 빠뜨리는 순간 시트가 영원히 잠긴다(rise_sheet.dart `submitting` 절).
+  bool get _submitting => widget.submitting.value;
   String? _error;
+
+  @override
+  void dispose() {
+    // 이 State가 신호의 마지막 사용자다. 래퍼(조상)의 리스너 해제는 dispose 뒤에도
+    // 허용된다(ChangeNotifier.removeListener 규약).
+    widget.submitting.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -123,7 +139,7 @@ class _BookingConfirmSheetState extends ConsumerState<_BookingConfirmSheet> {
 
   Future<void> _submit() async {
     setState(() {
-      _submitting = true;
+      widget.submitting.value = true;
       _error = null;
     });
     final result = await ref
@@ -135,7 +151,7 @@ class _BookingConfirmSheetState extends ConsumerState<_BookingConfirmSheet> {
         Navigator.of(context).pop();
       case Err(:final failure):
         setState(() {
-          _submitting = false;
+          widget.submitting.value = false;
           _error = failure.message;
         });
     }

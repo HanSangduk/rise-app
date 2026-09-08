@@ -77,6 +77,16 @@ void main() {
     expect(find.textContaining('사진이 2장 이상 필요해요'), findsNothing);
   });
 
+  testWidgets('빈 상태 안내는 버튼을 색이 아니라 라벨로 가리킨다 (P56 M4)', (tester) async {
+    // 촬영 FAB는 P54부터 브랜드 네이비(`AppColors.brand`)다. "빨간 버튼"은 첫 사용 순간의
+    // 유일한 길안내가 **없는 색**을 가리키는 거짓 안내였다. 버튼 아래 라벨 "촬영"
+    // (app_shell `_CameraNavItem`)으로 가리키면 색이 또 바뀌어도 참이다.
+    await pump(tester, const []);
+
+    expect(find.textContaining('빨간'), findsNothing, reason: 'FAB는 더 이상 빨갛지 않다');
+    expect(find.textContaining('아래 가운데 촬영 버튼'), findsOneWidget);
+  });
+
   testWidgets('조회 실패는 "1장" 안내로 위장되지 않는다', (tester) async {
     await pump(tester, [photo(14)], failed: true);
 

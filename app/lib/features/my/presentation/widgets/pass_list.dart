@@ -33,7 +33,8 @@ class _PassListState extends ConsumerState<PassList> {
 
   @override
   Widget build(BuildContext context) {
-    // 홀딩 상한은 센터 정책 실값(GET /v1/center) — 미로드/실패 시 기본값(2회/30일).
+    // 홀딩 상한은 센터 정책 실값(GET /v1/center) — 미로드/실패 시 폴백(2회/30일)이
+    // 오지만 그 숫자는 **화면에 내지 않는다**(`isFallback` 분기, P56 H1).
     final policy = ref.watch(centerPolicyProvider).value ?? CenterPolicy.fallback;
     // 이용 중(active) 패스가 없으면 일시정지 신청은 데드엔드(서버 거부) —
     // 진입점 자체를 비활성으로 두고 이유를 안내한다.
@@ -145,9 +146,13 @@ class _PassListState extends ConsumerState<PassList> {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        hasActivePass
-                            ? '일시정지 신청 (여행·부상 시 · ${policy.holdLimitLabel})'
-                            : '일시정지 신청 — 이용 중인 회원권이 없어요',
+                        // 폴백이면 상한을 말하지 않는다 — "최대 2회/30일"은 이 센터의
+                        // 기준이 아니라 앱 기본값이다. 실값은 시트 안 잔여 요약이 다시 말한다.
+                        !hasActivePass
+                            ? '일시정지 신청 — 이용 중인 회원권이 없어요'
+                            : policy.isFallback
+                                ? '일시정지 신청 (여행·부상 시)'
+                                : '일시정지 신청 (여행·부상 시 · ${policy.holdLimitLabel})',
                       ),
                     ),
                   ],
@@ -201,7 +206,12 @@ class _PassListState extends ConsumerState<PassList> {
       // 사실만 말하고 날짜는 정지 예정일로 못 박는다.
       '· 유효기간은 정지 예정일(${hold.to.month}/${hold.to.day})까지를 기준으로 늘어나 있어요. '
           '지금 끝내면 실제로 쉰 날짜만 남기고 다시 당겨져요.',
-      if (policy.maxHoldsPerPass > 0)
+      // 상한을 모르면(정책 조회 실패) "최대 N회"를 지어내지 않는다 — 쓴 횟수는 이 회원권의
+      // 사실이라 그대로 말하고, 상한은 모른다고 밝힌다(P56 H1).
+      if (policy.isFallback)
+        '· 일찍 끝내도 이번 일시정지 1회는 쓴 것으로 남아요 — 이 회원권은 지금까지 $used회를 '
+            '썼어요. (최대 횟수는 센터 정책을 확인하지 못했어요)'
+      else if (policy.maxHoldsPerPass > 0)
         '· 일찍 끝내도 이번 일시정지 1회는 쓴 것으로 남아요 — 이 회원권은 최대 '
             '${policy.maxHoldsPerPass}회 중 $used회를 썼어요.'
       else

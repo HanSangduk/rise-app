@@ -6,24 +6,6 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
-	<!-- 홈 화면 표시 이름(P19): 길면 잘리므로 "라이즈 컨디셔닝"이 아니라 "라이즈".
-	     CFBundleName은 시스템 내부 식별용이라 ASCII(rise_member)를 유지한다. -->
-	<!-- Firebase Phone Auth reCAPTCHA 폴백 URL 스킴(P46). 이게 없으면 시뮬레이터
-	     (APNs 불가 환경)에서 "인증번호 받기" 순간 PhoneAuthProvider가 fatal로 죽는다
-	     — 실기기는 APNs 사일런트 검증이라 P09 실측에서 안 드러났던 구멍.
-	     이 프로젝트의 GoogleService-Info엔 REVERSED_CLIENT_ID가 없어(전화 인증 전용)
-	     인코딩된 앱 ID 스킴(app-{GOOGLE_APP_ID의 콜론→하이픈})을 쓴다. -->
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>app-1-773077624928-ios-b700434a369d2acfb0fb05</string>
-			</array>
-		</dict>
-	</array>
 	<key>CFBundleDisplayName</key>
 	<string>라이즈</string>
 	<key>CFBundleExecutable</key>
@@ -40,22 +22,29 @@
 	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>app-1-773077624928-ios-3b39ab1c6c889eb0b0fb05</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<!-- 사용 목적 문자열은 한국어로 적는다(P11) — 영어 기본 문구는 App Store 심사에서
-	     "목적이 불명확함(Guideline 5.1.1)"으로 반려된다. 두 기능이 같은 카메라
-	     권한을 쓰므로 한 문장에 둘 다 적는다. -->
 	<key>NSCameraUsageDescription</key>
-	<string>데스크의 체크인 QR을 읽고, 체형 분석 사진을 촬영하기 위해 카메라를 사용합니다. 촬영한 사진은 회원 본인과 담당 코치만 볼 수 있습니다.</string>
-	<!-- 촬영한 사진은 앱에서 바로 업로드하고 기기 앨범에 저장하지 않지만,
-	     camera 플러그인이 사진 라이브러리 API를 링크해 심사에서 문구를 요구한다. -->
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>체형 분석 사진을 저장하거나 불러올 때만 사진 보관함을 사용합니다.</string>
-	<!-- 수평계(체형 촬영 시 폰 기울기 보정)에 가속도계를 사용한다. -->
+	<string>데스크의 체크인 QR을 읽고, 체형 분석 사진을 촬영하기 위해 카메라를 사용합니다. 촬영한 사진은 회원 본인과 담당 코치, 센터 대표(동의 시)만 볼 수 있습니다.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>체형 사진을 매번 같은 각도로 찍을 수 있도록, 기기 기울기를 재는 데 동작 센서를 사용합니다.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>인바디 결과지 사진을 불러올 때만 사진 보관함을 사용합니다. 촬영한 체형 분석 사진은 보관함에 저장하지 않습니다.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -86,15 +75,13 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 	</array>
 </dict>
 </plist>

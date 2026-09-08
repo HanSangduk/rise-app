@@ -1,0 +1,20 @@
+@@ -22,12 +22,15 @@
+ # — 2026-09-07 App Store 리젝 1.0(7) 5.1.1(iv)(work_log/P67). 매크로는 **모든 구성**에 있어야 하므로
+ # Debug/Profile(실기기 flutter run)에서도 본다 — 이 결함은 시뮬레이터에 카메라가 없어 개발 중 눈에 띄지 않았다.
+-# 판정 대상은 Pods 프로젝트 파일(post_install이 build_settings를 쓰는 곳). SPM 전환 시(flutter config
+-# --enable-swift-package-manager) 플러그인은 Pods를 떠나고 Package.swift가 Info.plist에서 매크로를 유도하므로
+-# 생성 패키지에 플러그인이 있으면 이 검사를 건너뛴다.
++# 판정 대상은 Pods 프로젝트 파일(post_install이 build_settings를 쓰는 곳).
++# SPM은 pubspec.yaml `flutter.config.enable-swift-package-manager: false`로 저장소 차원에서 꺼 두었다.
++# 플러그인이 생성 SPM 패키지에 들어 있으면 그 설정이 풀린 것이다 — SPM 경로의 Package.swift는 매크로를
++# Info.plist에서 유도하지만 Xcode.app에서 시작한 Archive는 cwd가 /라 앱을 못 찾아 전부 0으로 떨어진다
++# (플러그인 매니페스트 주석). 조용히 넘기지 않고 실패시킨다.
+ spm_pkg="${SRCROOT:-.}/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage/Package.swift"
+ if [ -f "$spm_pkg" ] && grep -q 'permission_handler_apple' "$spm_pkg"; then
+-  echo "[check_release_target] permission_handler_apple은 SPM 패키지 — PERMISSION_CAMERA는 Package.swift가 Info.plist에서 유도(검사 생략)"
++  echo "error: [check_release_target] permission_handler_apple이 SPM 패키지로 빌드된다 — pubspec.yaml flutter.config.enable-swift-package-manager: false 가 풀렸다(PERMISSION_CAMERA 매크로 경로가 Podfile을 벗어남, P67)" >&2
++  exit 1
+ else
+ 
+ 
+ 

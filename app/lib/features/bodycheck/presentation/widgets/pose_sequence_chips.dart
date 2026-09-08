@@ -67,34 +67,38 @@ class _PoseChip extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppRadius.pill),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: on ? AppColors.redLight : AppColors.chipBg,
-          borderRadius: BorderRadius.circular(AppRadius.pill),
-          border: Border.all(color: on ? AppColors.redBorder : Colors.transparent),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '${index + 1} ${pose.label}',
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: on ? FontWeight.w800 : FontWeight.w500,
-                color: on ? AppColors.red : AppColors.chipFg,
+      // RiseChip을 90% 베껴 만들면서 상하 히트 패딩만 빠져 있었다(P54).
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 9),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: on ? AppColors.brandLight : AppColors.chipBg,
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            border: Border.all(color: on ? AppColors.brandBorder : Colors.transparent),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '${index + 1} ${pose.label}',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: on ? FontWeight.w800 : FontWeight.w500,
+                  color: on ? AppColors.brand : AppColors.chipFg,
+                ),
               ),
-            ),
-            const SizedBox(width: 4),
-            if (done)
-              const RiseIcon(RiseIcons.check, size: 11, color: AppColors.red)
-            else if (current)
-              Container(
-                width: 6,
-                height: 6,
-                decoration: const BoxDecoration(color: AppColors.red, shape: BoxShape.circle),
-              ),
-          ],
+              const SizedBox(width: 4),
+              if (done)
+                const RiseIcon(RiseIcons.check, size: 11, color: AppColors.brand)
+              else if (current)
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: const BoxDecoration(color: AppColors.brand, shape: BoxShape.circle),
+                ),
+            ],
+          ),
         ),
       ),
     );

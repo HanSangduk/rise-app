@@ -52,6 +52,10 @@ const (
 
 // staffPhotoPrefix — 규칙이 예약해 둔 경로(storage.rules `match /staff/photos/{fileName}`).
 // **삭제 대상 판정에도 쓴다** — 이 접두가 아닌 경로는 이 기능이 만든 파일이 아니므로 지우지 않는다.
+// 삭제 판정이 붙는 자리는 셋이다: 업로드 교체(⑤) · 프로필 PUT의 지우기/교체(UpdateStaffProfile) ·
+// 퇴사 처리(DeactivateStaff ③, v2.31). 셋 다 접두만이 아니라 **`{uid}-` 명의까지** 본다
+// (ownedStaffPhotoPath) — 접두만 보면 A의 photo_url이 재직자 B의 파일을 가리키는 순간 A의 퇴사가
+// B의 얼굴을 지운다(P62 검증 이슈 1).
 const staffPhotoPrefix = "staff/photos/"
 
 // staffPhotoFormat — 허용 content_type 하나의 명세. 선언된 타입과 실제 바이트가 **둘 다**
@@ -193,41 +197,91 @@ func decodeStaffPhoto(req StaffPhotoRequest) ([]byte, staffPhotoFormat, error) {
 	return raw, format, nil
 }
 
-// staffPhotoObjectPath — 저장된 photo_url이 **이 기능이 올린 파일**을 가리키면 그 오브젝트
-// 경로를, 아니면 빈 문자열을 돌려준다(교체 시 옛 파일 삭제 판정).
+// parseStaffPhotoURL — Firebase 다운로드 URL을 (버킷, 오브젝트 경로)로 되뽑는다. `staff/photos/`
+// 밖이거나 모양이 다르면 둘 다 빈 문자열이다.
 //
 // 경로를 프로필에 따로 저장하지 않고 URL에서 되뽑는 이유: `PUT /v1/staff/{uid}/profile`은
 // **통 교체**라 어드민이 보내지 않은 필드는 지워진다(v1.6 계약). 서버만 관리하는
 // `photo_path` 칸을 두면 프로필을 한 번 저장하는 순간 조용히 비고, 그때부터 교체가
 // 옛 파일을 영원히 남긴다. URL은 어드민이 항상 되돌려 보내는 값이라 그 함정이 없다.
 //
-// 접두 검사가 안전장치다: 대표가 손으로 넣은 임의 URL(예: 회원 체형사진 경로를 가리키는
-// 토큰 URL)이 들어와도 `staff/photos/` 밖은 절대 지우지 않는다.
-func staffPhotoObjectPath(photoURL string) string {
+// 접두 검사가 1차 안전장치다: 대표가 손으로 넣은 임의 URL(예: 회원 체형사진 경로를 가리키는
+// 토큰 URL)이 들어와도 `staff/photos/` 밖은 절대 지우지 않는다. 명의(uid)·버킷 검사는
+// ownedStaffPhotoPath가 그 위에 얹는다.
+func parseStaffPhotoURL(photoURL string) (bucket, object string) {
 	if photoURL == "" {
-		return ""
+		return "", ""
 	}
 	u, err := url.Parse(photoURL)
 	if err != nil || u.Host != "firebasestorage.googleapis.com" {
-		return ""
+		return "", ""
 	}
 	// /v0/b/{bucket}/o/{escaped object path}
 	parts := strings.SplitN(strings.TrimPrefix(u.Path, "/"), "/", 5)
 	if len(parts) != 5 || parts[0] != "v0" || parts[1] != "b" || parts[3] != "o" {
-		return ""
+		return "", ""
 	}
 	// u.Path는 이미 디코드된 값이지만 EscapedPath 기준으로 한 번 더 푼다 — %2F로 인코딩된
 	// 경로 구분자가 원본이라 그것을 살려야 오브젝트 이름이 맞는다.
 	escaped := strings.SplitN(strings.TrimPrefix(u.EscapedPath(), "/"), "/", 5)
 	if len(escaped) != 5 {
-		return ""
+		return "", ""
 	}
-	object, err := url.PathUnescape(escaped[4])
+	object, err = url.PathUnescape(escaped[4])
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	if !strings.HasPrefix(object, staffPhotoPrefix) || strings.Contains(object, "..") {
+		return "", ""
+	}
+	return parts[2], object
+}
+
+// staffPhotoObjectPath — photo_url이 `staff/photos/` 안의 오브젝트를 가리키면 그 경로, 아니면 "".
+// **삭제 판정에 직접 쓰지 않는다** — 명의를 보지 않는다. 삭제 판정은 ownedStaffPhotoPath.
+func staffPhotoObjectPath(photoURL string) string {
+	_, object := parseStaffPhotoURL(photoURL)
+	return object
+}
+
+// staffOwnedPhotoPath — photo_url이 **이 uid 명의로 이 기능이 올린 파일**(`staff/photos/{uid}-…`,
+// UploadStaffPhoto의 명명 규칙)을 가리킬 때만 오브젝트 경로를 돌려준다. 다른 uid 명의·외부
+// URL·모양이 다른 URL은 전부 "" — 호출측은 그것을 외부 URL과 똑같이 다룬다(파일·포인터 무변경).
+//
+// 왜 접두만으로 부족한가(P62 검증 이슈 1): A의 프로필에 재직자 B의 파일 URL이 들어 있으면
+// (대표가 복사해 붙여 넣는 것만으로 가능하다 — PUT은 http(s)면 무엇이든 받는다) 접두 판정은
+// 그것을 "우리 파일"로 보고 A의 퇴사·[사진 지우기]가 **B의 얼굴을 지운다**. B의 photo_url은
+// 그대로 남아 죽은 링크가 되고, B는 아무 동사도 부르지 않았다. 파일 이름에 실린 uid가 곧
+// 소유권이므로 그것을 판정에 넣는다. `{uid}-`의 하이픈까지 비교해야 "t1"이 "t10-…"에 걸리지
+// 않는다.
+func staffOwnedPhotoPath(uid, photoURL string) string {
+	if uid == "" {
 		return ""
+	}
+	object := staffPhotoObjectPath(photoURL)
+	if object == "" || !strings.HasPrefix(object, staffPhotoPrefix+uid+"-") {
+		return ""
+	}
+	return object
+}
+
+// ownedStaffPhotoPath — staffOwnedPhotoPath에 **버킷 명의**를 얹은 서비스판. 삭제 판정 세 자리
+// (퇴사 ③·프로필 PUT·교체 ⑤)는 전부 이것을 쓴다.
+//
+// 버킷을 보는 이유: DeleteObjects는 서버가 묶인 버킷(STORAGE_BUCKET) 안의 경로만 지우는데,
+// 다른 버킷의 같은 이름 URL을 우리 것으로 판정하면 **우리 버킷의 동명 파일**을 지우게 된다
+// (다른 프로젝트·이전 버킷의 URL이 프로필에 남아 있는 경우). 버킷이 설정되지 않은
+// 환경(로컬·미구성)은 비교 기준이 없으므로 uid 판정만으로 간다 — 그 환경의 purger는 어차피
+// 미구성이라 실제 삭제가 없다(Configured=false → purgeStaffPhoto가 건너뛴다).
+func (s *Service) ownedStaffPhotoPath(uid, photoURL string) string {
+	object := staffOwnedPhotoPath(uid, photoURL)
+	if object == "" {
+		return ""
+	}
+	if want := s.cfg.StorageBucket; want != "" {
+		if bucket, _ := parseStaffPhotoURL(photoURL); bucket != want {
+			return ""
+		}
 	}
 	return object
 }
@@ -238,15 +292,20 @@ func staffPhotoObjectPath(photoURL string) string {
 // 센터 공용 버킷에 파일을 만든다. 되돌리는 수단은 대표에게만 있고, 비용·용량도 대표가 진다 —
 // 스태프 관리 계열(생성·정정·이관·퇴사)이 전부 owner 전용인 것과 같은 경계다.
 //
-// 순서가 이 함수의 설계다:
+// 순서가 이 함수의 설계다(v2.31 개정 — ⑤가 ④ 앞으로, 실패 전파):
 //
-//	① 검증 → ② 스태프 조회 → ③ 업로드 → ④ 프로필 저장 → ⑤ 옛 파일 삭제(best-effort)
+//	① 검증 → ② 스태프 조회 → ③ 새 파일 업로드 → ⑤ 옛 파일 삭제(이 uid 명의만) → ④ 프로필 저장
 //
-//	③이 ④보다 앞이라 업로드가 실패하면 프로필은 손대지 않은 채 그대로다(재시도 가능).
-//	⑤가 ④보다 뒤인 이유는 더 중요하다: 저장이 실패했는데 옛 파일을 먼저 지우면 **프로필이
-//	가리키는 URL이 죽은 링크가 된다**. 새 URL이 확실히 박힌 뒤에만 옛것을 지운다.
-//	⑤의 실패는 업로드를 실패시키지 않는다 — 대표 입장에서 사진은 이미 바뀌었고,
-//	남은 파일 한 개는 사람이 개입할 문제가 아니다(로그로 남긴다).
+//	③이 나머지보다 앞이라 업로드가 실패하면 프로필은 손대지 않은 채 그대로다(재시도 가능).
+//	⑤가 ④ **앞**인 이유(v2.25는 뒤였고 best-effort였다): 저장 뒤에 지우면 삭제 실패 시 새 URL은
+//	이미 박혔고 옛 파일은 아무도 가리키지 않는 고아가 된다 — 발견 경로 0(P22). 앞에 두면 ⑤가
+//	실패했을 때 방금 올린 새 파일을 best-effort로 되지우고 에러를 올린다: 프로필은 무변경이고
+//	옛 파일은 옛 URL이 그대로 가리키므로 잃는 것이 없다. 대표는 "사진 교체 실패"를 보고 다시
+//	올린다 — privacy.html "교체하거나 지우면 이전 파일은 삭제되며"가 참이 되는 유일한 정책이다
+//	(best-effort면 실패한 삭제를 성공한 교체 뒤에 숨긴다). 퇴사 ③·프로필 PUT과 같은 정책.
+//	④가 실패하면 "새 파일 고아 + 옛 URL 죽은 링크" 창이 생긴다(옛 파일은 이미 없다). 방금 올린
+//	파일은 그 자리에서 되지우고, 재시도(업로드 다시 → prev 삭제 = ErrObjectNotExist 성공 → 저장)
+//	로 수렴한다.
 func (s *Service) UploadStaffPhoto(ctx context.Context, p Principal, uid string, req StaffPhotoRequest) (StaffPhotoResponse, error) {
 	var res StaffPhotoResponse
 	if !p.IsOwner() {
@@ -267,6 +326,12 @@ func (s *Service) UploadStaffPhoto(ctx context.Context, p Principal, uid string,
 	if err != nil {
 		return res, err // 없는 스태프 앞으로 파일을 만들지 않는다(고아 파일의 가장 흔한 출처)
 	}
+	// 퇴사자(inactive) 앞으로는 파일을 만들지 않는다(v2.31). 퇴사 처리가 사진을 파기했는데
+	// 대표의 실수 한 번으로 새 파일이 생기면 파기가 되감긴다 — 파기의 역행 경로 차단.
+	// 업로드(③) 전이라 버킷에 아무것도 생기지 않는다. 재입사(reactivate/재초대) 뒤엔 자연히 열린다.
+	if !st.IsActive() {
+		return res, errors.Join(errBadRequest, errors.New("퇴사 처리된 스태프의 사진은 올릴 수 없어요 — 재입사 처리 후 올려주세요"))
+	}
 	suffix, err := randomHex(4)
 	if err != nil {
 		return res, err
@@ -274,36 +339,73 @@ func (s *Service) UploadStaffPhoto(ctx context.Context, p Principal, uid string,
 	// 난수를 붙이는 이유는 두 가지다: ① 같은 uid의 교체본이 CDN·브라우저 캐시에서 옛 사진으로
 	// 보이지 않는다(경로가 곧 버전) ② uid만으로 경로를 추측해 남의 사진을 훑는 것을 막는다
 	// (토큰이 1차 방어선이고 이건 그 위의 얇은 한 겹).
+	// 명명 규칙 `staff/photos/{uid}-{난수}.{ext}` — 파일 이름의 uid가 곧 소유권이다
+	// (staffOwnedPhotoPath가 이 규칙으로 "이 uid 명의인가"를 되읽는다. 규칙을 바꾸면 그쪽도 같이).
 	path := fmt.Sprintf("%s%s-%s.%s", staffPhotoPrefix, uid, suffix, format.ext)
 	photoURL, err := s.uploader.Upload(ctx, path, format.contentType, raw)
 	if err != nil {
 		return res, err
 	}
 
-	prevPath := staffPhotoObjectPath(st.Profile.PhotoURL)
+	// ⑤ 옛 파일 삭제 — 저장 **앞**. 비교 대상은 생성한 경로가 아니라 **새 URL이 실제로 가리키는
+	// 경로**다. 둘은 정상 경로에서 같지만, 같은 오브젝트를 두 번 가리키게 되는 어떤 경우에도
+	// (난수 충돌·업로더 구현 변경) 방금 올린 파일을 스스로 지우는 일이 없어야 한다.
+	prevPath, newPath := s.ownedStaffPhotoPath(uid, st.Profile.PhotoURL), staffPhotoObjectPath(photoURL)
+	if prevPath != "" && prevPath != newPath {
+		if _, err := s.purgeStaffPhoto(ctx, uid, prevPath, "교체된 이전 프로필 사진"); err != nil {
+			// 옛 파일이 남았으니 새 파일이 고아가 될 차례다 — 되지운다(best-effort: 이 삭제까지 실패하면
+			// 재시도 업로드가 다른 난수 경로를 만들어 이 파일은 남는다. 그 잔존은 로그가 유일한 흔적이다).
+			// 원래 에러를 덮지 않는다 — 대표에게는 "교체 실패"가 사실이고 프로필은 무변경이다.
+			_ = s.deleteStaffPhotoObject(ctx, uid, path, "이전 사진 삭제 실패 후 방금 올린 파일")
+			return res, err
+		}
+	}
 	st.Profile.Normalize() // 배열 null 금지 규약(v1.3) — 저장 전 하이진은 프로필 PUT과 동일
 	st.Profile.PhotoURL = photoURL
 	if err := s.store.SaveStaff(ctx, p.CenterID, st); err != nil {
 		// 프로필에 박히지 못한 파일은 아무도 가리키지 않는다 — 그 자리에서 지운다.
-		// 실패해도 원래 에러를 덮지 않는다(사용자에게는 저장 실패가 사실이다).
-		s.deleteStaffPhotoObject(ctx, path, "프로필 저장 실패 후 방금 올린 파일")
+		// 실패해도 원래 에러를 덮지 않는다(사용자에게는 저장 실패가 사실이다) — 반환 에러는 로그만.
+		// 옛 파일은 ⑤에서 이미 지워졌으므로 옛 URL은 죽은 링크로 남는다(아바타 이니셜 폴백) —
+		// 재시도가 수렴시킨다(함수 주석의 실패 창).
+		_ = s.deleteStaffPhotoObject(ctx, uid, path, "프로필 저장 실패 후 방금 올린 파일")
 		return res, err
-	}
-	// 비교 대상은 생성한 경로가 아니라 **새 URL이 실제로 가리키는 경로**다. 둘은 정상
-	// 경로에서 같지만, 같은 오브젝트를 두 번 가리키게 되는 어떤 경우에도(난수 충돌·
-	// 업로더 구현 변경) 방금 올린 파일을 스스로 지우는 일이 없어야 한다.
-	if newPath := staffPhotoObjectPath(photoURL); prevPath != "" && prevPath != newPath {
-		s.deleteStaffPhotoObject(ctx, prevPath, "교체된 이전 프로필 사진")
 	}
 	res.PhotoURL = photoURL
 	return res, nil
 }
 
-// deleteStaffPhotoObject — best-effort 삭제. MediaPurger를 재사용한다(파기 경계가 이미
-// 있는데 두 번째 삭제 경로를 만들면 STORAGE_BUCKET 미설정 같은 조건에서 동작이 갈린다).
-// 실패는 로그로만 남긴다 — 이 삭제가 업로드를 실패시키면 대표는 **성공한 일을 실패로** 보게 된다.
-func (s *Service) deleteStaffPhotoObject(ctx context.Context, path, why string) {
-	if _, err := s.media.DeleteObjects(ctx, []string{path}); err != nil {
-		log.Printf("staff photo delete 실패(%s): path=%s err=%v — 버킷에 파일이 남습니다", why, path, err)
+// purgeStaffPhoto — 스태프 사진 파기 세 자리(퇴사 ③·프로필 PUT·교체 ⑤)의 공통 정책.
+// 돌려주는 bool은 "파일이 실제로 지워졌다(포인터를 비워도 된다)"이다.
+//
+// purger가 미구성(Configured=false)이면 **지우지 않고 false, nil**이다. 미구성 DeleteObjects는
+// no-op 성공이라(unconfiguredPurger — 탈퇴를 막지 않기 위한 정책) 그 성공을 믿고 photo_url을
+// 비우면 파일은 남고 포인터만 사라진다 — 발견 경로 0(P62 검증 이슈 5). 호출측은 false를 받아
+// photo_url을 유지하고 나머지 동사(퇴사 상태 전이·프로필 저장)는 그대로 진행한다: 즉시 차단의
+// 본체는 ①②이지 파일이 아니고, 파일은 버킷이 구성되는 날 남은 포인터로 좇을 수 있다.
+// 로그 한 줄이 그 잔존의 유일한 흔적이다(reconcile 도구가 없다).
+func (s *Service) purgeStaffPhoto(ctx context.Context, uid, path, why string) (bool, error) {
+	if !s.media.Configured() {
+		log.Printf("staff photo purge skipped uid=%s path=%s (%s) — 파기 경계 미구성(STORAGE_BUCKET), photo_url 유지", uid, path, why)
+		return false, nil
 	}
+	if err := s.deleteStaffPhotoObject(ctx, uid, path, why); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// deleteStaffPhotoObject — 스태프 사진 오브젝트 하나를 지운다. MediaPurger를 재사용한다(파기
+// 경계가 이미 있는데 두 번째 삭제 경로를 만들면 STORAGE_BUCKET 미설정 같은 조건에서 동작이 갈린다).
+//
+// 실패는 로그로 남기고 **에러를 돌려준다** — 파기 세 자리(퇴사 ③·프로필 PUT·교체 ⑤)는 전부
+// purgeStaffPhoto를 거쳐 전파한다(v2.31 개정 — 교체도 best-effort가 아니다). 직접 부르는 곳은
+// "방금 올린 새 파일 되지우기"뿐이고 그것만 best-effort다(원래 에러를 덮지 않기 위해).
+// 로그에 uid를 싣는 이유: 파기가 실패한 채 남은 퇴사 행을 나중에 사람이 좇을 때 "PhotoURL이
+// 남은 스태프"와 이 줄을 잇는 유일한 키다(reconcile 도구가 없다).
+func (s *Service) deleteStaffPhotoObject(ctx context.Context, uid, path, why string) error {
+	if _, err := s.media.DeleteObjects(ctx, []string{path}); err != nil {
+		log.Printf("staff photo delete 실패(%s): uid=%s path=%s err=%v — 버킷에 파일이 남습니다", why, uid, path, err)
+		return err
+	}
+	return nil
 }

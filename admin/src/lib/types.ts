@@ -7,7 +7,11 @@
 // [가정 4](GET /v1/center)는 v1.4 기능 패치로 계약 확정 — 백엔드 실응답 형태로 교체했다.
 // 나머지 [가정 1~3]은 백엔드 실장 시 반드시 대조·확정 필요(README.md 갭 목록에도 동일 내용 기록).
 
-export type Role = "owner" | "trainer" | "member";
+// superadmin — 교차 센터 **관리 평면 전용** 롤(멀티센터 Phase A/B, 계약 v2.16). 센터 소속이
+// 없고(center_id: ""), 서버가 `/v1/admin/*`과 `/v1/me` 외의 모든 경로를 403으로 막는다.
+// 그래서 어드민도 **일상 운영 화면을 아예 그리지 않는다** — 눌러보고 403을 받는 UI를 만들지
+// 않는다는 이 저장소의 규약이 여기서는 화면 전체 단위로 적용된다(App.tsx의 셸 분기).
+export type Role = "owner" | "trainer" | "member" | "superadmin";
 
 export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 export const WEEKDAY_LABEL: Record<Weekday, string> = {
@@ -465,6 +469,56 @@ export interface BodyPhoto {
   date: string;
   storage_path: string;
   blurred: boolean;
+  // [v2.14] 스태프 소프트 삭제 시각(RFC3339). 목록 응답에는 실리지 않는다(서버가 삭제분을
+  // 거른다) — DELETE·restore 응답에서만 본다. 백엔드 omitempty라 살아 있는 사진엔 키가 없다.
+  deleted_at?: string | null;
+}
+
+// [v2.28] 동의가 **유효하지 않은** 회원의 사진 목록을 스태프에게 줄 때의 원소 — GET /v1/body-photos가
+// 잠긴 회원(철회·미동의)에 대해 403 대신 이 모양의 배열을 준다(service.go BodyPhotoMeta, 정확히 6키).
+// **storage_path·blurred가 없다**: 사진 바이트에 닿는 값은 싣지 않고, 삭제 요청을 처리하는 데 필요한
+// 최소(어느 날 어느 포즈 사진이 있는가)만 준다. 사진의 **존재 사실**과 **내용**을 가른 것이다 —
+// 스태프는 그 사진을 찍은 당사자라 존재 사실은 이미 알고 있고, 철회가 막는 것은 내용 열람이다.
+export interface BodyPhotoMeta {
+  id: string;
+  member_id: string;
+  pose: BodyPose;
+  direction: BodyDirection;
+  date: string;
+  deleted_at?: string | null;
+}
+
+// 같은 엔드포인트가 두 모양 중 하나를 준다(한 응답 안에 섞이지 않는다). 판별은 백엔드가 적은 대로
+// **storage_path 유무** — Full은 항상 그 키를 싣고(빈 값이어도 키는 있다), Meta는 키 자체가 없다.
+export type BodyPhotoListItem = BodyPhoto | BodyPhotoMeta;
+export function isFullBodyPhoto(p: BodyPhotoListItem): p is BodyPhoto {
+  return "storage_path" in p && typeof p.storage_path === "string";
+}
+
+// [v2.14] 스태프 삭제의 유예 기간 — 서버 domain.BodyPhotoPurgeAfter(30일)의 거울. 화면 문구
+// ("30일 안에 복원")와 휴지통의 남은 일수가 이 값 하나에서 나온다.
+export const BODY_PHOTO_PURGE_AFTER_DAYS = 30;
+
+// 파기까지 남은 일수(내림, 0 이상). deleted_at이 없거나 못 읽으면 null — "미상"을 0으로 말하지 않는다.
+// Full·Meta 어느 쪽이든 deleted_at 하나만 본다.
+export function bodyPhotoPurgeDaysLeft(
+  p: { deleted_at?: string | null },
+  now: Date = new Date(),
+): number | null {
+  if (!p.deleted_at) return null;
+  const t = new Date(p.deleted_at).getTime();
+  if (Number.isNaN(t)) return null;
+  const left = BODY_PHOTO_PURGE_AFTER_DAYS - (now.getTime() - t) / 86_400_000;
+  return Math.max(0, Math.floor(left));
+}
+
+// [v2.15] POST /v1/body-photos/reconcile 응답 — service_body_photo_reconcile.go BodyPhotoReconcileResult.
+export interface BodyPhotoReconcileResult {
+  storage_objects: number; // 이 회원 폴더의 파일 수
+  known_paths: number; // 메타가 가리키는 경로 수(소프트 삭제 포함)
+  orphans: string[]; // 메타가 없는 파일 경로
+  deleted: number; // 실제로 지운 수(apply 아니면 0)
+  applied: boolean;
 }
 
 export interface Inbody {
@@ -675,15 +729,44 @@ export interface MemberWithPasses extends Member {
   passes: Pass[];
 }
 
-// [가정 2] GET /v1/join/requests — 가입 요청 승인 리스트(설정 화면·P48 ③폴백)를
+// [가정 2] GET /v1/join/requests — 가입 요청 큐(회원 관리 상단·P48 ③폴백)를
 // 보여주려면 대기 중 요청 목록 조회가 필요한데 계약엔 POST(요청·승인)만 있고
 // 목록 조회가 없다. POST /v1/join/request의 대칭 조회로 추정.
+// 가입 요청의 처리 상태 — 서버 store.JoinRequest.Status(pending|approved|rejected)와 1:1.
+export type JoinRequestStatus = "pending" | "approved" | "rejected";
+
 export interface JoinRequest {
   id: string;
+  // 거절되면 서버가 **비운다**(P55) — 승인되지 않은 사람의 이름·번호를 센터가 계속 들고 있을
+  // 근거가 없다. 그래서 rejected 행은 이름이 빈 문자열로 온다(행 자체는 재요청 남용을 세는
+  // 근거라 남는다). 큐는 pending만 그리므로 화면에서 빈 이름을 만날 일은 없다.
   name: string;
   phone: string;
   center_id: string;
-  requested_at: string;
+  // [P55] 서버는 **pending만** 반환하는 것이 계약이다. 그래도 타입이 이 필드를 갖는 이유:
+  //  · 계약을 비추는 것이 이 파일의 일이고(머리주석), 승인·거절이 무엇을 남기는지가 여기 보인다.
+  //  · 필터가 서버에 얹히기 **전**의 배포에서는 승인·거절된 요청까지 그대로 내려온다
+  //    (store.ListJoinRequests에 상태 조건이 없다) — 화면이 큐를 사실대로 그리려면 이 값이 필요하다.
+  status: JoinRequestStatus;
+  // **`requested_at`이 아니라 `created_at`이다**(P55). 서버 `store.JoinRequest`의 태그가
+  // `json:"created_at"`인데 여기가 다른 이름을 적어 두는 바람에 값이 항상 `undefined`였다.
+  // `api.ts`의 `req<T>()`는 키 매핑 없이 `res.json()`을 그대로 돌려주므로 타입이 곧 계약이다.
+  //
+  // 이 오타는 **요청이 2건이 되어야** 드러났다 — `Array.sort`는 원소가 2개 이상일 때만
+  // 비교자를 호출한다. 그리고 `ErrorBoundary`가 `AdminShell` 전체를 감싸므로(App.tsx)
+  // 설정 탭 하나가 아니라 **어드민 앱 통째로** 폴백 화면이 됐다. 큐를 줄이려면 승인해야
+  // 하는데 승인 버튼이 있는 화면을 열 수 없는 데드락이었다(거절·삭제 API도 없다).
+  created_at: string;
+}
+
+/// 큐(회원 관리 상단 가입 요청 카드·대시보드 대기 건수·네비 배지)에 남아야 하는 요청인가.
+///
+/// **"pending인가"가 아니라 "처리된 적 없는가"로 판정한다.** 서버가 pending만 주게 되면 이
+/// 함수는 아무것도 거르지 않는 no-op이고, 필터가 아직 없는 배포에서는 승인·거절된 행을 걷어낸다.
+/// 반대로 `status === "pending"`으로 쓰면 필드가 비어 오는 응답(구버전 서버·부분 배포)에서 큐가
+/// 통째로 빈 목록이 된다 — 기다리는 회원이 있는데 "대기 없음"을 그리는 쪽이 훨씬 나쁜 실패다.
+export function isJoinPending(r: JoinRequest): boolean {
+  return r.status !== "approved" && r.status !== "rejected";
 }
 
 // 재등록/상담 요청(계약 v2.20, P42) — 회원발 요청 큐. member_name은 서버가 응답에서
@@ -926,8 +1009,71 @@ export interface CheckinQrToken {
   issued_at: string | null;
 }
 
+// ── [P55] 센터 신원(상호 · 전화 · 주소) ────────────────────────────────
+// 백엔드 domain.Center의 name·phone·address와 1:1. 저장은 PUT /v1/center의 **center 덩어리**
+// (owner 전용) — policy(머지)·business(통 교체)와 나란한 세 번째 덩어리다.
+//
+// **사업자 정보의 biz_name과 다른 값이다.** 이쪽은 회원·직원이 부르는 상호(간판)이고, 저쪽은
+// 계약서·법정 고지에 인쇄되는 법인/사업자명이다. 실제로 "라이즈 컨디셔닝 센터(강남)"와
+// "주식회사 라이즈"처럼 갈리는 값이라 한 칸으로 합치면 계약서에 간판 이름이 인쇄된다.
+//
+// 입력 경로가 없어서 생긴 결함이 두 개다: (1) 어드민 3곳이 상호를 하드코딩해 서버가 뭘 알든
+// 화면은 같은 문자열만 인쇄했고, (2) 이름 없는 센터는 회원 앱의 센터 찾기 목록에서 걸러진다
+// — 실제로 운영 중인 센터가 회원에게 보이지 않는다(P55의 착수 사유).
+export interface CenterIdentity {
+  name: string; // 상호 — 서버 필수(빈 값 400) · 60자
+  phone: string; // 센터 대표 전화 — 선택 · 20자
+  address: string; // 센터 주소 — 선택 · 120자
+}
+
+/// 서버 domain.Center.Validate 미러 — 길이는 반드시 `[...s].length`(코드 포인트)로 센다
+/// (서버가 `len([]rune(s))`로 센다. 사업자 정보 상한들과 같은 규약).
+export const CENTER_NAME_MAX = 60;
+export const CENTER_PHONE_MAX = 20;
+export const CENTER_ADDRESS_MAX = 120;
+
+/// 미등록 상태의 센터 신원 — EMPTY_BUSINESS·EMPTY_FACILITY와 같은 자리(배포 순서가 어긋난 창).
+export const EMPTY_CENTER_IDENTITY: CenterIdentity = { name: "", phone: "", address: "" };
+
+/// 서버에 상호가 아직 없을 때 화면이 인쇄하는 이름 — **종전 하드코딩 문자열 그대로**다.
+/// 폴백을 지우면 등록 전 센터의 화면 상단이 빈칸이 되고, 상호를 넣을 수 있는 설정 화면으로
+/// 가는 길목(셸 헤더)부터 이름을 잃는다. 등록되는 순간 이 값은 더 이상 쓰이지 않는다.
+export const CENTER_NAME_FALLBACK = "라이즈 컨디셔닝 센터";
+
+/// 응답에서 센터 신원을 꺼내되 **없으면 미등록과 같은 모양으로 접는다**(businessOf와 같은 자리).
+///
+/// 두 자리를 보는 이유: 현재 서버는 상호만 top-level `name`으로 내려주고(api.CenterResponse.Name),
+/// 전화·주소를 포함한 `center` 덩어리는 이번 P55 백엔드와 **병렬**로 붙는다. 덩어리가 오면 그걸
+/// 쓰고, 아직이면 top-level 상호만이라도 살린다 — 그래야 서버가 먼저 뜨든 어드민이 먼저 뜨든
+/// 화면이 크래시하지 않고 "아직 등록 전"으로 보인다.
+export function centerIdentityOf(c?: Center | null): CenterIdentity {
+  if (!c) return EMPTY_CENTER_IDENTITY;
+  if (c.center) {
+    return {
+      name: c.center.name ?? "",
+      phone: c.center.phone ?? "",
+      address: c.center.address ?? "",
+    };
+  }
+  return { ...EMPTY_CENTER_IDENTITY, name: c.name ?? "" };
+}
+
+/// 화면에 인쇄할 센터 이름 — **상호의 단일 해석 지점**이다.
+///
+/// 셸 사이드바·셸 헤더·설정의 센터명 행이 각자 폴백을 들면 같은 센터가 화면마다 다른 이름을
+/// 갖는다(상호를 저장한 직후가 정확히 그 모양이다: 한 곳만 서버 값, 나머지는 옛 하드코딩).
+export function centerDisplayName(c?: Center | null): string {
+  return centerIdentityOf(c).name.trim() || CENTER_NAME_FALLBACK;
+}
+
 export interface Center {
   center_id: string;
+  // [P55] 센터 상호(top-level) — 서버 api.CenterResponse.Name. 미등록이면 빈 문자열이고,
+  // 이 필드 자체가 없는 배포(구서버)도 있어 optional이다. 해석은 centerDisplayName 한 곳에서.
+  name?: string;
+  // [P55] 센터 신원 덩어리 — PUT /v1/center {center{name,phone,address}}의 대칭 조회.
+  // 백엔드와 병렬 작업이라 optional(facility와 같은 근거) — 부재는 centerIdentityOf가 접는다.
+  center?: CenterIdentity;
   policy: CenterPolicy;
   // v2.13 신설. 서버가 항상 채워 보낸다(미등록이면 12칸이 빈 문자열 + complete:false) —
   // optional로 두면 화면마다 다른 폴백을 짜 넣게 되고 "미등록"과 "아직 안 불러옴"이 섞인다.
@@ -936,4 +1082,37 @@ export interface Center {
   // 병렬 작업이라 구서버 응답에 없을 수 있고, 그때 대가가 화면 크래시면 안 된다 — 부재는
   // facilityOf(Settings.tsx)가 EMPTY_FACILITY(=미확인)로 접는다.
   facility?: CenterFacility;
+}
+
+// ── 관리 평면(멀티센터) — superadmin 전용 ────────────────────────────────────
+//
+// `GET /v1/admin/centers` · `POST /v1/admin/centers`(계약 v2.16). 서버 `api.CenterCreate` /
+// `api.CenterCreated`와 1:1이다.
+
+/** 센터 ID 규칙 — 서버 `domain.centerIDPattern`과 **같은 정규식**이다. 화면이 미리 막아 주지
+ *  않으면 400을 받고 나서야 규칙을 알게 된다(P50: 개발자만 아는 것을 사람에게 묻지 않는다). */
+export const CENTER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,28}[a-z0-9]$/;
+
+export interface AdminCenter {
+  id: string;
+  name: string;
+  phone?: string;
+  address?: string;
+  status: string;
+  created_at: string;
+}
+
+/** 센터 생성 요청 — 센터 신원 + **최초 owner**를 한 번에. owner 없이 만든 센터는 아무도 들어갈
+ *  수 없는 방이라 서버가 role을 owner로 강제한다(api.CreateCenter). */
+export interface CenterCreateBody {
+  id: string;
+  name: string;
+  phone?: string;
+  address?: string;
+  owner: { name: string; email: string };
+}
+
+export interface CenterCreated {
+  center: AdminCenter;
+  owner: Staff;
 }

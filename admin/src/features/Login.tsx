@@ -110,9 +110,10 @@ export function Login() {
         <div className="text-[22px] font-black">
           RISE <span className="text-brand">CONDITIONING</span>
         </div>
-        <div className="mb-[18px] mt-1 text-[11px] text-muted">
-          라이즈 컨디셔닝 센터 어드민 · powered by PT데스크
-        </div>
+        {/* [P65] 상호를 박지 않는다 — 이 어드민은 **여러 센터가 함께 쓴다**(멀티센터). 로그인
+            전에는 어느 센터 사람인지 알 방법도 없고(세션이 없다), 2호점 대표가 1호점 상호를
+            보고 로그인하게 된다. 로그인 뒤 사이드바가 자기 센터 상호를 띄운다(App.tsx CenterName). */}
+        <div className="mb-[18px] mt-1 text-[11px] text-muted">PT데스크 센터 어드민</div>
 
         <form onSubmit={onSubmit}>
           <div className="mb-2 text-left">

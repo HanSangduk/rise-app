@@ -6,6 +6,7 @@ import 'package:rise_member/core/policy/center_policy.dart';
 import 'package:rise_member/core/policy/center_policy_provider.dart';
 import 'package:rise_member/core/result/failure.dart';
 import 'package:rise_member/core/result/result.dart';
+import 'package:rise_member/core/session/session_gone_view.dart';
 import 'package:rise_member/core/session/session_provider.dart';
 import 'package:rise_member/core/theme/app_colors.dart';
 import 'package:rise_member/core/utils/coach_label.dart';
@@ -34,6 +35,9 @@ class BookingScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(bookingViewModelProvider);
     final showMyCoachOnly = ref.watch(showMyCoachOnlyProvider);
+    // '' 폴백은 **세션이 비워진 뒤 리스너가 화면을 내리기까지의 한 프레임용**이다 —
+    // 그 프레임엔 뷰모델도 SessionGoneFailure를 내므로 이 값은 어디에도 실리지 않는다
+    // (`hasMember('')`는 false, P64).
     final memberId = ref.watch(sessionProvider)?.memberId ?? '';
     final policy = ref.watch(centerPolicyProvider).value ?? CenterPolicy.fallback;
     // 코치 프로필(P05) — 스태프 캐시를 화면 로드와 병행으로 워밍해두고, 칩/태그
@@ -57,8 +61,11 @@ class BookingScreen extends ConsumerWidget {
         builder: (context, now) {
           _rolloverSelectedDate(context, ref, now);
           return async.when(
-            loading: () => const Center(child: CircularProgressIndicator(color: AppColors.red)),
-            error: (e, _) => e is EmptyPassesFailure
+            loading: () => const Center(child: CircularProgressIndicator(color: AppColors.brand)),
+            // 세션 소멸은 에러가 아니라 **전환 중**이다 — 재시도 버튼을 그리지 않는다(P64).
+            error: (e, _) => e is SessionGoneFailure
+                ? const SessionGoneView()
+                : e is EmptyPassesFailure
                 // 회원권 0개는 에러가 아니라 온보딩 성격의 빈 상태 — 홈과 동일한 전용 뷰.
                 // booking build는 homeViewModelProvider.future를 watch하므로 booking만
                 // invalidate하면 홈이 캐시한 에러/빈 상태를 그대로 재수령한다(네트워크 0회)
@@ -91,7 +98,7 @@ class BookingScreen extends ConsumerWidget {
               final coachName = CoachLabel.nameOrNull(data.primaryPass.trainerName);
               final primaryInactive = data.primaryPass.trainerInactive;
               return RefreshIndicator(
-                color: AppColors.red,
+                color: AppColors.brand,
                 onRefresh: () async {
                   // 취소 버튼(컷오프)이 이 탭에 있으므로 pull-to-refresh 때 정책도 재조회
                   // — 대표가 컷오프를 바꿔도 재로그인 없이 반영(center_policy_provider 주석).
@@ -311,7 +318,10 @@ class BookingScreen extends ConsumerWidget {
     // "불러오지 못했어요"를 안내한다.
     final cached =
         staffMap?[trainerId] ??
-        StaffDto(uid: trainerId, name: CoachLabel.resolve(fallbackName, fallback: '담당 코치'));
+        StaffDto(
+          uid: trainerId,
+          name: CoachLabel.resolve(fallbackName, fallback: '담당 코치'),
+        );
     showTrainerProfileSheet(
       context,
       staff: _withDomainStatus(cached, inactive),
@@ -381,13 +391,26 @@ class BookingScreen extends ConsumerWidget {
           return AlertDialog(
             title: const Text('예약 취소'),
             content: Text(
-              free
+              // **정책을 모르면 무료라고 단정하지 않는다**(P56).
+              //
+              // `centerPolicyProvider`는 `GET /v1/center` 실패 시 예외가 아니라
+              // **폴백 값을 데이터로** 돌려준다(24h/유예 있음). 그 상태에서 `free`는
+              // 폴백 24h로 계산된 값이라, 센터 실제 마감이 48h면 30시간 전 취소가
+              // `free=true`로 판정돼 **경고 문장이 아예 안 뜬 채** 세션이 차감된다.
+              // 회원은 "취소할까요?"만 읽고 확정한다. `isFallback`의 dartdoc이 적은
+              // 그 사고가 정확히 이 자리다.
+              policy.isFallback
+                  ? '$when 예약을 취소할까요?\n\n'
+                        '센터의 취소 정책을 불러오지 못해서, 지금 취소하면 세션이 '
+                        '차감되는지 확인할 수 없어요.\n'
+                        '차감 여부는 마이 탭 이용내역에서 확인할 수 있어요.'
+                  : free
                   ? '$when 예약을 취소할까요?'
                   : '$when 예약을 취소할까요?\n\n'
-                      '취소 마감(${policy.cancelCutoffHours}시간 전)이 지나 지금 취소하면 '
-                      '노쇼와 같이 세션 1회가 차감돼요.'
-                      '${policy.graceOnce ? ' 최초 1회는 유예되지만, 이미 유예를 받았다면 이번엔 차감돼요.' : ''}'
-                      '\n차감 여부는 마이 탭 이용내역에서 확인할 수 있어요.',
+                        '취소 마감(${policy.cancelCutoffHours}시간 전)이 지나 지금 취소하면 '
+                        '노쇼와 같이 세션 1회가 차감돼요.'
+                        '${policy.graceOnce ? ' 최초 1회는 유예되지만, 이미 유예를 받았다면 이번엔 차감돼요.' : ''}'
+                        '\n차감 여부는 마이 탭 이용내역에서 확인할 수 있어요.',
             ),
             actions: [
               TextButton(
@@ -407,10 +430,12 @@ class BookingScreen extends ConsumerWidget {
 
     final result = await ref.read(bookingViewModelProvider.notifier).cancel(booking.id);
     if (!context.mounted) return;
-    final (message, kind) = switch (result) {
-      Ok() => ('예약을 취소했어요', RiseSnackKind.ok),
-      Err(:final failure) => (failure.message, RiseSnackKind.danger),
-    };
-    ScaffoldMessenger.of(context).showSnackBar(riseSnackBar(message, kind: kind));
+    switch (result) {
+      case Ok():
+        ScaffoldMessenger.of(context)
+            .showSnackBar(riseSnackBar('예약을 취소했어요', kind: RiseSnackKind.ok));
+      case Err(:final failure):
+        showFailureSnackBar(context, failure);
+    }
   }
 }

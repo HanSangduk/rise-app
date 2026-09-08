@@ -1,3 +1,4 @@
+import 'package:clock/clock.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:rise_member/core/api/me_api.dart';
 import 'package:rise_member/core/api/staff_directory.dart';
@@ -11,6 +12,7 @@ import 'package:rise_member/core/utils/phone_format.dart';
 import 'package:rise_member/features/auth/data/auth_remote_data_source.dart';
 import 'package:rise_member/features/auth/data/auth_repository_impl.dart';
 import 'package:rise_member/features/auth/data/join_request_store_impl.dart';
+import 'package:rise_member/features/auth/domain/auth_models.dart';
 import 'package:rise_member/features/auth/domain/auth_repository.dart';
 import 'package:rise_member/features/auth/domain/join_request_store.dart';
 import 'package:rise_member/features/auth/presentation/auth_state.dart';
@@ -33,6 +35,23 @@ AuthRepository authRepository(Ref ref) {
 Stream<String?> signedInPhone(Ref ref) =>
     ref.watch(authRepositoryProvider).signedInPhoneChanges();
 
+/// 가입 요청을 보낼 수 있는 센터 목록(계약 v2.33).
+///
+/// **고를 것이 2곳 이상일 때만 화면이 선택을 묻는다**(`hasChoice`). 센터가 하나뿐인데 선택
+/// 화면을 띄우면 회원에게 "고를 수 있다"는 거짓 인상을 주고 탭만 하나 늘린다.
+///
+/// 실패는 **빈 목록으로 접는다** — 이 조회가 실패했다고 가입 요청 자체를 막으면 안 된다.
+/// 센터 없이 보낸 요청은 서버가 기본 센터로 폴백하므로(v2.33) 종전 동작이 그대로 남는다.
+/// autoDispose: 대기실을 떠나면 필요 없다.
+@riverpod
+Future<List<CenterDirectory>> joinCenters(Ref ref) async {
+  final result = await ref.watch(authRepositoryProvider).fetchJoinCenters();
+  return switch (result) {
+    Ok(:final value) => value,
+    Err() => const <CenterDirectory>[],
+  };
+}
+
 /// 가입 요청("승인 대기 중")의 로컬 영속 — 앱 재실행 복원(session_restore)과
 /// 뷰모델이 공유한다.
 @riverpod
@@ -50,6 +69,19 @@ enum SendCodeOutcome {
   verified,
 
   /// 실패 — `state.error`가 화면에 인라인으로 뜬다(이동 없음).
+  failed,
+}
+
+/// [AuthViewModel.requestJoin]의 결과 — 시트가 닫을지·무슨 스낵바를 띄울지 이 값만 본다.
+enum JoinRequestOutcome {
+  /// 서버가 접수했다 — 대기 화면으로.
+  sent,
+
+  /// 서버에 **이미 pending이 있다**(409 `join_pending`, 계약 v2.34). 실패가 아니라 pending 확답 —
+  /// 뷰모델이 상태를 pending으로 승격했으므로 화면은 성공처럼 닫되 문구만 다르다.
+  alreadyPending,
+
+  /// 실패 — `state.error`가 시트 안에 인라인으로 뜬다.
   failed,
 }
 
@@ -186,7 +218,7 @@ class AuthViewModel extends _$AuthViewModel {
   ///    바꾸면 [setPhone]이 이 값을 비우므로 재인증 흐름을 막지 않는다.
   ///
   /// [signedInPhone]은 Firebase가 준 E.164 번호다. **이 화면이 인증하려던 번호와
-  /// 같을 때만** 진행한다 — 다른 번호로 남아 있던 세션이 지금 인증을 가로채
+  /// 같을 때만** 진행한다 — 다른 번호의 세션이 남아 있다가 지금 인증을 가로채
   /// 남의 계정으로 넘어가면 안 된다.
   Future<bool> completeAutoVerification(String signedInPhone) async {
     if (state.busy || state.match != null) return false;
@@ -260,7 +292,7 @@ class AuthViewModel extends _$AuthViewModel {
     }
     if (!confirm) {
       // 매칭 카드를 지우고(clearMatch) 거부 안내 카드로 전환 — 가입 요청 경로와
-      // "다른 번호로 다시 시도" 탈출구는 화면이 상시 노출한다.
+      // "번호 다시 인증하기" 탈출구는 화면이 상시 노출한다.
       state = state.copyWith(submitting: false, clearMatch: true, matchDeclined: true);
       return false;
     }
@@ -284,28 +316,86 @@ class AuthViewModel extends _$AuthViewModel {
   /// 성공 시각을 기록해 center_confirm이 "승인 대기 중" 카드로 고정되고
   /// 30초 카운트다운 후에만 재요청을 허용한다(중복 제출 방지).
   /// 같은 시각을 로컬에도 남겨(JoinRequestStore) 앱을 껐다 켜도 대기 상태로 복귀한다.
-  Future<bool> requestJoin(String name) async {
+  ///
+  /// 409 `join_pending`([JoinPendingFailure], 계약 v2.34)은 실패로 다루지 않는다 — 서버가
+  /// "이미 pending이 있다"고 **확답**한 것이라 `serverJoinStatus='pending'`으로 승격한다. 종전엔
+  /// 이 409가 시트 안 빨간 문구로 끝나, 서버가 `/v1/me`에 요청을 안 실어 준 상태(타 센터 큐·
+  /// 조회 실패)에서는 "다시 요청 → 409 → 다시 요청"의 막다른 길이었다(plan C 4-c).
+  Future<JoinRequestOutcome> requestJoin(String name, {String centerId = ''}) async {
     state = state.copyWith(submitting: true, clearError: true);
     final repo = ref.read(authRepositoryProvider);
     final store = ref.read(joinRequestStoreProvider);
-    final result = await repo.requestJoin(name: name, phone: state.phone);
+    final result =
+        await repo.requestJoin(name: name, phone: state.phone, centerId: centerId);
 
+    final phone = normalizeKoreanPhone(state.phone);
+    if (result case Err(failure: final JoinPendingFailure pending)) {
+      // 요청 시각은 모른다(서버 것이다) — 상태에 지어 넣지 않는다. 다음 확인(GET /v1/me)이
+      // `created_at`을 준다. 로컬 기록은 재실행 복귀용이라 지금 시각으로 남긴다(종전 규약).
+      state = state.copyWith(
+        submitting: false,
+        serverJoinStatus: 'pending',
+        joinCenterId: pending.centerId.isNotEmpty ? pending.centerId : centerId,
+      );
+      if (phone.isNotEmpty) {
+        await store.save(JoinRequestRecord(
+          phone: phone,
+          requestedAt: DateTime.now(),
+          centerId: pending.centerId.isNotEmpty ? pending.centerId : centerId,
+        ));
+      }
+      return JoinRequestOutcome.alreadyPending;
+    }
     if (result case Err(:final failure)) {
       state = state.copyWith(submitting: false, error: failure);
-      return false;
+      return JoinRequestOutcome.failed;
     }
 
     final requestedAt = DateTime.now();
-    final phone = normalizeKoreanPhone(state.phone);
-    state = state.copyWith(submitting: false, joinRequestedAt: requestedAt);
-    await store.save(JoinRequestRecord(phone: phone, requestedAt: requestedAt));
-    return true;
+    // `serverJoinStatus`를 **함께** 세운다(P56). `centerConfirmStage`는 `rejected`를
+    // pending보다 먼저 판정하므로, 거절 화면에서 재요청이 성공해도 이 한 줄이 없으면
+    // **화면이 한 픽셀도 안 바뀐다**. 그런데 서버는 이전 요청이 rejected면 중복 409를
+    // 내지 않아 **요청은 실제로 접수된다** — 회원이 반복하면 대표 큐에 진짜로 여러 줄이
+    // 쌓인다. P55가 없애려던 중복 큐가 정확히 이 자리로 되살아난다.
+    state = state.copyWith(
+      submitting: false,
+      joinRequestedAt: requestedAt,
+      serverJoinStatus: 'pending',
+      // 고른 센터를 함께 남긴다(v2.33) — 대기실 센터 카드가 그 센터의 연락처를 보여준다.
+      joinCenterId: centerId,
+    );
+    // 번호를 모르면 로컬 기록을 남기지 않는다(P64 검증 반영). 서버는 토큰의 번호로 접수하므로
+    // 요청 자체는 유효하지만, 빈 번호로 저장한 기록은 어떤 번호와도 `matches`하지 않아 복원
+    // 때 죽은 줄이 되거나, 정규화가 ''를 돌려주는 다른 입력과 잘못 맞는다. 번호는 로그인
+    // 플로우와 복원 경로([restoreSignedInPhone])가 세운다 — 비어 있다면 그쪽이 빠진 것이다.
+    if (phone.isNotEmpty) {
+      await store.save(
+        JoinRequestRecord(phone: phone, requestedAt: requestedAt, centerId: centerId),
+      );
+    }
+    return JoinRequestOutcome.sent;
+  }
+
+  /// 복원·재검증 전용 — Firebase 신원의 번호를 대기실에 세운다(P64 검증 반영).
+  ///
+  /// 콜드스타트(캐시 없음)와 캐시 재검증이 미연결 확답을 받으면 둘 다 대기실에 서는데,
+  /// 종전엔 로컬 대기 기록이 번호와 맞을 때만 [restorePendingJoinRequest]가 번호를 채웠다.
+  /// 기록이 없으면 `phone`이 ''인 채 대기실이 떠서 가입 요청의 로컬 기록이 빈 번호로 저장됐다.
+  /// [setPhone]과 달리 발송 세션·매칭 결과를 건드리지 않는다 — 사용자가 번호를 **바꾼**
+  /// 게 아니라 같은 신원을 복원한 것이다.
+  void restoreSignedInPhone(String phone) {
+    state = state.copyWith(phone: normalizeKoreanPhone(phone));
   }
 
   /// 앱 재실행 복원 전용 — 로컬에 남은 가입 요청을 "승인 대기 중"으로 되살린다.
   /// 번호 대조는 호출부(session_restore)가 이미 끝낸 상태로 들어온다.
   void restorePendingJoinRequest(JoinRequestRecord record) {
-    state = state.copyWith(phone: record.phone, joinRequestedAt: record.requestedAt);
+    state = state.copyWith(
+      phone: record.phone,
+      joinRequestedAt: record.requestedAt,
+      // 로컬 기록의 센터는 폴백이다 — 서버 값이 뒤에 오면(applyServerJoinStatus) 그쪽이 덮는다.
+      joinCenterId: record.centerId,
+    );
   }
 
   /// 앱 재실행 복원 전용 — 연결 여부를 **확인하지 못했음**을 화면에 남긴다.
@@ -331,26 +421,75 @@ class AuthViewModel extends _$AuthViewModel {
     state = state.copyWith(checkingConnection: true, clearError: true);
     final result = await ref.read(authRepositoryProvider).loadSession();
 
+    // 확인 상태 줄의 시각 — **성공(connected/notYet)에만** lastCheckedAt, 실패엔 lastCheckFailedAt.
+    // 실패한 호출의 시각을 "마지막 확인"으로 찍으면 그 문장이 거짓이 된다(plan B §3).
+    final now = clock.now();
     switch (result) {
       case Ok(:final value):
         ref.read(sessionProvider.notifier).set(_withDisplayName(value));
-        state = state.copyWith(checkingConnection: false, connectionUnknown: false);
+        state = state.copyWith(
+          checkingConnection: false,
+          connectionUnknown: false,
+          lastCheckedAt: now,
+        );
         // 연결됐으니 "승인 대기 중" 로컬 기록은 폐기(confirmMatch와 같은 이유).
         await ref.read(joinRequestStoreProvider).clear();
         return ConnectionCheck.connected;
 
-      case Err(failure: MemberNotLinkedFailure()):
+      case Err(failure: final MemberNotLinkedFailure f):
         // 서버가 "아직"이라고 확답했다 — 오류가 아니므로 error로 남기지 않고
         // (빨간 문구는 과잉) 호출부가 안내 문구로 처리한다.
-        state = state.copyWith(checkingConnection: false, connectionUnknown: false);
+        //
+        // 계약 v2.27: 같은 응답이 가입 요청 상태도 들고 온다. **이 값이 로컬 기록을
+        // 이긴다** — 기기를 바꿔 로컬 근거가 없어도 대기/거절 화면이 제대로 선다.
+        //
+        // 서버가 요청 없음(null)이라 답하면 옛 `pending`을 **명시적으로 지운다** — copyWith의
+        // `?? this`는 null을 못 지우므로, 그 사이 센터가 지운 요청이 삭제 고지에 "보낸 가입
+        // 요청 (이름·전화번호)"로 남는다. 로컬 대기 기록(joinRequestedAt)은 종전대로 둔다.
+        state = state.copyWith(
+          checkingConnection: false,
+          connectionUnknown: false,
+          serverJoinStatus: f.joinStatus,
+          clearServerJoinStatus: f.joinStatus == null,
+          joinRequestedAt: f.joinRequestedAt,
+          centerId: f.centerId,
+          joinCenterId: f.joinCenterId,
+          lastCheckedAt: now,
+        );
         return ConnectionCheck.notYet;
 
       case Err(:final failure):
         // 확인 실패 — 연결됐는지 여전히 모른다. connectionUnknown은 그대로 둔다
         // (대기 화면에서 눌렀다면 대기 화면 그대로, 재확인 화면이었다면 그대로).
-        state = state.copyWith(checkingConnection: false, error: failure);
+        state = state.copyWith(
+          checkingConnection: false,
+          error: failure,
+          lastCheckFailedAt: now,
+        );
         return ConnectionCheck.failed;
     }
+  }
+
+  /// 서버가 준 가입 요청 상태를 반영한다(계약 v2.27).
+  ///
+  /// 세션 복원(`restoreAuthLanding`)과 재확인(`checkConnection`)이 같은 값을 같은
+  /// 자리에 넣게 하는 지점 — 두 경로가 갈리면 "복원했을 땐 거절인데 재확인하면
+  /// 대기"처럼 화면이 흔들린다.
+  ///
+  /// null(서버에 요청 없음)은 **지우는 값**이다 — `checkConnection`의 미연결 분기와 같은 규약.
+  void applyServerJoinStatus(
+    String? status, {
+    DateTime? requestedAt,
+    String centerId = '',
+    String joinCenterId = '',
+  }) {
+    state = state.copyWith(
+      serverJoinStatus: status,
+      clearServerJoinStatus: status == null,
+      joinRequestedAt: requestedAt,
+      centerId: centerId,
+      joinCenterId: joinCenterId,
+    );
   }
 
   /// 세션에 표시용 이름을 확정한다 — **로그인 경로와 재실행 복원 경로가 같은
@@ -371,11 +510,11 @@ class AuthViewModel extends _$AuthViewModel {
     return fallback == null ? session : session.withMemberName(fallback);
   }
 
-  /// "다른 번호로 다시 시도" — 어떤 상태(매칭됨/본인 아님/승인 대기/매칭 실패)에서도
+  /// "번호 다시 인증하기" — 어떤 상태(매칭됨/본인 아님/승인 대기/매칭 실패)에서도
   /// 열려 있어야 하는 탈출구. Firebase 세션을 끊고 플로우 상태를 처음으로 되돌린다.
   ///
   /// 로컬 대기 기록은 **일부러 지우지 않는다**. 대기는 기기가 아니라 그 번호의
-  /// 상태이고(다른 번호로는 JoinRequestRecord.matches가 막는다), 여기서 지우면
+  /// 상태이고(번호가 다르면 JoinRequestRecord.matches가 막는다), 여기서 지우면
   /// 번호를 잘못 눌러 나갔다 같은 번호로 돌아온 사용자가 대기 사실을 잃고 같은
   /// 요청을 또 보내게 된다. 폐기 시점은 오직 "연결 완료"다.
   Future<void> restartWithNewPhone() async {

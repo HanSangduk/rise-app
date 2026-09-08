@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rise_member/core/brand/splash_gate.dart';
@@ -117,9 +118,17 @@ class _RiseMemberAppState extends ConsumerState<RiseMemberApp> {
     //
     // **null → null은 무시한다**(prev != null 조건). 앱 시작 시점의 세션은 null이고,
     // 조건이 없으면 세션 복원이 끝나기도 전에 로그인으로 튕겨 복원 자체가 죽는다.
+    //
+    // 착지는 **세션을 비운 이유**가 고른다(P64). 종전엔 원인 불문 `/login`이라 캐시
+    // 재검증의 미연결 확답(신원은 살아 있고 센터 연결만 사라진 경우)까지 전화번호
+    // 화면으로 떨어져 SMS 재인증을 강제했다. 이유가 없으면(예: 옛 호출부) 신원 상실로
+    // 본다 — 가장 보수적인 착지다.
+    //
+    // 판정은 순수 함수 `sessionListenerRoute`에 있다 — 여기는 읽고 옮기기만 한다.
     ref.listen(sessionProvider, (prev, next) {
-      if (prev == null || next != null) return;
-      _router.go('/login');
+      final route =
+          sessionListenerRoute(prev, next, ref.read(sessionProvider.notifier).lastEndReason);
+      if (route != null) _router.go(route);
     });
 
     return MaterialApp.router(
@@ -139,7 +148,24 @@ class _RiseMemberAppState extends ConsumerState<RiseMemberApp> {
           // **라우터 바깥이라 복원 중에도 살아 있다.** `/splash` 라우트로 만들면
           // 그 라우트가 덮어야 할 구멍 안에 놓인다(redirect가 await하는 동안엔
           // 어떤 라우트도 그려지지 않는다).
-          child: SplashGate(ready: _restored, child: child!),
+          //
+          // 시스템 바 스타일을 **앱 전체에** 건다(P54). `AppBarTheme.systemOverlayStyle`은
+          // AppBar가 있는 화면에만 걸리는데 홈·로그인엔 AppBar가 없어서, `MaterialApp`이
+          // 밝은 테마 기본값으로 보내는 `SystemUiOverlayStyle.dark`가 그대로 나갔다 —
+          // 그 값은 **내비게이션 바를 검게 칠하고 흰 아이콘**을 얹는 조합이라, 크림색
+          // 앱 아래에 검은 띠가 깔렸다(실기기·스토어 캡처 양쪽에서 확인).
+          // 검은 전체화면(카메라·사진 뷰어)은 자기 `AnnotatedRegion`으로 이걸 덮는다.
+          child: AnnotatedRegion<SystemUiOverlayStyle>(
+            value: const SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              statusBarIconBrightness: Brightness.dark,
+              statusBarBrightness: Brightness.light, // iOS
+              systemNavigationBarColor: Colors.transparent,
+              systemNavigationBarDividerColor: Colors.transparent,
+              systemNavigationBarIconBrightness: Brightness.dark,
+            ),
+            child: SplashGate(ready: _restored, child: child!),
+          ),
         );
       },
     );

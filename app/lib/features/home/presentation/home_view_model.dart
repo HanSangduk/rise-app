@@ -34,7 +34,8 @@ class HomeViewModel extends _$HomeViewModel {
   Future<HomeSummary> build() async {
     final memberId = ref.watch(sessionProvider)?.memberId;
     if (memberId == null) {
-      throw const AuthFailure('로그인이 필요해요');
+      // 셸이 떠 있는 채 세션이 비었다 — 리스너가 이동 중이라 문구가 아닌 타입만 낸다(P64).
+      throw const SessionGoneFailure();
     }
     // 정책값 자체는 여기서 쓰지 않는다(취소 컷오프 판정이 화면의 파생 계산으로
     // 옮겨갔다 — [NextBooking] 주석). 그래도 **기다리는 건 남긴다**: 홈 카드가
@@ -104,6 +105,8 @@ class HomeViewModel extends _$HomeViewModel {
   /// 스낵바 채널([homeworkToggleErrorProvider]).
   Future<void> selectPass(String passId) async {
     final memberId = ref.read(sessionProvider)?.memberId;
+    // 세션이 비었으면 리스너가 이미 화면을 내리는 중이다 — 홈의 부분 갱신은 알릴
+    // 상대가 없으므로 조용히 끝낸다(촬영 탭과 달리 잃을 바이트가 없다, P64).
     if (memberId == null) return;
     final repo = ref.read(homeRepositoryProvider);
     final result = await repo.loadHome(
@@ -128,6 +131,8 @@ class HomeViewModel extends _$HomeViewModel {
   Future<void> toggleHomework(HomeworkItem item) async {
     final current = state.value;
     final memberId = ref.read(sessionProvider)?.memberId;
+    // 세션 없음은 위 selectPass와 같은 이유로 조용히 — 낙관적 갱신을 시작하기 전이라
+    // 되돌릴 것도 없다.
     if (current == null || memberId == null) return;
 
     // 오늘 체크 상태를 못 읽었으면 **보내지 않는다**. 형제 항목의 done은 전부

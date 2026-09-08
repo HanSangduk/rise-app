@@ -10,6 +10,7 @@ import 'package:rise_member/core/result/result.dart';
 import 'package:rise_member/core/session/app_session.dart';
 import 'package:rise_member/core/utils/coach_label.dart';
 import 'package:rise_member/core/utils/phone_format.dart';
+import 'package:rise_member/features/auth/domain/auth_config.dart';
 import 'package:rise_member/features/auth/data/auth_remote_data_source.dart';
 import 'package:rise_member/features/auth/domain/auth_models.dart';
 import 'package:rise_member/features/auth/domain/auth_repository.dart';
@@ -38,9 +39,16 @@ class AuthRepositoryImpl implements AuthRepository {
     }
     final normalized = normalizeKoreanPhone(phone);
 
-    if (kDebugMode) {
-      // 디버그 빌드: 앱 무결성 검증(SafetyNet/reCAPTCHA/APNs) 생략 —
-      // 콘솔 등록 테스트 번호(+82 10-1234-5678 등)로 시뮬레이터에서 개발 가능.
+    // 앱 무결성 검증(Play Integrity/reCAPTCHA/APNs) 생략 스위치.
+    //
+    // 디버그: 시뮬레이터·에뮬레이터엔 APNs·Play Integrity가 없어 이게 없으면 개발이 막힌다.
+    //
+    // 릴리스: **스토어 심사 계정 한 번호에만** 연다. 심사자는 우리 기기·네트워크가 아니라
+    // 어떤 환경에서 열지 알 수 없는데, APNs 사일런트 검증이나 reCAPTCHA 웹뷰가 한 번이라도
+    // 걸리면 로그인 못 한 채로 리젝이 온다(왕복 며칠). 이 스위치를 켠 상태에서 Firebase는
+    // **콘솔에 등록된 테스트 번호만** 받아준다 — 실번호로는 인증이 되레 실패하므로,
+    // 이 분기가 일반 회원의 인증을 우회시키는 통로가 되지 않는다.
+    if (kDebugMode || normalized == AuthConfig.reviewPhoneE164) {
       await _auth.setSettings(appVerificationDisabledForTesting: true);
     }
 
@@ -140,7 +148,7 @@ class AuthRepositoryImpl implements AuthRepository {
     try {
       await _auth.signOut();
     } catch (_) {
-      // 로그아웃 실패가 "다른 번호로 다시 시도"를 막으면 안 된다 —
+      // 로그아웃 실패가 "번호 다시 인증하기"를 막으면 안 된다 —
       // 미초기화(테스트)·네트워크 무관하게 화면은 항상 전화번호 입력으로 돌아간다.
     }
   }
@@ -195,11 +203,32 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
-  Future<Result<void>> requestJoin({required String name, required String phone}) {
+  Future<Result<void>> requestJoin({
+    required String name,
+    required String phone,
+    String centerId = '',
+  }) {
     if (name.trim().isEmpty) {
       return Future.value(const Err(ValidationFailure('이름을 입력해주세요')));
     }
-    return guardApi(() => _remote.requestJoin(name: name.trim(), phone: phone));
+    return guardApi(
+      () => _remote.requestJoin(name: name.trim(), phone: phone, centerId: centerId),
+    );
+  }
+
+  @override
+  Future<Result<List<CenterDirectory>>> fetchJoinCenters() {
+    return guardApi(() async {
+      final dtos = await _remote.fetchJoinCenters();
+      return dtos
+          .map((d) => CenterDirectory(
+                id: d.id,
+                name: d.name.trim(),
+                address: d.address.trim(),
+                phone: d.phone.trim(),
+              ))
+          .toList(growable: false);
+    });
   }
 
   @override
@@ -211,7 +240,20 @@ class AuthRepositoryImpl implements AuthRepository {
         if (memberId == null) {
           // "아직 연결 전"은 네트워크 실패와 전혀 다른 결론(온보딩 vs 재시도)으로
           // 이어진다 — 호출부가 문구가 아니라 타입으로 가를 수 있게 전용 Failure.
-          return const Err(MemberNotLinkedFailure());
+          //
+          // 계약 v2.27: 같은 응답에 가입 요청 상태가 함께 온다. 결론과 이유를 갈라
+          // 나르면 호출부가 이유를 로컬 기록에서 다시 추론하게 되고, 그 추론이
+          // 기기 변경에서 틀린다 — 함께 싣는다.
+          //
+          // 계약 v2.34: 요청이 귀속된 센터(`join_request.center_id`)와 Principal 센터(`center_id`)
+          // 도 함께 나른다 — 대기실이 "어느 센터의 연락처·코치를 보여줘도 되는지"를 이 둘로 판정한다.
+          final jr = me.joinRequest;
+          return Err(MemberNotLinkedFailure(
+            joinStatus: jr?.status,
+            joinRequestedAt: jr == null ? null : DateTime.tryParse(jr.createdAt)?.toLocal(),
+            centerId: me.centerId,
+            joinCenterId: jr?.centerId ?? '',
+          ));
         }
         return Ok(AppSession(
           uid: me.uid,

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rise_member/core/result/failure.dart';
@@ -40,9 +41,9 @@ void main() {
   group('requestJoin — 승인 대기 영속', () {
     test('성공하면 대기 시각을 상태와 로컬 저장소 양쪽에 남긴다', () async {
       notifier().setPhone('010-1234-5678');
-      final ok = await notifier().requestJoin('김라이즈');
+      final outcome = await notifier().requestJoin('김라이즈');
 
-      expect(ok, isTrue);
+      expect(outcome, JoinRequestOutcome.sent);
       expect(read().joinRequestedAt, isNotNull);
       expect(read().centerConfirmStage, CenterConfirmStage.pendingApproval);
       expect(store.record, isNotNull);
@@ -51,11 +52,22 @@ void main() {
       expect(store.record!.requestedAt, read().joinRequestedAt);
     });
 
+    test('번호를 모르면 로컬 기록을 남기지 않는다 — 서버는 토큰 번호로 접수한다(P64 검증 반영)', () async {
+      // 번호가 비어 있어도 요청은 유효하다(서버가 토큰의 번호로 접수). 다만 ''로 저장한
+      // 기록은 어떤 번호와도 matches하지 않아 복원 때 죽은 줄이 된다.
+      expect(read().phone, isEmpty);
+      final outcome = await notifier().requestJoin('김라이즈');
+
+      expect(outcome, JoinRequestOutcome.sent);
+      expect(read().centerConfirmStage, CenterConfirmStage.pendingApproval, reason: '화면은 대기 카드');
+      expect(store.record, isNull, reason: '빈 번호의 기록은 죽은 줄이다');
+    });
+
     test('실패하면 아무것도 남기지 않는다 (있지도 않은 대기 카드 방지)', () async {
       notifier().setPhone('010-1234-5678');
       repo.requestJoinResult = const Err(NetworkFailure());
 
-      expect(await notifier().requestJoin('김라이즈'), isFalse);
+      expect(await notifier().requestJoin('김라이즈'), JoinRequestOutcome.failed);
       expect(read().joinRequestedAt, isNull);
       expect(store.record, isNull);
       expect(read().error, isA<NetworkFailure>());
@@ -445,6 +457,78 @@ void main() {
       expect(read().error, isNull);
     });
 
+    // P63 검증 반영 — 서버가 요청 없음(joinStatus null)이라 답하면 requestJoin이 세운
+    // 'pending'을 지운다. copyWith의 `?? this`로는 못 지우던 자리(clearServerJoinStatus).
+    test('아직인데 서버에 요청이 없으면 serverJoinStatus를 지운다 — 삭제 고지가 unknown으로', () async {
+      await waitPending();
+      expect(read().joinRequestTrace, JoinRequestTrace.pending);
+
+      expect(await notifier().checkConnection(), ConnectionCheck.notYet);
+
+      expect(read().serverJoinStatus, isNull);
+      expect(read().joinRequestTrace, JoinRequestTrace.unknown);
+      // 로컬 대기 기록은 종전대로 — 화면은 대기 카드를 유지한다(재확인 버튼이 거기 있다).
+      expect(read().centerConfirmStage, CenterConfirmStage.pendingApproval);
+    });
+
+    test('applyServerJoinStatus(null)도 지운다 — 복원·재확인이 같은 규약', () async {
+      await waitPending();
+      notifier().applyServerJoinStatus(null);
+      expect(read().serverJoinStatus, isNull);
+      expect(read().joinRequestTrace, JoinRequestTrace.unknown);
+    });
+
+    // P69 C2 — 서버 null은 "없음 ∪ 조회 실패"다. joinRequestedAt을 지우면 화면이 빈 상태로 떨어져
+    // 중복 요청이 나가고, 남기면 `unknown`이라 "다시 요청"이 다시 열린다(막다른 길 없음).
+    test('서버 null 응답은 joinRequestedAt을 유지한다 — 그래서 "다시 요청"이 다시 열린다', () async {
+      await waitPending();
+      final before = read().joinRequestedAt;
+      expect(read().canRetryJoinRequest, isFalse, reason: '서버 확답 pending');
+
+      await notifier().checkConnection();
+
+      expect(read().joinRequestedAt, before);
+      expect(read().canRetryJoinRequest, isTrue);
+    });
+
+    // P69 H1·H2 — 확인 상태 줄의 시각. 성공(notYet/connected)에만 lastCheckedAt, 실패에만 failedAt.
+    test('notYet은 lastCheckedAt만, 실패는 lastCheckFailedAt만 세운다', () async {
+      await waitPending();
+      await withClock(Clock.fixed(DateTime(2026, 9, 8, 12, 14)), () async {
+        await notifier().checkConnection();
+      });
+      expect(read().lastCheckedAt, DateTime(2026, 9, 8, 12, 14));
+      expect(read().lastCheckFailedAt, isNull);
+
+      repo.sessionResult = const Err(NetworkFailure());
+      await withClock(Clock.fixed(DateTime(2026, 9, 8, 12, 20)), () async {
+        await notifier().checkConnection();
+      });
+      expect(read().lastCheckFailedAt, DateTime(2026, 9, 8, 12, 20));
+      expect(read().lastCheckedAt, DateTime(2026, 9, 8, 12, 14), reason: '실패가 성공 시각을 덮지 않는다');
+    });
+
+    test('connected도 lastCheckedAt을 세운다', () async {
+      await waitPending();
+      repo.session = const AppSession(uid: 'u1', role: 'member', centerId: 'c1', memberId: 'm1');
+      await withClock(Clock.fixed(DateTime(2026, 9, 8, 12, 30)), () async {
+        expect(await notifier().checkConnection(), ConnectionCheck.connected);
+      });
+      expect(read().lastCheckedAt, DateTime(2026, 9, 8, 12, 30));
+    });
+
+    // P69 H3 — 계약 v2.34: /v1/me가 요청 센터와 Principal 센터를 함께 준다.
+    test('MemberNotLinkedFailure의 centerId·joinCenterId를 상태에 나른다', () async {
+      await waitPending();
+      repo.sessionResult = const Err(MemberNotLinkedFailure(
+        joinStatus: 'pending',
+        centerId: 'rise',
+        joinCenterId: 'gangnam-2',
+      ));
+      await notifier().checkConnection();
+      expect(read().centerId, 'rise');
+      expect(read().joinCenterId, 'gangnam-2');
+    });
     test('네트워크 실패면 failed — 대기 상태를 뒤집지 않고 사유만 남긴다', () async {
       await waitPending();
       repo.sessionResult = const Err(NetworkFailure());
@@ -488,6 +572,51 @@ void main() {
       await future;
       expect(read().busy, isFalse);
     });
+  });
+
+  // P69 C2 — 409 `join_pending`(계약 v2.34)은 실패가 아니라 pending 확답이다.
+  group('requestJoin — 409 join_pending 승격', () {
+    test('alreadyPending을 돌려주고 serverJoinStatus=pending·joinCenterId·로컬 기록을 세운다', () async {
+      notifier().setPhone('010-1234-5678');
+      repo.requestJoinResult = const Err(JoinPendingFailure(centerId: 'gangnam-2'));
+
+      expect(await notifier().requestJoin('김라이즈', centerId: 'rise'), JoinRequestOutcome.alreadyPending);
+
+      expect(read().joinRequestTrace, JoinRequestTrace.pending);
+      expect(read().centerConfirmStage, CenterConfirmStage.pendingApproval);
+      expect(read().joinCenterId, 'gangnam-2', reason: '서버가 말한 센터가 고른 센터를 이긴다');
+      expect(read().joinRequestedAt, isNull, reason: '요청 시각은 서버 것 — 지어내지 않는다');
+      expect(read().error, isNull, reason: '실패가 아니다');
+      expect(store.record?.centerId, 'gangnam-2');
+      expect(store.record?.phone, '+821012345678');
+    });
+
+    test('409에 center_id가 없으면 고른 센터로 폴백', () async {
+      notifier().setPhone('010-1234-5678');
+      repo.requestJoinResult = const Err(JoinPendingFailure());
+      await notifier().requestJoin('김라이즈', centerId: 'rise');
+      expect(read().joinCenterId, 'rise');
+    });
+
+    test('성공 시 고른 센터가 상태·로컬 기록에 남는다', () async {
+      notifier().setPhone('010-1234-5678');
+      expect(await notifier().requestJoin('김라이즈', centerId: 'gangnam-2'), JoinRequestOutcome.sent);
+      expect(read().joinCenterId, 'gangnam-2');
+      expect(store.record?.centerId, 'gangnam-2');
+    });
+
+    test('restorePendingJoinRequest는 기록의 센터를 폴백으로 세운다', () {
+      notifier().restorePendingJoinRequest(
+        JoinRequestRecord(phone: '+821012345678', requestedAt: DateTime(2026, 9, 8), centerId: 'gangnam-2'),
+      );
+      expect(read().joinCenterId, 'gangnam-2');
+      // 서버가 뒤에 빈 값을 주면(구서버) 폴백이 남고, 값을 주면 덮는다.
+      notifier().applyServerJoinStatus('pending');
+      expect(read().joinCenterId, 'gangnam-2');
+      notifier().applyServerJoinStatus('pending', joinCenterId: 'rise');
+      expect(read().joinCenterId, 'rise');
+    });
+
   });
 
   // 앱 시작 복원이 GET /v1/me에 실패했을 때 — "미연결"로 단정하지 않는 상태.
@@ -678,8 +807,13 @@ class _FakeAuthRepository implements AuthRepository {
       const Ok(null);
 
   @override
-  Future<Result<void>> requestJoin({required String name, required String phone}) async =>
+  Future<Result<void>> requestJoin({required String name, required String phone, String centerId = ''}) async =>
       requestJoinResult;
+
+  /// v2.33 — 센터 목록. 이 스위트들은 선택 UI를 다루지 않으므로 빈 목록(= 고를 것 없음)이다.
+  @override
+  Future<Result<List<CenterDirectory>>> fetchJoinCenters() async =>
+      const Ok(<CenterDirectory>[]);
 
   @override
   Future<Result<AppSession>> loadSession() {

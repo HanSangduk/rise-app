@@ -372,9 +372,9 @@ function MonthlyChart({ monthly }: { monthly: MonthlyRevenue[] }) {
       <text x={0} y={12} fontSize={9} fill="#8b8fa3">
         원
       </text>
-      <polyline points={polyline} fill="none" stroke="#f43f5e" strokeWidth={2.5} />
+      <polyline points={polyline} fill="none" stroke="#7fa0c4" strokeWidth={2.5} />
       {points.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r={i === points.length - 1 ? 3.5 : 3} fill="#f43f5e" />
+        <circle key={i} cx={p.x} cy={p.y} r={i === points.length - 1 ? 3.5 : 3} fill="#7fa0c4" />
       ))}
       {points.map((p, i) => (
         <text key={i} x={p.x} y={H - 4} fontSize={9} fill="#8b8fa3" textAnchor="middle">

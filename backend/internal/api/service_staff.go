@@ -487,7 +487,36 @@ func (s *Service) DeactivateStaff(ctx context.Context, p Principal, uid, leftAtR
 	if err := s.saveStaffIndexRole(ctx, p.CenterID, uid, domain.RoleMember); err != nil {
 		return nil, err
 	}
-	// ③ Staff 레코드. 여기까지 못 와도 사람은 이미 잠겨 있다(안전한 방향의 잔여 상태).
+	// ③ 프로필 사진 파기(v2.31). 퇴사는 사진의 유일한 목적(회원 앱 공개)이 소멸하는 시점이다 —
+	//    근로자 명부 3년·정산 5년 보존 근거에 사진은 없다(개인정보 보호법 §21 목적 달성 시 파기).
+	//    지우는 것은 **이 uid 명의로 우리가 만든 파일(`staff/photos/{uid}-…`)만**이고, 실제로 지운
+	//    경우에만 포인터를 비운다. 외부 URL·다른 uid 명의 파일·다른 버킷(v1.6 수기 입력으로 무엇이든
+	//    들어올 수 있다)은 파일도 포인터도 건드리지 않는다 — 접두만 보면 A의 퇴사가 B의 얼굴을 지운다.
+	//
+	//    왜 ①② 뒤인가: 삭제는 불가역이다. ①②가 실패하면 퇴사 자체가 실패인데 사진만 먼저 사라지면
+	//    "재직 중인데 사진이 없어진" 부작용이 남는다. ②까지 지나면 사람은 이미 잠겨 있다.
+	//    왜 ④ 저장 앞인가: 저장 뒤에 지우면 삭제 실패 시 포인터가 이미 비어 고아가 된다(발견 경로 0 —
+	//    P22). 앞에 두면 ④ 실패 시 "파일은 없는데 URL은 남은" 창이 생기지만 status가 아직 active라
+	//    재시도가 400에 막히지 않고, 재시도의 DeleteObjects는 ErrObjectNotExist를 성공으로 세므로
+	//    (provision.go) 그때 URL이 비워진다 — 멱등으로 수렴한다. 반대 방향(포인터 유실)은 수렴하지 않는다.
+	//    왜 실패를 전파하는가(best-effort가 아닌 이유): ②가 즉시 차단의 본체라 여기서 500을 내도 보안상
+	//    잃는 것이 없고, status가 active로 남아 재시도가 멱등으로 수렴한다 — 기존 ④ SaveStaff 실패 전파와
+	//    같은 취급. 조용히 성공시키면 privacy.html의 "퇴사 처리되면 삭제"가 재시도 동사 없는 거짓 약속이 된다.
+	//    (동시성 한계: 트랜잭션이 없어 ③~④ 사이에 들어온 업로드는 IsActive 가드를 통과할 수 있다 —
+	//    last-writer-wins, 기존 경로들과 같은 급. 계약 v2.31에 적어 둔다.)
+	//    purger 미구성이면 파기를 건너뛰고 photo_url을 **유지**한 채 퇴사는 진행한다(purgeStaffPhoto —
+	//    no-op 성공을 믿고 포인터를 비우면 파일이 고아가 된다. 즉시 차단의 본체는 ①②다).
+	if prevPath := s.ownedStaffPhotoPath(uid, st.Profile.PhotoURL); prevPath != "" {
+		deleted, err := s.purgeStaffPhoto(ctx, uid, prevPath, "퇴사 처리 — 프로필 사진 파기")
+		if err != nil {
+			return nil, err
+		}
+		if deleted {
+			st.Profile.PhotoURL = "" // 파기가 실제로 됐을 때만 포인터를 비운다(불변식: 빈 URL ⇔ 우리 파일 없음)
+		}
+	}
+	// ④ Staff 레코드. 여기까지 못 와도 사람은 이미 잠겨 있다(안전한 방향의 잔여 상태).
+	//    status·left_at·photo_url이 한 번의 쓰기에 함께 실린다.
 	st.Status = domain.StaffStatusInactive
 	st.LeftAt = &leftAt
 	if err := s.store.SaveStaff(ctx, p.CenterID, st); err != nil {
@@ -500,6 +529,8 @@ func (s *Service) DeactivateStaff(ctx context.Context, p Principal, uid, leftAtR
 
 // ReactivateStaff — 재입사 복원. 순서는 deactivate의 정확한 역순이다(권한을 늘리는 쓰기는
 // 마지막): Staff 레코드 → UserIndex 복원 → Firebase 잠금 해제.
+// 사진은 되살리지 않는다(v2.31) — 퇴사가 파기한 파일은 없고 photo_url도 그때 비워졌다. 복직은
+// 이니셜 아바타로 시작하고, 필요하면 대표가 다시 올린다(어드민 재입사 모달이 이를 말한다).
 func (s *Service) ReactivateStaff(ctx context.Context, p Principal, uid string) (*domain.Staff, error) {
 	if !p.IsOwner() {
 		return nil, ErrForbidden

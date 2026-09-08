@@ -22,10 +22,11 @@ Stats    {active_members, registered, rereg_rate, rereg_n, rereg_d, unassigned, 
 
 ## 엔드포인트
 ```
-GET  /v1/me                                → {uid, role, center_id, member_id?, name?}  (name은 v2.2)
+GET  /v1/me                                → {uid, role, center_id, member_id?, name?, join_request?}  (name은 v2.2, join_request는 v2.27 — {status, center_id, created_at} v2.34)
 POST /v1/join/match                        회원: 번호 인증 후 자동 매칭 조회 → {member?, needs_confirm:true}
 POST /v1/join/confirm                      {member_id, confirm:true|false}  이름확인 1탭(P48)
-POST /v1/join/request                      {center_id} 가입 요청 · POST /v1/join/approve {request_id} (owner)
+POST /v1/join/request                      {center_id} 가입 요청(409 본문 {error, code:"join_pending", center_id} v2.34) · POST /v1/join/approve {request_id} (owner — 같은 번호의 활성 회원이 있으면 409 v2.34)
+POST /v1/join/reject                       {request_id} 거절 (owner, v2.27) — 이름·번호를 비우고 status만 남긴다
 
 GET  /v1/members?trainer=&q=               역할 스코프 자동(트레이너=담당만)
 POST /v1/members  PUT /v1/members/{id}
@@ -149,7 +150,9 @@ Booking.status "waitlist"                    예약어로만 유지 — v1 미�
 
 ### 직렬화·정책 규약
 ```
-배열 필드는 항상 [] (null 금지)              Member.flags · Pass.holds · Staff.offdays — 신규 생성 경로 포함
+배열 필드는 항상 [] (null 금지)              Member.flags · Pass.holds · Staff.offdays · Payment.installments(v2.28)
+                                              — 신규 생성 경로 포함 + **읽기 직전에도** nil→[] (v2.28: 이미 null로
+                                              굳은 문서를 위한 바닥. Member.body_poses는 nil이 의미를 가져 제외)
 Policy 홀딩 상한                             -1=명시적 무제한, 0=필드 부재(로드 시 기본값으로 승격 —
                                               v1.2 이전 정책 문서에서 상한이 풀리는 것 방지)
 consent.signed_at/revoked_at                 항상 서버 기록(스태프 PUT이 보낸 값도 무시하고 전이 규칙만 적용)
@@ -307,6 +310,11 @@ title ≤40자 · career_years 0~50(0=미표기) · bio ≤500자 · 배열 원�
 PUT /v1/staff/{uid}/profile {profile}      owner 또는 본인 trainer(offdays와 동일 권한, member 403).
                                             "통 교체" 시맨틱 — 폼이 항상 전 필드 제출(머지 아님,
                                             빈 값으로 지우기 자연스러움). 범위 위반 400 한국어
+                                            **예외(v2.31 개정)**: 우리 파일(`staff/photos/{uid}-…`)을
+                                            가리키는 photo_url은 이 PUT으로 **새로 만들 수 없다** —
+                                            그 포인터는 업로드 엔드포인트(v2.25)만 박는다. 저장된 값과
+                                            다른 우리 파일 URL을 보내면 409(stale). 같은 값 되돌림·빈 값·
+                                            외부 URL은 종전대로.
 ```
 
 ### 기존 계약 변경
@@ -524,7 +532,9 @@ POST /v1/staff/{uid}/deactivate               퇴사처리(owner 전용)
      409 {error:"...", blockers:{members:[], passes:[], recurrings:[], bookings:[]}}
      400 본인 비활성화 · 400 이미 inactive · 409 마지막 활성 owner
      성공 시: Staff.status=inactive + left_at · UserIndex 강등(즉시 차단 — 인증이 요청마다
-     이 문서를 읽고 캐시가 없다) · Firebase 계정 Disabled + RevokeRefreshTokens(재로그인 차단).
+     이 문서를 읽고 캐시가 없다) · Firebase 계정 Disabled + RevokeRefreshTokens(재로그인 차단)
+     · 프로필 사진 파기(v2.31 — **이 uid 명의**의 `staff/photos/<uid>-…` 파일만 지우고 photo_url=""; 외부·남의 URL은 무변경, 미구성 purger면 포인터 유지.
+       파기 실패 시 500이고 status는 active로 남아 재시도가 멱등으로 수렴한다).
      ID 토큰 검증은 폐기 확인을 하지 않으므로 발급된 토큰은 최대 1시간 유효하다 —
      즉시성은 UserIndex가 담당하고 Firebase 비활성화는 2차 방어선이다.
 
@@ -538,7 +548,8 @@ POST /v1/staff/{uid}/reactivate               재입사 복원(owner 전용)
 POST /v1/staff              퇴사자(inactive) 재초대는 409가 아니라 **재고용으로 완결된다**:
                             status를 active로 되돌리고 요청의 name·role·color·payout을 반영하되
                             **profile·offdays는 보존**한다(실수로 다시 눌러 경력 데이터가 날아가지
-                            않게). 응답은 신규와 같은 201 + Staff.
+                            않게 — 단 photo_url 제외: 퇴사 시 파기되어 비어 있다, v2.31).
+                            응답은 신규와 같은 201 + Staff.
                             → 복직 경로가 둘(이 경로와 reactivate)이고 응답이 구분되지 않으므로,
                               어드민은 초대 화면에서 "이미 있던 계정이면 기존 비밀번호가 유지된다"를
                               함께 안내한다(초대 메일 문구가 사실과 어긋나지 않게).
@@ -1271,7 +1282,8 @@ DELETE /v1/me                          회원탈퇴(회원 본인 전용). 바�
 
   응답 200 {
     deleted:true, member_id, withdrawn_at,
-    purged:{body_photos, inbody, workout_logs, hw_checks, checkins, recurrings},
+    purged:{body_photos, inbody, workout_logs, hw_checks, checkins, recurrings,
+            consult_requests, join_requests},          ← 뒤 2칸 v2.26 신설
     retained:{passes, payments, contracts, ledger, bookings},
     cancelled_bookings, remaining_sessions
   }
@@ -1279,8 +1291,12 @@ DELETE /v1/me                          회원탈퇴(회원 본인 전용). 바�
   403 호출자가 owner|trainer — 스태프에겐 지울 회원 레코드가 없고, 회원으로도 연결된
       계정이면 UserIndex가 사라져 **센터가 대표를 잃는다**(복구 API 없음. v1.9 guardNotStaff·
       v2.0 락아웃 가드와 같은 계열). 스태프의 이탈 경로는 POST /v1/staff/{uid}/deactivate다.
-  404 member_id 미연결(가입 매칭 전) — 지울 대상 자체가 없다. 200으로 통과시키면
-      "탈퇴했다"는 응답이 실제로는 아무것도 하지 않은 응답이 된다.
+  ~~404 member_id 미연결(가입 매칭 전) — 지울 대상 자체가 없다.~~
+  ⚠ v2.27 개정: **미연결 계정도 200이다** — 지울 대상이 없다는 전제가 틀렸다. 가입 요청 시트에
+      이름·번호를 직접 적은 사람(join_requests)과 Firebase 계정(전화번호)이 있다(P55 C-3, §36
+      삭제 요구권). 미연결 분기(deleteUnlinkedAccount)는 Firebase 계정 삭제 → join_requests 파기 →
+      UserIndex 삭제로 끝나고 응답 키 집합은 회원 경로와 같다(member_id는 빈 값, purged.join_requests
+      외 전부 0). 상세는 v2.27 절 "DELETE /v1/me — 미연결 계정".
   400 이미 탈퇴한 계정(정상 경로로는 도달하지 않는다 — 인덱스만 남은 잔여 상태의 이중 방어선)
 
   ⚠ **잔여 회차가 남아 있어도 막지 않는다.** 검토 후 기각: Guideline 5.1.1(v)는 사업상 상태를
@@ -1288,8 +1304,11 @@ DELETE /v1/me                          회원탈퇴(회원 본인 전용). 바�
     Pass·Payment·Contract·Ledger가 전부 보존되므로 탈퇴 후 환불 요구에도 정산 근거가 살아 있다.
     대신 응답의 remaining_sessions로 고지한다(앱이 확인 화면·완료 안내에 그대로 띄운다).
 
-  ⚠ **재시도 경로가 없다.** 성공하면 UserIndex가 사라져 같은 uid의 두 번째 호출은 404다.
-    되돌리는 API도 없다(탈퇴는 종단 상태 — 복직이 있는 스태프 퇴사와 다르다).
+  ⚠ **되돌리는 API가 없다**(탈퇴는 종단 상태 — 복직이 있는 스태프 퇴사와 다르다).
+    ~~성공하면 UserIndex가 사라져 같은 uid의 두 번째 호출은 404다.~~
+    ⚠ v2.27 개정: 두 번째 호출은 404가 아니다 — 인덱스가 없으면 미연결 분기로 들어가
+    200(purged 전부 0, Firebase DeleteUser는 없는 계정을 성공으로 본다)으로 끝난다. 즉 재시도가
+    멱등이 됐다(토큰은 계정 삭제 후에도 최대 1시간 유효 — provision.go DeleteUser 주석).
 ```
 
 ### 파기·보존 경계 (계약의 핵심)
@@ -1302,6 +1321,7 @@ DELETE /v1/me                          회원탈퇴(회원 본인 전용). 바�
   체형사진 BodyPhoto — **Firestore 메타 + Cloud Storage 원본 파일**
   인바디 Inbody · 수업기록 WorkoutLog(coach_note 포함) · 홈워크 체크 HwCheck ·
     체크인 CheckinRecord · 고정 스케줄 Recurring
+  가입 요청 JoinRequest(**이름·전화번호 원본**) · 재등록/상담 요청 ConsultRequest(note) ← v2.26 신설
   UserIndex(uid→member_id) · **Firebase Identity Platform 계정**
 
 보존(비식별 상태로 5년)
@@ -1310,6 +1330,10 @@ DELETE /v1/me                          회원탈퇴(회원 본인 전용). 바�
   ⚠ v2.17 개정: 계약은 **무접촉이 아니다** — 미서명(draft/sent) 계약은 문서를 보존한 채
     voided로 종결된다(서명 주체가 파기된 뒤의 "서명 대기"는 사실이 아니다). signed는
     상태·증적 그대로 불가침. 문서 수는 변하지 않는다(retained.contracts 동일).
+  ⚠ v2.26 개정: 위 "가명만 붙은"은 **Contract에 대해서는 문자 그대로가 아니다** — 스탬프된
+    계약의 vars에 {{회원명}}·{{회원 전화번호}}가 얼어 있어 5년 동안 함께 남는다(v2.18 §D ①).
+    의도된 잔존이고 파기하지 않는다(근거는 v2.26 절). **고지 대상**이라 개인정보처리방침·
+    계정삭제 안내가 이 사실을 적어야 한다.
 ```
 
 전자상거래법 §6②는 거래기록과 관련된 **성명 보존을 허용**하지만 **일부러 쓰지 않는다.**
@@ -1356,13 +1380,19 @@ GET  /v1/stats              탈퇴 회원은 어느 지표에도 들어가지 �
 ② Firebase 계정 삭제            ─┘ **같은 ID 토큰으로 재시도**된다(둘 다 멱등)
 ③ 미래 confirmed 예약 무차감 취소  (CancelAtomic — 슬롯 사본까지 비운다. 페널티 원장 없음)
 ④ 미서명(draft/sent) 계약 voided 종결 (v2.17 신설 — TransitionContract CAS, signed 불가침)
-⑤ 가명화 + 건강·이용 기록 파기     (Store.PurgeMemberPersonalData — 기록 먼저, 회원 문서 마지막)
-⑥ UserIndex 삭제                 (호출자의 권한 자체를 없애므로 반드시 마지막)
+⑤ 가입 요청 파기                  (v2.26 신설 — Store.DeleteJoinRequestsByUID. 최상위 컬렉션이라
+                                  ⑥의 센터 스코프 스윕이 구조적으로 닿지 못한다)
+⑥ 가명화 + 건강·이용 기록 파기     (Store.PurgeMemberPersonalData — 기록 먼저, 회원 문서 마지막)
+⑦ UserIndex 삭제                 (호출자의 권한 자체를 없애므로 반드시 마지막)
 
 메타보다 **파일을 먼저** 지운다: 반대로 하면 경로를 아는 유일한 문서가 먼저 사라져 민감정보
 원본이 버킷에 영영 남고, 그 잔존은 어느 화면에도 드러나지 않아 발견조차 불가능하다.
 VerifyIDToken은 계정 삭제를 확인하지 않아 토큰이 최대 1시간 유효하다 — ②가 앞에 있어도
-④⑤⑥의 재시도가 가능한 이유다(v2.0 퇴사 처리 주석과 같은 사실).
+④⑤⑥⑦의 재시도가 가능한 이유다(v2.0 퇴사 처리 주석과 같은 사실).
+
+⑤가 ⑥보다 **앞**인 것이 규약이다(v2.26): 뒤에 두면 실패한 순간 회원 문서는 이미 가명화돼
+재시도가 400("이미 탈퇴 처리된 계정이에요")에 막히고 **이름·전화번호가 영구히 남는다** —
+④를 ⑥ 앞에 둔 것과 같은 이유다.
 ```
 
 ### 체형사진 원본 파기 — v2.9가 적어 둔 갭을 닫는다
@@ -1550,7 +1580,7 @@ PUT /v1/center  → 바디가 {policy?, business?}. 둘 다 없으면 400.
              넣고 상호·주소가 바뀔 때만 손대는 값이다.
 ```
 
-### 신규 엔드포인트 — 유일한 무인증 v1 경로
+### 신규 엔드포인트 — 유일한 무인증 v1 경로 (v2.29부터는 둘 — `GET /v1/public/center` 참조)
 
 ```
 GET /v1/public/business        인증 불필요. /api/v1/public/business 에도 미러(P07).
@@ -1802,8 +1832,10 @@ POST /v1/admin/centers {id,name,phone?,address?,owner:{name,email}}
                                             (멱등). 이름이 다른 기존 ID는 409. 임시 비밀번호
                                             비노출 — 초대 메일은 어드민 프론트가
                                             sendPasswordResetEmail로(CreateStaff와 동일).
-GET  /v1/admin/centers                      → 200 [Center] — 신원 등록된 센터만(정책 지연 시딩·
-                                            헬스체크가 만든 유령 문서 제외), id 오름차순.
+GET  /v1/admin/centers                      → 200 [Center] — ⚠ v2.35 개정: **기본 센터 ∪ 신원 등록
+                                            센터**. 기본 센터는 상호가 비어도 name:"" 그대로 맨 앞
+                                            (v2.34까지는 신원 등록 문서만이라 운영 1호점이 빠졌다).
+                                            그 외는 상호 등록 문서만, id 오름차순. v2.35 절 참조.
 ```
 
 ### 기존 계약 변경
@@ -2118,6 +2150,8 @@ facility {report_status, report_no, insurance}   전 역할 공개(Business와 �
                                                  미선언이면 {"unknown","",""}.
 GET /v1/public/business                          **불변** — 키 집합이 전용 타입으로 고정돼
                                                  있고(v2.13), facility는 실리지 않는다.
+GET /v1/public/center                            (v2.29) {name, phone, address} 3칸 고정 — 여기도
+                                                 facility·policy는 실리지 않는다.
 ```
 
 ### 새 endpoint
@@ -2725,6 +2759,9 @@ owner만이다. 근거: 이 호출은 센터 공용 버킷에 **파일을 만든
 `uid`는 오브젝트 경로에 실리므로 `^[A-Za-z0-9_-]{1,128}$`만 받는다(경로 주입 차단, 400).
 없는 스태프면 **404이고 파일을 만들지 않는다** — 아무도 가리키지 않는 오브젝트는 메타에서
 출발하는 어떤 경로로도 발견되지 않는다.
+퇴사 처리된 스태프(inactive)면 **400** `"퇴사 처리된 스태프의 사진은 올릴 수 없어요 — 재입사 처리 후
+올려주세요"`(v2.31) — 역시 업로드 전이라 파일을 만들지 않는다. 퇴사가 파기한 것을 실수 한 번으로
+되살리지 않기 위해서다.
 
 요청 바디 상한은 이 경로만 **4MiB**다(공용 1MiB). base64가 3바이트를 4자로 부풀려 2MB 이미지가
 약 2.67MiB가 되므로, 공용 상한으로는 계약이 허용하는 정상 사진이 먼저 막힌다.
@@ -2748,16 +2785,21 @@ staff/photos/{uid}-{난수8자}.{jpg|png|webp}
 `storage.rules`는 **변경하지 않는다.** Admin SDK는 보안 규칙을 지나지 않으므로(v2.11
 MediaPurger와 같은 사실) 규칙을 열 이유가 없다.
 
-### 교체 — 옛 파일은 지운다(best-effort)
+### 교체 — 옛 파일은 지운다 (v2.31에서 개정 — best-effort 아님, 저장 앞, 실패 전파)
 
-프로필에 이미 `staff/photos/…` 오브젝트를 가리키는 URL이 있으면 **새 URL이 저장된 뒤에**
-그 오브젝트를 지운다. 순서가 뒤집히면 저장이 실패했을 때 프로필이 죽은 링크를 가리킨다.
-삭제 실패는 업로드를 실패시키지 않는다(로그만 남긴다) — 대표 입장에서 사진은 이미 바뀌었고,
-남은 파일 하나 때문에 성공한 일을 실패로 보여줄 이유가 없다.
+~~프로필에 이미 `staff/photos/…` 오브젝트를 가리키는 URL이 있으면 **새 URL이 저장된 뒤에**
+그 오브젝트를 지운다. 삭제 실패는 업로드를 실패시키지 않는다(로그만 남긴다).~~
+→ **v2.31 개정**: 순서는 "새 파일 업로드 → 옛 파일 삭제 → 프로필 저장"이고, 옛 파일 삭제가
+실패하면 방금 올린 새 파일을 best-effort로 되지운 뒤 **에러를 전파**한다(프로필 무변경, 옛
+URL·옛 파일 그대로). 저장 뒤 best-effort 삭제는 실패 시 옛 파일을 발견 경로 없는 고아로 만들었고,
+privacy.html "교체하거나 지우면 이전 파일은 삭제되며"를 실패한 삭제 뒤에 숨기는 고지로 만들었다.
+새 순서와 실패 창은 v2.31 "교체(⑤)" 절 참조. 위 문단은 v2.25 당시의 판단 기록으로 남긴다.
 
-**`staff/photos/` 접두가 아닌 URL은 절대 지우지 않는다.** 대표가 손으로 넣어 둔 외부
-URL(v1.6부터 정상 경로다)이나, 회원 체형사진 경로를 가리키는 토큰 URL이 프로필에 들어 있어도
-사진 교체 한 번이 남의 파일을 지우는 일이 없어야 한다. 호스트·경로 모양·접두를 모두 본다.
+**`staff/photos/{uid}-` 명의가 아닌 URL은 절대 지우지 않는다**(v2.31 개정 — 종전엔 접두
+`staff/photos/`만 봤다). 대표가 손으로 넣어 둔 외부 URL(v1.6부터 정상 경로다), 회원 체형사진
+경로를 가리키는 토큰 URL, **다른 스태프 명의의 우리 파일**, 다른 버킷의 URL이 프로필에 들어
+있어도 사진 교체 한 번이 남의 파일을 지우는 일이 없어야 한다. 호스트·경로 모양·접두·uid 명의·
+버킷(STORAGE_BUCKET 설정 시)을 모두 본다.
 
 오브젝트 경로를 프로필에 따로 저장하지 않고 **URL에서 되뽑는** 이유: `PUT /v1/staff/{uid}/
 profile`은 통 교체라 어드민이 보내지 않은 필드는 지워진다. 서버만 관리하는 `photo_path` 칸을
@@ -2783,12 +2825,14 @@ profile`은 통 교체라 어드민이 보내지 않은 필드는 지워진다. 
 (`FIREBASE_PROJECT` 미설정, 인메모리)에서는 항상 503이다 — 로컬에서 사진을 넣어 보려면
 v1.6의 URL 입력 경로를 계속 쓴다.
 
-### 퇴사·탈퇴와의 관계 (범위 밖 — 확인만)
+### 퇴사·탈퇴와의 관계 (범위 밖 — 확인만) (v2.31에서 개정 — 퇴사 시 파기한다, 아래 v2.31 참조)
 
 스태프 퇴사(`POST /v1/staff/{uid}/deactivate`)는 **소프트 전이**라 Staff 레코드도 프로필도
 남는다(v2.0 "하드 삭제를 하지 않는 이유"). 따라서 **퇴사 시 사진 파일을 지우지 않는다** —
 복직(`reactivate`)이 프로필을 그대로 되살리는데 파일만 없으면 깨진 이미지가 남는다. 회원탈퇴
 파기 경로(`PurgeMemberPersonalData`, v2.11)는 회원 개인정보 전용이며 스태프 사진과 무관하다.
+→ **v2.31**: 퇴사 시 파일을 파기하면서 `photo_url`도 함께 비우므로 "깨진 이미지" 우려는 사라진다 —
+복직·재고용은 이니셜 아바타로 시작한다. 위 문단은 v2.25 당시의 판단 기록으로 남긴다.
 
 현재 스태프를 **영구 삭제하는 경로는 서버에 없다.** 그래서 "지워진 스태프의 사진이 영원히
 남는" 상태도 아직 존재하지 않는다. 그 경로가 생기는 날 사진 파기를 함께 정해야 한다 —
@@ -2803,3 +2847,1172 @@ v1.6의 URL 입력 경로를 계속 쓴다.
 
 v1.6의 URL 직접 입력은 **그대로 유효하다**(제거하지 않는다). 이미 외부 URL로 사진을 넣어 둔
 센터가 깨지지 않아야 하고, 업로드가 미구성인 환경에는 그 경로가 유일한 수단이다.
+
+---
+
+## v2.26 탈퇴 파기 사각지대 — 요청 큐 2종이 이름·번호·메모를 남기고 있었다 (2026-08-30, P53, 이 섹션도 계약의 일부)
+
+엔드포인트는 늘지 않는다. `DELETE /v1/me` 응답의 `purged`에 **칸 두 개가 는다**
+(`consult_requests`·`join_requests`). 와이어 변경은 그게 전부이고, 실제 변경은 그 두 칸이
+가리키는 **파기 자체가 종전에 일어나지 않았다**는 것이다.
+
+### 왜 (지금까지 "지웠다"고 보고하면서 안 지우고 있었다)
+
+Google Play 데이터 보안 심사 점검 중 발견. v2.11의 파기는 컬렉션 목록이 아니라 **모양**으로
+정의돼 있었다 — "`centers/{centerID}/…` 아래에서 `member_id`가 일치하는 문서". 그 모양을
+벗어난 개인정보 두 벌이 조용히 살아남았다.
+
+```
+join_requests      **최상위 컬렉션**(승인 전엔 센터 귀속 전) + member_id 없음(uid 키)
+                   → 센터 스코프 스윕이 **구조적으로** 닿지 못한다. 담긴 것: 신청자가 직접
+                     적은 **이름·전화번호 원본**(POST /v1/join/request, v1.2)
+consult_requests   센터 스코프 + member_id 보유 → 닿을 수 있었는데 **목록에 없었다.**
+                   v2.11(08-25)보다 v2.20(08-29)이 나중이라, 새 컬렉션이 파기 목록에
+                   등록되지 않은 채 배포됐다. 담긴 것: 회원이 남긴 **자유 서술 note**
+```
+
+두 결함의 성격이 다르다 — 하나는 추상화의 사각지대, 하나는 등록 누락. 그래서 수리도 둘로
+갈린다(아래 ⑤ 신설 vs 스윕 목록 추가).
+
+무게: 개인정보보호법 §21①은 목적이 끝나면 **지체 없이** 파기하라고 하고, 이 두 컬렉션은
+계약·결제 기록이 아니라 §21① 단서의 예외를 타지 못한다. 앱의 계정 삭제 화면과 배포된
+개인정보처리방침이 *"지체 없이 파기"*를 약속하고 있으므로 **화면이 서버가 지키지 않는 약속을
+하고 있었고**, Play 데이터 보안의 "사용자가 삭제를 요청할 수 있음" 답변도 그 두 항목에 대해서는
+사실이 아니었다.
+
+특히 join_requests는 하나 더 있다: `JoinApprove`가 `jr.name`·`jr.phone`을 **그대로 새 회원
+레코드로 굳힌다**(v1.7). pending 요청 하나가 남아 있으면 대표의 승인 한 번으로 파기한
+이름·번호가 되살아난다 — v2.11이 *"phone을 비우는 것이 이 설계의 급소"*라며 세운 방어선을
+컬렉션 하나 옆에서 우회하는 경로다.
+
+### 파기·보존 판정 (컬렉션별로 따로 내렸다 — 일괄 적용하지 않는다)
+
+```
+JoinRequest      **완전 삭제**(익명화 아님)
+  근거   처리 목적 = "이 사람을 센터 회원으로 매칭·승인". 계정이 사라지면 그 목적은
+         **영구히 달성 불가능**하다(승인해도 붙일 계정이 없다).
+  왜 익명화가 아닌가  이름·번호를 지우면 남는 것은 {center_id, status, created_at}뿐이다 —
+         가리키는 사람도, 할 수 있는 일도 없는 껍데기다. 가명화는 **남은 것에 쓸모가 있을 때**
+         쓰는 수단이고(Ledger가 그렇다), 여기엔 그 쓸모가 없다.
+  범위   **센터로 좁히지 않는다**(uid 전체). 다른 센터 큐에 남은 요청도 같은 사람의
+         이름·번호이고, 그 계정은 이제 존재하지 않아 어느 센터도 승인할 수 없다.
+  상태   pending·approved·rejected **전부**. 거절된 요청도 이름·번호를 그대로 품는다.
+
+ConsultRequest   **완전 삭제**(익명화 아님)
+  근거   거래 기록이 아니다 — 이 큐에서 결제·발급은 일어나지 않는다(v2.20 본문). 데스크가
+         상담 후 남기는 실제 사업 기록은 Pass·Payment·Contract이고 **그쪽은 전부 보존된다.**
+         상담 요청은 그 앞의 손잡이일 뿐이라 5년 보존의 대상이 아니다.
+  note   회원이 직접 쓴 자유 서술이라 무엇이 적혔는지 서버가 알 수 없다. 실제로 "무릎이
+         아파서" 같은 건강 서술이 들어온다 — v2.11이 파기로 분류한 coach_note·flags[injury]와
+         같은 성격이고, 보존 근거는 없다.
+  왜 note만 비우지 않는가  탈퇴 후의 상담 요청은 **처리 자체가 불가능**하다(연락 수단이
+         전부 파기됐다). 남기면 데스크 큐에 영원히 처리 불가능한 유령 행이 남는다 —
+         v2.17이 미서명 계약을 voided로 종결한 것과 같은 판단인데, 그쪽은 **문서 보존
+         의무가 있어서** 상태만 바꿨고 이쪽은 그 의무가 없어 문서째 지운다.
+  집계   어떤 통계·KPI도 이 컬렉션을 읽지 않는다(삭제해도 숫자가 흔들리지 않는다).
+```
+
+### 실행 순서 — ⑤ 신설(v2.11 절의 실행 순서, 위에서 개정)
+
+`consult_requests`는 `PurgeMemberPersonalData`의 **스윕 목록에 한 줄 추가**로 끝난다(이미
+사정거리 안이다). `join_requests`는 그 동사가 닿지 못하므로 **새 스토어 동사 +
+새 단계**다.
+
+```
+Store.DeleteJoinRequestsByUID(ctx, uid) (int, error)
+  · 최상위 컬렉션을 uid로 훑는다(센터 무관, 단일 필드 필터 — 복합 인덱스 불요)
+  · 없는 uid도 성공(0건) — DeleteUserIndex와 같은 규약. 재시도가 막히면 이름·번호가 영구 잔존
+  · **빈 uid는 아무것도 지우지 않는다** — Firestore의 `uid == ""`는 uid가 빈 레거시 문서에
+    실제로 매칭한다(Memory만 보면 안 보이는 차이. 두 구현 모두 가드하고 적합성이 고정)
+```
+
+⑤의 자리가 ⑥(가명화)보다 **앞**인 것이 규약이다. 뒤에 두면 실패한 순간 회원 문서는 이미
+탈퇴 상태라 재시도가 400에 막히고 이름·번호가 영구히 남는다 — v2.17이 ④를 ⑤ 앞에 둔 것과
+같은 이유이고, 같은 성질(멱등)이라 부분 실패 후 재시도가 몇 번을 돌아도 결과가 같다.
+
+### 파기 목록에 없는 것 — Contract.vars의 이름·전화번호는 **남는다**
+
+v2.18(§D ①)이 send 시점에 `{{회원명}}`·`{{회원 전화번호}}`를 `vars`에 얼린다. 계약은 5년
+보존이므로 **이름·전화번호가 계약 스냅샷 안에서 그만큼 살아남는다.** 검토했고 **파기하지
+않기로** 했다.
+
+```
+① 봉인이 vars를 덮는다   sha256 = SHA-256(template_version + "\n" + canonical_json(vars)) (§D ②)
+                        vars에서 한 글자만 바꿔도 재계산 대조가 깨져 **서명된 계약의 사후
+                        변조 검출이 영구히 불가능**해진다. 봉인을 함께 다시 계산하는 것은
+                        더 나쁘다 — 그 연산은 진짜 변조와 구별되지 않는다.
+② 문서의 내용이다        계약서의 당사자 표시는 그 문서를 계약서이게 하는 것이다. 5년 보존의
+                        목적이 "그 거래가 있었다"의 입증인데, 당사자가 빈칸인 처분문서는
+                        그 목적을 잃는다. 전자상거래법 §6②는 거래기록과 함께 식별정보 보존을
+                        **명시적으로 허용**한다(v2.11이 회원 문서에서 쓰지 않기로 한 그 허용).
+```
+
+v2.11의 *"성명 보존을 일부러 쓰지 않는다"*와 모순처럼 보이지만 아니다. 그쪽에서 이름은
+**거래 기록을 가리키는 색인**이라 없어도 기록이 완전했다(그래서 불필요해진 개인정보였다).
+여기서 이름은 **기록 그 자체의 내용**이다. 같은 조문을 한쪽에선 쓰지 않고 한쪽에선 쓰는 것이
+일관된 판단이다.
+
+⚠ **다만 이것은 고지의 대상이다.** 개인정보처리방침·계정삭제 안내가 *"이름·휴대폰 번호는
+삭제됩니다"*라고만 적고 있으면 그 문장이 부정확해진다. 문서 수정은 이 절의 범위 밖이고
+P53에 필요한 문장이 적혀 있다.
+
+미서명(draft/sent) 계약에 한해 봉인이 아직 없으므로(§D ② — 봉인은 sign의 일) vars 레닥션이
+**기술적으로는** 가능하다. 채택하지 않았다: 탈퇴 void 스윕과 서명이 경합하면(v2.17이 실제로
+방어하는 창) 레닥션된 vars 위에 봉인이 찍혀 **당사자가 "[파기됨]"인 서명 계약**이 생긴다 —
+지금 상태보다 나쁘다.
+
+### 검증
+
+```
+파기 완전성   탈퇴가 그 회원의 가입 요청(pending·rejected 전부)과 상담 요청을 실제로 지우는가
+격리          같은 센터 이웃 회원의 상담 요청 · 아직 회원이 아닌 이웃 신청자의 가입 요청은 온전한가
+              (uid가 **빈** 레거시 문서도 살아남는가 — 빈 uid 가드)
+멱등          ⑤ 부분 실패 → 가명화 전에 멈추고 UserIndex 보존 → 같은 토큰 재시도가 완결
+정직성        응답 purged의 두 칸이 실제 삭제 건수와 일치(건수를 믿지 않고 다시 읽어 대조)
+계약 vars     탈퇴 후에도 회원명·전화번호가 그대로이고 **봉인 재계산이 여전히 일치**
+와이어        라우터를 태워 JSON 키로(purged에 consult_requests·join_requests 존재)
+```
+
+### 남은 갭
+
+`Contract.signature_png`(v2.21)도 계약 문서 안에 있어 5년 보존을 상속한다. vars의 이름·번호와
+같은 성격의 잔존이고 같은 결론(문서의 내용이므로 보존)이지만, v2.11의 *"가명만 붙은 거래
+기록"*이라는 표현은 그것까지 포함해 **문자 그대로는 사실이 아니다.** 위 v2.11 절에 개정
+주석을 달아 두었다.
+
+보유기간(5년) 만료 후 자동 파기는 여전히 없다(P22 후속 5) — 그 배치가 생기면 계약 문서의
+이름·번호도 그때 함께 사라진다. 그때까지는 고지가 그 자리를 대신한다.
+
+## v2.27 대기실(Lobby) — 대기 상태의 주인을 로컬에서 서버로 옮긴다 (2026-09-02, P55, 이 섹션도 계약의 일부)
+
+센터에 연결되지 않은 회원이 앱에서 **막다른 길에 갇혀 있었다.** 화면 제목은 "센터 선택"인데
+아래에 센터 목록이 없고, 있는 것은 "가입 요청을 보냈어요" 카드와 [연결됐는지 확인]
+[다시 요청] 두 버튼뿐이다. 그 상태의 주인은 **앱의 SharedPreferences**였다.
+
+이 절은 게이트를 옮기지 않는다(미연결 회원은 여전히 홈에 못 들어간다). 게이트를 **진실하고
+유용하게** 만든다. 그리고 그 과정에서 발견된, **이미 배포돼 있던 CRITICAL 2건**을 고친다.
+
+### 왜 (고친 것 중 둘은 이미 사용자를 다치게 하고 있었다)
+
+```
+C-2  좀비 가입 요청이 회원 기록을 통째로 날린다        (데이터 손실 · 되돌릴 API 없음)
+C-3  미연결 계정은 자기 이름·전화번호를 지울 수 없다   (개인정보보호법 §36 삭제 요구권)
+```
+
+**C-2의 재현 경로**(전부 정상 동선이다 — 어느 단계도 오용이 아니다):
+
+```
+① 회원이 앱에서 가입 요청       join_requests에 pending 1건 (이름·전화번호 원본)
+② 대표가 데스크에서 그 사람을    members에 진짜 레코드 생성
+   어드민에 직접 등록
+③ 회원이 번호 인증 → match      UserIndex.member_id = ②의 레코드
+   → confirm 으로 **연결**       회원권·예약·수업기록·체형사진이 전부 여기 붙는다
+④ ①의 pending은 **그대로 남는다**  JoinConfirm이 join_requests를 건드리지 않았다
+⑤ 며칠 뒤 대표가 큐를 정리하다   SaveMember가 **빈 회원 레코드를 새로 만들고**
+   ①을 승인                      SaveUserIndex가 신원을 그리로 옮긴다
+                                 → 회원권·예약·기록·사진 전부 상실. 되돌릴 API 없음
+```
+
+`JoinApprove`의 멱등 가드(v1.9)가 이것을 못 본다 — 그 가드는 **그 요청 문서의 status만**
+보는데 ①은 여전히 정직하게 pending이고, 진실은 다른 문서(UserIndex)에 있었다. 게다가
+목록이 pending 필터를 하지 않아 **처리된 요청이 큐에 남는 것이 기본 상태**였고, 대표가
+큐를 줄일 수단은 승인 하나뿐이었다(거절이 없었다) — ⑤는 예외 동작이 아니라 유일한 동선이었다.
+
+**C-3**: `DeleteMyAccount`가 `p.MemberID == ""`이면 `store.ErrNotFound`(404)로 **진입부터**
+막았다. 근거는 "지울 대상 자체가 없다"였는데 사실이 아니었다 — join_requests에는 신청자가
+직접 적은 **이름·전화번호 원본**이 있고 Firebase 계정에는 인증된 번호가 있다. v2.26이 만든
+파기 경로(`DeleteJoinRequestsByUID`)에 도달할 길이 **회원이 된 사람에게만** 열려 있었던 것이다.
+
+### 와이어 변경 (엔드포인트 1개 신설 · 필드 3자리 추가)
+
+```
+POST /v1/join/reject {request_id}                  신설(owner 전용)
+GET  /v1/me                     → join_request?    member_id가 없을 때만
+PUT  /v1/center                 ← center{...}      덩어리 3번째(policy·business 옆)
+GET  /v1/center                 → center{...}      상호·전화·주소 되읽기
+DELETE /v1/me                                      미연결 계정도 200(종전 404)
+GET  /v1/join/requests          → pending만        (필터는 응답에만 — 문서는 남는다)
+POST /v1/join/request           → 409 추가          같은 uid의 pending 중복
+```
+
+#### GET /v1/me — `join_request`
+
+```jsonc
+// 미연결(대기실) — member_id가 없다
+{ "uid":"u_abc", "role":"member", "center_id":"rise",
+  "join_request": { "status":"pending", "created_at":"2026-09-02T05:14:00Z" } }
+
+// 요청한 적 없음 — **키 자체가 없다**(omitempty)
+{ "uid":"u_abc", "role":"member", "center_id":"rise" }
+
+// 연결된 회원 · 스태프 — **키 자체가 없다**
+{ "uid":"u_abc", "role":"member", "center_id":"rise", "member_id":"mem_1", "name":"김민지" }
+```
+
+```
+status     "pending" | "approved" | "rejected"   (store.JoinRequest.Status 그대로)
+created_at RFC3339 UTC
+```
+
+**두 칸뿐인 것이 규약이다.** `id`·`name`·`phone`·`center_id`는 싣지 않는다 —
+`JoinMatchMember`(연결 전 최소 노출, v1.9)와 같은 규율이다. 이름·번호는 신청자가 방금 자기
+손으로 적은 값이라 서버가 되돌려줄 이유가 없고, `id`는 승인·거절이 owner 전용 동사라
+신청자에게 쓸모가 없다(있으면 "그 id로 무엇을 할 수 있나"를 찾게 만드는 표면만 는다).
+`center_id`는 v1 단일 센터라 진실이 아닌 선택지를 암시한다.
+⚠ v2.34 개정: **`center_id`를 싣는다**(3칸). 위 근거는 v2.33이 센터 선택을 열면서 소멸했다 — 이제는
+감추는 쪽이 거짓이다(요청은 2호점에 있는데 대기실은 1호점 연락처를 찍는다). 조회도 센터가 아니라
+**uid 기준**이다. v2.34 절 참조.
+
+**오라클 표면 없음**: 자기 uid로만 스코프된다. 남의 존재를 캐낼 수 없다.
+
+**best-effort다** — 조회가 실패해도 `/v1/me`는 200이다(표시 이름 `name`과 같은 규약).
+이 호출이 실패하면 앱은 온보딩도 시작하지 못하는데, 대기 상태 하나 때문에 그 위험을 지지 않는다.
+
+**`approved`가 나올 수 있는 유일한 경우**는 승인 도중 `SaveUserIndex`만 실패한 부분 잔여다
+(정상 승인은 member_id가 생기므로 이 필드가 사라진다). 앱은 그 값을 "승인됐는데 아직
+연결 중"으로 다루고 재조회하면 된다 — 잘못된 상태가 아니라 드문 중간 상태다.
+
+#### POST /v1/join/request — pending 중복 409
+
+```jsonc
+// 409
+{ "error": "이미 보낸 가입 요청이 있어요 — 센터에서 확인하면 연결돼요" }
+```
+
+`CreateConsultRequest`(v2.20)와 **같은 규칙·같은 문구 형태**다 — 새 패턴이 아니라 같은
+"회원발 요청 큐"에 이미 있던 규칙을 이쪽에도 맞춘 것이다. uid 스코프이므로 다른 신청자는
+막히지 않는다. **pending이 아닌 요청은 판정 대상이 아니다** — 거절된 뒤에는 다시 요청할 수 있다.
+
+#### POST /v1/join/reject — owner 전용
+
+```jsonc
+// 요청
+{ "request_id": "jreq_1a2b" }
+
+// 200 — 갱신된 요청 문서(name·phone이 빈 값이다)
+{ "id":"jreq_1a2b", "center_id":"rise", "uid":"u_abc",
+  "name":"", "phone":"", "status":"rejected", "created_at":"2026-09-02T05:14:00Z" }
+```
+
+```
+403  owner가 아님 · 남의 센터 요청(JoinApprove와 같은 두 겹 가드)
+404  **없는 request_id — 이 하나뿐이다**
+409  이미 처리된 요청("이미 처리된 가입 요청이에요")
+```
+
+⚠ **상태 충돌에 404를 쓰지 않는다.** 어드민은 이 엔드포인트의 404를 "이 배포에 아직 거절
+기능이 없음"으로 접어 안내 문구를 띄운다 — 두 사건이 같은 코드로 겹치면 이미 거절한 요청을
+다시 눌렀을 때 "거절 기능이 아직 서버에 올라가지 않았어요"가 뜬다.
+
+#### PUT/GET /v1/center — `center` 덩어리
+
+```jsonc
+// 요청 — 셋 다 선택. **보낸 칸만 갱신**(policy와 같은 머지 시맨틱)
+{ "center": { "name":"라이즈 컨디셔닝", "phone":"02-555-1234", "address":"서울 강남구 …" } }
+
+// 응답(PUT·GET 동일) — GET /v1/center 전체 모양
+{ "center_id":"rise",
+  "name":"라이즈 컨디셔닝",                                    // 하위호환 유지(center.name과 같은 값)
+  "center":{ "name":"…", "phone":"…", "address":"…" },        // v2.27 신설
+  "policy":{…}, "business":{…}, "facility":{…} }
+```
+
+```
+400  id·status·created_at을 보내면 거부(DisallowUnknownFields)
+400  policy·business·center 중 아무것도 없으면 거부
+403  owner가 아님
+```
+
+⚠ **`id`·`status`·`created_at`은 봉인이다.** `SaveCenter`는 두 스토어 구현 모두 `c.ID`를
+쓰기 대상 **키**로 쓴다 — `{"id":"gangnam-2"}` 하나가 통과하면 대표의 편집 폼이 **남의 센터
+문서를 덮어쓴다.** 그래서 요청 타입을 `domain.Center`가 아니라 세 칸짜리 전용 patch로 둔다.
+포인터인 이유는 부분 갱신이다: 보내지 않은 칸은 그대로 두고, **보낸 칸은 빈 문자열이어도
+반영한다**(잘못 적은 주소를 비워서 지우기 — business가 통 교체로 얻은 성질을 머지에서 얻는다).
+
+`name`을 top-level에도 남긴 이유: 앱·어드민이 이미 읽고 있는 키라 지우면 배포 순서가 뒤집힌다
+(서버 먼저 → 클라이언트 나중이 아니라 그 반대가 된다). `center.name`과 항상 같은 값이다.
+
+#### DELETE /v1/me — 미연결 계정 (종전 404 → 200)
+
+```jsonc
+// 미연결 계정의 응답 — **키 집합은 회원 경로와 같다**(숫자만 0)
+{ "deleted":true, "member_id":"", "withdrawn_at":"2026-09-02T05:20:00Z",
+  "purged":{ "body_photos":0, "inbody":0, "workout_logs":0, "hw_checks":0, "checkins":0,
+             "recurrings":0, "consult_requests":0, "join_requests":1 },
+  "retained":{ "passes":0, "payments":0, "contracts":0, "ledger":0, "bookings":0 },
+  "cancelled_bookings":0, "remaining_sessions":0 }
+```
+
+키가 달라지지 않는 것이 규약이다 — 앱의 완료 화면은 서버가 준 숫자만 옮기는 장치이고
+(v2.11 `RetainedCounts`), 계정 종류에 따라 키가 갈리면 그 화면이 분기를 갖게 된다.
+앱 1.0(5)+가 이 응답의 `purged.join_requests`·`member_id`를 완료 안내에 읽는다 — v2.29 절 끝 소비자 메모 참조.
+
+**탈퇴한 회원의 재호출도 이제 200이다**(종전 404). 탈퇴는 UserIndex를 지우므로 그 토큰의
+principal은 member_id가 없는 상태가 되는데, 그것은 **아직 연결되지 않은 대기실 계정과
+완전히 같은 모양**이다 — 서버가 둘을 구별할 수단이 없고, 대기실 쪽은 반드시 열려야 한다
+(C-3). 응답이 말하는 것은 "이 계정에 남은 것이 없다"이고 그것은 사실이다. 실제로 이 호출이
+가능한 창은 Firebase 계정 삭제 후 ID 토큰이 살아 있는 최대 1시간뿐이다.
+
+### C-2를 고친 방법 — **원인 제거와 방어선을 둘 다 둔다**
+
+```
+원인 제거   JoinConfirm이 성공하면 그 uid의 가입 요청을 파기한다
+            → P53이 만든 Store.DeleteJoinRequestsByUID를 **재사용**(새 스토어 동사 없음).
+              그 동사의 규약이 이 자리에 정확히 맞는다: uid 전체 스코프(다른 센터 큐의 요청도
+              같은 사람의 것이고, 연결된 지금은 어느 센터도 승인해선 안 된다) · 없는 uid도
+              성공 · 멱등.
+            → 자리는 **맨 뒤**다. 앞의 두 쓰기(SaveMember·SaveUserIndex)가 연결의 본체라,
+              이걸 앞에 두면 "큐에서도 사라지고 연결도 안 된" 사람이 생긴다 —
+              대표에게 보이지 않는 사람이다. 뒤에 두면 반대 잔여("연결됐는데 큐에 남음")가
+              생길 수 있지만 그쪽은 아래 방어선이 무해하게 만들고 재시도가 마저 지운다.
+            → confirm=false("본인이 아니에요")는 아무것도 지우지 않는다(연결되지 않았다).
+
+방어선      JoinApprove가 **이미 회원으로 연결된 uid**를 거절한다 → 409
+            → 이미 배포된 프로덕션에 잔여 요청이 실재하므로 원인 제거만으로는 부족하다.
+            → guardNotStaff가 이미 GetUserIndex를 부르는 자리 옆이다(조회 1회 추가).
+```
+
+⚠ **이 가드는 탈퇴 후 재가입을 막지 않는다 — 막으면 안 된다.** 탈퇴는 `DeleteUserIndex`를
+수행하므로 `GetUserIndex`가 ErrNotFound → 가드 통과 → 정상적으로 새 레코드가 생긴다.
+그리고 탈퇴자에게 `JoinConfirm`은 `IsWithdrawn`으로 막혀 있으므로(v2.11) **가입 요청 승인이
+돌아오는 유일한 길**이다. 여기서 막으면 탈퇴한 사람이 영원히 못 돌아온다 —
+`TestJoinApproveAllowsRejoinAfterWithdrawal`이 그 성질을 고정한다.
+
+**이미 프로덕션에 남아 있는 좀비 요청의 처리**: 승인은 이제 409이므로, 대표는 새로 생긴
+거절(D-3)로 큐에서 내린다. 그 문서는 `{uid, center_id, status, created_at}`만 남고
+이름·번호는 사라진다.
+
+### 큐가 진실을 말하게 — pending 필터와 거절
+
+`ListJoinRequests`가 **pending만** 돌려준다. 종전엔 승인·거절된 요청이 큐에 남아 대표가
+"처리할 것"과 "처리한 것"을 구별할 수 없었고, 그 착시가 두 번 누르는 동선을 만들었다
+(`JoinApprove`의 v1.9 주석이 *"두 번 누르는 게 기본 동선이다"*라고 자인하고 있었다 —
+그 문장이 이 절에서 사라진다).
+
+```
+감사 추적은 없어지지 않는다   필터는 **응답에만** 걸린다. 스토어의 동사는 여전히 전체를
+                             돌려주고, 문서는 status만 바뀐 채 남는다. 어느 것도 삭제되지
+                             않는다(삭제는 탈퇴 파기뿐 — v2.26). 이력 뷰가 필요해지면
+                             여기에 status 쿼리 파라미터를 여는 것이 다음 단계다. 지금 열지
+                             않는 이유는 **그것을 읽을 화면이 없어서**다.
+필터를 스토어가 아니라       Firestore에서 Where(center_id)에 Where(status)를 더하면 복합
+서비스에서 하는 이유         인덱스가 필요하고, 인덱스 없이 배포되면 **프로덕션에서만** 500이
+                             난다(Memory 구현으로는 보이지 않는다). 큐 규모가 센터당 수십
+                             건이라 서버 필터가 그 위험보다 싸다(ListMembers 필터와 같은 판단).
+```
+
+**거절이 이름·번호를 비우는 것**은 P53과 모순이 아니다. P53이 탈퇴 파기에서 익명화를 기각한
+근거는 *"남은 것에 쓸모가 없을 때"*였다(껍데기만 남는다). 여기서는 남은
+`{uid, center_id, status, created_at}`에 쓸모가 생긴다 — 신청자에게 **결론을 전달한다**
+(`GET /v1/me`의 `join_request`가 rejected를 읽는다). 같은 컬렉션을 한쪽에선 지우고
+한쪽에선 비우는 것이 일관된 판단이다.
+
+**문서를 통째로 지우지 않는 이유**: 지우면 신청자 화면은 "요청한 적 없음"으로 되돌아가고,
+그 사람은 "왜 아직 승인이 안 되지"라며 다시 요청한다 — 끊을 수 없는 재요청 루프가 생기고
+pending 중복 409도 그것을 막지 못한다(pending이 없으니 통과한다).
+
+### 열지 않은 것 — 바디의 `center_id`는 **계속 무시한다**
+
+`JoinRequestCreate`의 봉인은 유지된다. **다만 이유가 갱신됐다**:
+
+```
+종전의 이유   "그 센터의 회원인가"를 검증할 자리가 없다(멀티센터 미도래)
+지금의 이유   **넣을 목록이 없다.** 회원용 센터 목록 API가 없고(GET /v1/admin/centers는
+              superadmin 전용), ListCenters는 name이 빈 센터를 유령으로 거르는데 **운영
+              센터가 바로 그 상태였다** — 열어 봐야 고를 것이 0개인 선택지다.
+```
+
+v2.27은 그 선행조건 쪽을 먼저 고친다(PUT /v1/center의 `center` 덩어리로 센터가 신원을 갖는다).
+**선택을 여는 조건은 셋이다**: ① 신원 등록된 센터가 2곳 이상 ② 회원이 읽을 수 있는 목록
+엔드포인트 ③ `JoinRequestCreate`에 "그 센터가 실재하고 가입을 받는가" 검증. 셋이 갖춰지기
+전에 바디 값을 믿으면 종전 결함(존재하지 않는 센터로 200 → 어느 큐에도 안 뜨는 영원한
+pending)이 그대로 돌아온다.
+
+### 무변경 — 기존 가드 3겹
+
+```
+joinPhone       토큰의 검증된 phone_number가 유일한 출처(v1.7/P06)
+guardNotStaff   스태프 uid를 회원으로 연결(=강등)하지 못하게(v1.9)
+IsWithdrawn     탈퇴 레코드에 재연결 불가(v2.11)
+```
+
+이 절은 셋 중 어느 것도 건드리지 않는다. `GET /v1/center`의 체크인 QR 토큰 비노출
+(v2.23 키 집합 고정)도 그대로다 — `center` 블록은 전용 응답 타입이라 토큰이 무임승차할
+자리가 없고, 키 집합 테스트가 6키로 갱신돼 다음 필드 추가 때도 같은 질문을 강제한다.
+
+### 배포 순서
+
+```
+서버 먼저, 클라이언트 나중.  PUT /v1/center의 decodeJSON은 DisallowUnknownFields라
+                            **서버가 먼저 center 필드를 알아야** 어드민이 보낼 수 있다
+                            (v2.13이 business를 넣을 때와 같은 규약).
+앱은 그 다음.                join_request는 추가 필드라 구 앱이 무시한다(호환 파괴 없음).
+                            거절 기능도 어드민이 없는 동안 서버에만 있어도 무해하다.
+```
+
+### 검증
+
+```
+뮤테이션        가드를 하나씩 지워 테스트가 실제로 죽는지 확인(17건 전부 KILLED — work_log/P55)
+C-2 재현        연결 후 남은 좀비 요청 승인 → 409 + UserIndex·회원권·회원 수 불변
+C-2 원인        confirm 성공 후 그 uid의 요청이 사라지고 **이웃 신청자 것은 남는가**
+재가입          탈퇴 → confirm은 여전히 400 · request→approve는 200 + **새 레코드**
+C-3             미연결 탈퇴가 join_requests를 실제로 지우고 Firebase DeleteUser를 부르는가
+                (저장소를 다시 읽어 대조 — 응답의 건수를 믿지 않는다)
+C-3 순서        ⑤ 실패 → ⑦(UserIndex) 미실행 → 같은 토큰 재시도가 완결
+스태프 가드     owner·trainer·superadmin이 미연결 분기로 새지 않는가(가드 ① 무변경)
+최소 노출       join_request를 JSON으로 굳혀 키 2개 + 이름·번호 미포함
+격리            center 저장이 policy·business·facility를 건드리지 않는가(P27 교훈)
+봉인            center.id/status/created_at → 400 · 남의 센터 문서 무변경
+와이어          라우터를 태워 상태코드(200/400/403/409/404)와 JSON 키까지 고정
+에뮬레이터      스토어 인터페이스 **무변경**이므로 신규 케이스 없음. 새로 밟는 경로
+                (기존 센터 문서 위의 SaveCenter 머지)는 testCenterIdentity가 이미 고정하고
+                있고, firestore_emulator 러너 전량 통과를 재확인했다.
+```
+
+### 남은 갭
+
+```
+① /v1/me의 대기 조회가 센터 큐 전체를 훑는다   미연결 회원에게만 도는 경로이고 큐가 수십
+                                              건이라 지금은 값싸다. 큐가 커지면
+                                              ListJoinRequestsByUID(단일 필드 필터라 복합
+                                              인덱스 불요)가 다음 단계다.
+② 승인 부분 실패의 잔여                        SaveUserIndex만 실패하면 approved 요청 + 인덱스
+                                              없음이 남는다. /v1/me가 status:"approved"를
+                                              정직하게 보고하지만 자동 복구는 없다(재승인은
+                                              409). v2.6 계열의 트랜잭션화가 남은 자리다.
+③ 회원의 센터 선택                             위 "열지 않은 것"의 세 조건이 갖춰지면.
+④ 거절 이력 뷰                                 큐는 pending만 보여준다. 문서는 남아 있으므로
+                                              status 파라미터를 여는 것으로 족하다.
+```
+
+## v2.28 P56 감사 후속(백엔드) — 승인 후 잔류 개인정보 · 배열 null 읽기 정규화 · 파기 경계 미구성 503 · 철회 후 파기 경로 · 라우터 404 구분 (2026-09-04, P57, 이 섹션도 계약의 일부)
+
+P56 감사가 잡은 백엔드 결함 중 **"저장소가 다른 곳에서 이미 내린 판단과 어긋나는 자리"** 5건을 닫는다.
+새 기능이 아니다 — 형제 동사가 이미 내린 판단을 따라가게 만드는 것이다. 각 항목 옆에 그 선례를 적었다.
+
+### 왜
+
+```
+A5   JoinApprove가 이름·번호를 남긴다         3줄 옆 JoinReject는 "처리 목적이 끝난 개인정보"라며 둘 다 비운다.
+     DoneConsultRequest가 note를 남긴다       P53: 상담 요청 큐는 5년 보존 대상이 아니다(결제·발급이 일어나지 않는다)
+A3   Payment.installments가 null로 굳는다     Member.flags·Pass.holds는 "어드민 크래시 방지" 주석까지 달고
+                                             정규화 — 여기만 빠졌고, **읽기 쪽** 정규화는 셋 다 없었다
+A4   파기 경계 강등 4곳이 ListObjects→nil,nil  같은 파일 unconfiguredUploader는 "조용한 성공을 절대 만들지
+                                             않는다"(503). reconcile이 미구성 서버에서 항상 "고아 0건"이었다
+B1   DeleteBodyPhoto가 열람 게이트를 재사용     형제 DeleteInbody: "삭제는 동의 철회 이후에 **더** 필요한 동작"
+B12  라우터 404 = 리소스 404                   어드민 "404=미배포" 규약이 원리적으로 성립 불가 → B6 위험 지시
+```
+
+### 변경
+
+#### 요청 큐 — 처리 완료 시 개인정보를 비운다 (A5)
+
+```
+POST /v1/join/approve                  승인 후 요청 문서의 name·phone을 비운다(JoinReject와 동형).
+                                       남는 것: {uid, center_id, status:"approved", created_at}.
+                                       응답(회원 레코드)·/v1/me의 join_request(status·created_at)는 무변경.
+POST /v1/consult-requests/{id}/done    done 전이 시 note를 비운다. 행은 남는다(done→done 멱등 유지).
+                                       응답·목록의 note 키는 omitempty라 사라진다.
+```
+
+승인 큐 이력에서 "누구였는지"는 **회원 레코드가 답한다** — 승인은 이름·번호를 회원 레코드로 *옮기는*
+동작이지 복사하는 동작이 아니다. 요청 문서의 사본은 개명·정정을 따라가지 않아 남길수록 틀려지는 사본이고,
+join_requests는 최상위+uid 키라 센터 스코프 파기 스윕이 구조적으로 못 닿는다(P53). 이로써 privacy.html의
+*"처리 완료 또는 탈퇴 시 지체 없이 파기"*가 두 반쪽 모두 참이 된다(종전엔 탈퇴 절반만 참).
+
+#### 직렬화 계약 — 읽기 쪽 바닥 (A3)
+
+```
+배열 필드는 항상 []              Member.flags · Pass.holds · Staff.offdays · **Payment.installments**(신설)
+                                — 생성 경로뿐 아니라 **읽기 직전에도** nil→[] (이미 null로 굳은 문서를 위한 바닥)
+POST /v1/payments               installments 생략(일시불) → 저장·응답 모두 []
+GET  /v1/payments               프로덕션의 null 문서도 []로 나간다
+GET  /v1/members                flags null 문서 → 응답 [] (owner 목록 · member self 모두)
+PUT  /v1/members/{id}           머지 저장 시 flags를 []로 **치유**(종전 slices.Clone(nil)==nil이라 PUT으로도 안 나았다)
+GET  /v1/passes · members[].passes · POST /v1/passes/{id}/refund
+                                holds null 문서 → 응답 []
+Member.body_poses               **제외** — nil이 "센터 기본 사용"이라는 의미를 가진다(v2.10)
+```
+
+⚠ holds의 단건 응답 결함은 기본 `go test`(Memory)로는 **절대 안 죽는다** — Memory의 UpdatePassWithLedger*가
+롤백 안전을 위해 슬라이스를 새로 만들어 nil이 될 수 없고, Firestore는 fromDoc(JSON)이라 null이 nil로 온다.
+테스트는 Firestore 모양의 래퍼 스토어로 고정했다(P49·P53이 적은 "에뮬레이터 전용" 자리와 같은 계열).
+
+#### 파기 경계 미구성 — 훑기는 503, 탈퇴는 no-op (A4)
+
+```
+POST /v1/body-photos/reconcile   STORAGE_BUCKET 미설정 · 버킷 접근 실패 · 로컬(FIREBASE_PROJECT 미설정)이면
+                                 503 {error, code:"media_not_configured"}   (종전: 200 "고아 0건")
+DELETE /v1/me · DELETE /v1/body-photos/{id}(회원) · 유예 스윕 · POST /v1/body-photos/purge
+                                 무변경 — 미구성이면 파일 파기는 no-op(메타·계정·인덱스는 파기), 기동 로그 경고
+```
+
+두 동사를 **일부러 다르게** 다룬다. 훑기는 조회라 크게 실패해도 잃는 것이 없고, 조용히 성공하면 "버킷이
+깨끗하다"는 거짓 보고가 된다 — 그 도구는 바로 이 no-op이 남긴 고아 50개(v2.15) 때문에 만들어졌다. 탈퇴는
+§36 삭제 요구권이라 배포 설정 하나에 막히면 그쪽이 더 큰 거짓이다(P51 결정 유지: 파기 실패가 탈퇴를 막으면
+안 된다). `code:"media_not_configured"`는 어드민이 code 없는 503을 전달 경로 장애로 읽어 재시도를 권하기
+때문이다 — 재시도로 안 낫는 설정 문제임을 기계가 읽는다. 문구는 어느 값을 설정해야 하는지를 말한다.
+
+#### 체형사진 — 철회 후 파기 경로 완결 (B1)
+
+```
+DELETE /v1/body-photos/{id}          동의(sensitive)를 보지 않는다(DeleteInbody와 통일). 스코프는 그대로
+                                     (owner=전체 · trainer=담당 · member=본인). 종전: 철회 후 스태프 403.
+GET  /v1/body-photos?member=         동의 **무효** + 스태프 + 스코프 안 → 200 **BodyPhotoMeta[]**  (종전 403)
+                                       BodyPhotoMeta {id, member_id, pose, direction, date, deleted_at?}
+                                       — storage_path·blurred **없음**(열람은 여전히 잠긴다). 키 집합을 테스트로 고정.
+                                     동의 유효 · 회원 본인 → BodyPhoto[] 무변경.  스코프 밖 → 403 무변경.
+GET  /v1/body-photos?member=&include_deleted=true
+                                     **스태프 전용**: 소프트 삭제분(deleted_at 포함)까지 — v2.14 "30일 안에 복원"이
+                                     새로고침 뒤에도 참이 된다(종전엔 어드민이 세션 휴지통만 둘 수 있었다).
+                                     **회원은 403** — 조용히 무시하지 않는다. 회원 화면에서 삭제분은 "즉시
+                                     사라진다"(v2.13)가 계약이라 이 파라미터를 보내는 회원 앱은 버그이고,
+                                     버그는 크게 실패해야 보인다. 잠긴 목록(BodyPhotoMeta)에도 적용된다.
+POST /v1/body-photos/{id}/restore    무변경 — 복원은 동의 게이트를 지난다(되살리는 동작은 열람 쪽이다).
+```
+
+같은 엔드포인트의 **원소 모양이 동의 상태로 갈린다**. 배열 자체는 유지한다(회원 앱이 배열을 읽는다).
+어드민은 회원의 consent로 어느 쪽인지 이미 알고, `storage_path` 키의 유무가 두 번째 판별자다. 이로써
+방침의 *"철회 후 데스크에 삭제 요청"*이 서버·어드민 양쪽에서 실재한다 — 목록이 403이면 스태프는 지울 id를
+얻을 길이 없어 B1은 "서버만 열린" 절반 수리였다.
+
+#### 라우터 404 구분 (B12)
+
+```
+없는 경로(라우터)     404 {error:"찾을 수 없음", code:"route_not_found"}
+없는 리소스(id)       404 {error:"찾을 수 없음"}                          ← 무변경, code 없음
+405                  무변경(code 없음)
+```
+
+어드민의 "404 = 이 배포에 아직 없는 엔드포인트" 판정은 **`code === "route_not_found"`로만** 한다. code가 없는
+404는 전부 "그 id가 없다"다 — 사람이 읽는 `error` 문구는 판별자가 아니다(바뀌어도 되는 값이다).
+**`route_not_found`·`media_not_configured` 문자열은 어드민 상수와 글자 단위로 맞춰져 있으므로 바꾸지 말 것.**
+
+### 검증
+
+```
+뮤테이션        24건 → 23 KILLED · 1 제거(등가: PayInstallment의 읽기 정규화 — 인덱스 가드가 len(nil)==0으로
+               먼저 400을 내 응답에 nil이 실릴 수 없다. 죽일 수 없는 코드를 두지 않고 지웠다)
+               Memory 전용 초록 1건(holds 단건 응답)은 Firestore 모양 래퍼 스토어로 죽였다
+와이어          라우터를 태워 "installments":null · "flags":null · "holds":null 바이트 부재, 404 code 유무,
+               503 code, BodyPhotoMeta 키 집합(정확히 6키), include_deleted 회원 403을 고정
+동의 철회       실제 경로(PUT consent.sensitive=false)로 revoked_at을 찍고 검증 — 스토어 직접 수정은
+               SensitiveConsentValid의 판정 규칙을 비켜간다
+스토어          인터페이스·구현 무변경 → 에뮬레이터 신규 케이스 없음
+회귀            go build · go vet · go test ./... · go test -race ./... 전건 그린
+```
+
+### 남은 갭
+
+```
+① 과거 승인분의 join_requests            이번 수리는 앞으로의 승인만 비운다. 이미 approved인 문서의 name·phone은
+                                        1회성 마이그레이션(status=approved 문서의 두 칸 비움)이 필요하다 — 람 결정.
+② 업로드 503(ErrUploadUnavailable)의 code  같은 계열(STORAGE_BUCKET)이라 media_not_configured를 실어도 되지만
+                                        어드민이 요청하지 않아 이번엔 안 붙였다(붙이면 추가적 변경).
+③ 405의 code                             필요해지면 method_not_allowed — 지금 읽는 화면이 없다.
+④ 잠긴 목록의 판별자                       storage_path 키 유무 + consent. 명시 플래그(예: 응답 헤더)가 필요해지면
+                                        그때 연다 — 배열을 객체로 바꾸는 것은 회원 앱을 깨뜨리므로 금지.
+```
+
+## v2.29 공개 센터 신원 — 회원 앱이 어드민 "센터 신원"을 실제로 읽게 (2026-09-05, P56 L10, 이 섹션도 계약의 일부)
+
+### 왜
+
+v2.27이 `PUT /v1/center {center{name,phone,address}}`를 열고 어드민에 "센터 신원" 폼을 붙였다.
+폼의 효과 안내는 **"회원 앱의 센터 찾기 목록에 이 이름으로 뜹니다"**였는데 — 그런 목록은 없다
+(P55는 센터 선택 대신 대기실을 택했다), 그리고 앱은 그 3칸을 **어디서도 읽지 않았다**:
+
+```
+상호       앱 로컬 상수 '라이즈 컨디셔닝 센터 (강남)' — P48 목업 값, 지점 "강남"은 확인된 사실이 아님.
+           홈 헤더(이름 미해석 폴백)·다음 예약 카드·마이 탭·대기실 카드 5곳에 그대로 인쇄.
+전화·주소  대기실 연락 카드가 GET /v1/public/business(사업자 정보)를 읽음 — 어드민이 "센터 신원"에
+           저장한 센터 전화는 앱 어디에도 나오지 않았다.
+```
+
+P56 분류로는 **거짓 약속**(어드민 문안) + **와이어 불일치**(저장 경로와 읽기 경로가 다른 문서) +
+**선언만 있고 구현 없음**(CenterResponse.Name의 "클라이언트는 폴백한다" 규약 — 읽는 클라이언트가 없었다).
+발견 경로: 2026-09-05 대기실 E2E(에뮬레이터, 미연결 테스트 번호)에서 카드가 "(강남)"을 찍는 것을 보고
+출처를 좇았다.
+
+### 무엇이 바뀌나
+
+```
+GET /v1/public/center          인증 불필요. /api/v1/public/center 에도 미러(P07).
+
+  응답 200 { name, phone, address }              ← CenterIdentityView, PUT /v1/center {center}와 같은 키 집합
+  헤더     Cache-Control: public, max-age=300     ← /v1/public/business와 같은 이유(무인증 경로 읽기 증폭 차단)
+
+  미등록이어도 200 + 빈 3칸(404 아님) — 대기실이 "불러오지 못함"과 "등록 전"을 구분한다.
+  키는 항상 셋 다 나간다(omitempty 아님) — 클라이언트가 키 부재와 빈 값을 구분하지 않게.
+```
+
+**폴백 규칙 — 서버 한 곳에서.**
+
+```
+phone    center.phone   비어 있으면 business.phone
+address  center.address 비어 있으면 business.address
+name     폴백 없음 — 빈 문자열 그대로. 사업자명(법인명)과 센터 상호는 다른 값이다(어드민이 두 칸을
+         나눈 이유). 빈 상호는 클라이언트가 자기 임시 상수로 채운다(CenterResponse.Name 규약과 같다).
+```
+
+왜 서버에서 합치나: 앱·어드민이 각자 합치면 어느 화면은 센터 번호를, 어느 화면은 사업자 번호를
+말하는 자기모순이 생긴다. 왜 전화·주소만: 대표가 법정 고지 때문에 사업자 12칸을 먼저 채우고 센터
+3칸은 비워 두는 순서가 자연스럽고, 그때 대기실의 "센터에 전화하기"가 죽어 있으면 안 된다. 두 번호
+모두 이미 공개 값이라 새로 노출되는 것은 없다.
+
+**의도적으로 내보내지 않는 것**: `domain.Center`의 `id`·`status`·`created_at`, policy 전체, business
+전체, facility. 키 집합은 `service_public_center_test.go`가 3칸으로 잠근다 — 늘리는 일이 테스트에
+걸려 의식적인 결정이 되게.
+
+### 클라이언트
+
+```
+앱     centerContactProvider → GET /v1/public/center (종전 /v1/public/business). CenterContact.name 추가,
+       displayName = name ∥ AppConfig.centerFullName. 동기 centerDisplayNameProvider(String)를 홈 헤더·
+       다음 예약 카드·마이 탭·대기실 매칭/연락 카드 5곳이 읽는다 — 로딩 중엔 임시 상수, 서버 값이 오면 교체.
+       AppConfig.centerFullName = '라이즈 컨디셔닝 센터' — 지점명 "(강남)" 제거(검증 못 한 사실을 회원에게
+       사실처럼 찍지 않는다), 어드민 CENTER_NAME_FALLBACK과 같은 문자열로 정렬(등록 전 두 화면이 다른
+       이름을 말하지 않게).
+어드민 CENTER_IDENTITY_EFFECT_NOTE — "센터 찾기 목록" 문안 삭제. 앱이 실제로 읽는 자리(센터 연결 화면·홈·
+       마이 탭, 연락 카드의 전화·주소, 사업자 정보 폴백)만 적는다. 상호 미등록 경고도 같은 방향.
+앱     401 인터셉터 — `/v1/public/*`(·`/api/v1/public/*`)에서 온 401은 세션을 비우지 않는다. 공개 경로는 신원을
+       보지 않으므로 그 401은 신원 상실이 아니라 구서버(라우트 부재 → auth 미들웨어 401) 또는 헤더 첨부 실패다.
+       클라이언트가 "무인증 표면" 목록을 이 규칙에 쓰므로, 공개 경로를 더하면 `isPublicApiPath`도 함께 본다.
+```
+
+### 무인증 표면 (이 목록이 계약이다)
+
+```
+GET /v1/public/business   v2.13   사업자 12칸 + complete
+GET /v1/public/center     v2.29   센터 상호·전화·주소 3칸
+(+ /api/v1/ 미러 둘, /healthz·/health)
+```
+
+그 밖의 모든 `/v1/*`은 auth.Middleware 뒤다 — `TestPublicBusinessNeedsNoAuth`·`TestPublicCenterNeedsNoAuth`가
+`/v1/center`·`/v1/me`·`/v1/members`의 401을 함께 고정한다.
+
+소비자 메모(2026-09-06, P63 — 계약 변경 아님): 앱 1.0(5)+는 `DELETE /v1/me` 응답의 `purged.join_requests`(미연결 완료 안내의
+"보낸 가입 요청" 유무)와 `member_id`(빈 값 = 미연결 경로 → 완료 문구 선택)를 읽는다. v2.27이 정한 두 칸을 서버가 정리할 때 이 의존을 본다.
+
+## v2.30 접속기록 관측 규약 (2026-09-06, P61, 이 섹션도 계약의 일부)
+
+### 와이어 변경 없음
+
+요청·응답·상태코드·헤더 **무변경**. 앱(Flutter)·어드민(React)이 보내거나 받는 것은 하나도 바뀌지 않고,
+클라이언트가 추가로 보낼 식별자도 없다(정보주체 id는 이미 path·query·body에 있고 서버가 그것을 읽는다).
+이 절은 v1.2 §"기타 확정"의 `500 바디는 "서버 오류가 발생했습니다"(원문은 서버 로그)` 문장과 같은 층위 — **서버가 요청마다 무엇을 남기는가**를 계약에 적는다.
+어디에 얼마나 쌓이고 어떻게 점검하는가(버킷·sink·잠금·주기)는 `backend/README.md` 접속기록 절.
+
+### 왜
+
+privacy.html이 "개인정보처리시스템 접속기록 2년 이상 보관·위·변조 방지·점검"을 약속하는데(P56 L9)
+서버에는 chi 평문 요청 로그뿐이었다 — uid·정보주체·수행업무가 없어 「개인정보의 안전성 확보조치 기준」
+(고시 제2026-9호, 2026.7.1. 일부개정·같은 날 시행(law.go.kr 헤더 [시행 2026. 7. 1.] 확인)) §2의 '접속기록' 정의를 만족하지 못했고, 30일 뒤 사라졌다. 민감정보(체형사진·체성분)를
+처리하는 시스템이라 §8①2호 → 2년.
+
+### access 라인 스키마 — stdout JSON 한 줄, 요청당 1건
+
+```
+{"log_type":"access",                  ← sink 필터 키(jsonPayload.log_type="access"). 고정.
+ "severity":"INFO",                    ← 2xx/3xx/4xx INFO · 401/403 WARNING · 5xx ERROR (항상 명시)
+ "time":"2026-09-06T03:09:38.681Z",    ← RFC3339Nano UTC → LogEntry.timestamp
+ "message":"access owner1 PUT /v1/members/{id} 200",
+ "request_id":"…",                     ← middleware.RequestID (auth reject 로그·recoverJSON 로그와 같은 값)
+ "uid":"owner1","role":"owner","center_id":"rise",          ← 식별자(취급자). 401이면 세 칸 모두 ""
+ "method":"PUT","route":"/v1/members/{id}","path":"/v1/members/m1",   ← 수행업무. route는 chi 패턴,
+                                        미해석(401·404)이면 "/v1/*" 또는 "/api/v1/*" — path를 항상 병기
+ "status":200,"latency_ms":3,"bytes":412,
+                                        ← status: 핸들러가 헤더를 안 썼으면(0) 컨텍스트 DeadlineExceeded → 504
+                                          (chi Timeout이 accessLog 뒤에 504를 쓴다), 그 외 → 500
+ "aborted":true,                       ← 패닉으로 끊긴 요청에만. 헤더가 이미 나갔으면 status는 나간 값
+                                          (예: 200)을 유지하고 aborted:true — recoverJSON은 그 경우 연결을
+                                          끊지 코드를 바꾸지 않는다. 패닉이면 status 무관 severity ERROR
+ "remote_ip":"1.2.3.4",                ← RealIP 결과: True-Client-IP → X-Real-IP → XFF **첫** 값 순 —
+                                          셋 다 클라이언트가 지정할 수 있어 **위조 가능**. 포트 없음
+ "x_forwarded_for":"1.2.3.4, 10.0.0.1",   ← 원 헤더 전체(있을 때만, 512자 클립·초과 시 "…") — 교차 확인용
+ "xff_last":"10.0.0.1",                ← XFF **마지막** 값(있을 때만) = 프록시(GFE)가 덧붙인 값 → **신뢰 값**.
+                                          Hosting 리라이트 경유는 끝값이 Hosting 프록시라 끝에서 둘째가 클라이언트
+ "user_agent":"…",                     ← 있을 때만, 512자 클립·초과 시 "…"
+ "subject":{"member_id":"m1"},         ← 처리한 정보주체(있을 때만). member_id | resource_id | staff_uid
+ "logging.googleapis.com/trace":"projects/rize-218c1/traces/<TRACE_ID>"   ← GCP_PROJECT 있고
+                                        X-Cloud-Trace-Context 있을 때만. Cloud Run 요청 로그와 상관
+}
+```
+
+`/api/v1/*` 미러(P07)도 완전 패턴(`/api/v1/members/{id}`)으로 남는다 — 미러가 기록 우회 뒷문이 아니다.
+
+### 절대 싣지 않는 것
+
+요청·응답 **본문**, `Authorization`·`X-Dev-Uid`·`X-Dev-Role` 값, **쿠키**, **쿼리 문자열 원문**(`q=` 검색어에
+이름·전화번호가 들어온다 — 화이트리스트 `member` 값만 읽어 `subject.member_id`로 옮긴다), `Principal.Phone`,
+이름. `accesslog_test.go`(`TestAccessLogNeverContainsSecretsOrBody`)가 문자열 부재로 못 박는다. 이 목록을
+늘리는 변경은 계약 개정이다.
+
+### 기록 범위 · 거부 기록 규칙
+
+```
+스태프(owner·trainer·superadmin)   모든 요청 — 성공·실패·404·패닉(500)·타임아웃(504) 포함
+회원(member)                        401·403 외에는 기록하지 않는다(400·404·5xx 포함) (§8① "정보주체는 제외한다" + 최소수집)
+역할 무관                            401(토큰 없음/무효 — auth 앞에서 기록) · 403(스코프 위반) 은 항상 기록
+클로저 밖                            /healthz · /health · /api/health · /v1/public/* (+/api 미러) 는 기록하지 않는다
+```
+
+거부 기록이 가능한 이유는 미들웨어 순서다: `accessLog`가 `auth.Middleware`보다 **앞**에 서고 auth가
+Principal을 포인터 엔트리에 역주입한다(auth.go). 그 두 줄을 지우면 모든 스태프 요청이 미인증으로
+기록된다 — `TestAccessLogRecordsStaffRequest`가 잡는다. 회원 404 제외는 `TestAccessLogOmitsMemberSelfAccess`,
+504·aborted 분기는 `TestAccessLogTimeoutIs504`·`TestAccessLogPanicAfterHeaderKeepsStatus`, remote_ip 위조·xff_last는
+`TestAccessLogRemoteIPSpoofableXFFLastTrusted`, 512자 클립은 `TestAccessLogClipsLongHeaders`가 고정한다.
+
+### 핸들러 규약 — `setAccessSubject(ctx, memberID)`
+
+정보주체 식별자가 **본문에만** 있는 핸들러는 성공 응답을 쓰기 전에 1줄로 알려준다(미들웨어는 본문을
+읽지 않는다 — '본문 기록 금지' 원칙과 `decodeJSON`의 바디 소비가 충돌한다). 생성 동사는 응답 객체의 id를
+쓴다(생성 후가 정확). 현재 12곳: `CreateBooking` · `Checkin` · `CreatePass` · `CreatePayment` ·
+`CreateContract` · `CreateBodyPhoto` · `CreateInbody` · `CreateWorkoutLog` · `CreateHomework`(개인 배정
+1명일 때만 — 다수 배정은 subject 없음) · `CreateHwCheck` · `JoinApprove`(승인으로 생긴 회원 id) ·
+`CreateMember`(생성된 id). 훅이 없어도 라인은 남는다(route·path로 수행업무는 확정) — 누락은 "덜 정확"일
+뿐 조용한 실패가 아니다. **새 POST 핸들러가 본문의 회원 id로 개인정보를 처리하면 이 훅을 단다.**
+
+### chi `middleware.Logger` 제거
+
+같은 배포에서 제거했다. 컨테이너 stdout의 평문 요청 로그(`?q=` 포함 RequestURI)가 사라지고 access 라인이
+대신한다. **Cloud Run 요청 로그(30일)에는 쿼리 문자열이 여전히 남는다** — 이 규약이 보장하는 것은
+"접속기록(2년)에 싣지 않는다"까지다.
+
+---
+
+## v2.31 퇴사 시 프로필 사진 파기 — 퇴사는 스태프 사진의 목적 소멸이다 (2026-09-06, P62, P56 B13, 이 섹션도 계약의 일부)
+
+### 왜
+
+스태프 프로필 사진의 유일한 목적은 **회원 앱 공개**다(privacy.html 수집 항목 표 — "센터가 등록(회원 앱에
+공개됩니다)"). 퇴사(`deactivate`)는 그 목적이 소멸하는 시점이고, v2.0이 하드 삭제를 하지 않는 근거로 든
+근로자 명부 3년(근기법 §42·시행령 §20 — 성명·성별·생년월일·주소·이력·종사 업무·고용/퇴직일)에 사진은
+없으며, 정산 5년은 Payout 요율과 by_trainer 집계의 근거일 뿐 사진과 무관하다. 즉 **보존 근거가 없는
+개인정보 잔류**다(개인정보 보호법 §21① — 목적 달성 시 지체 없이 파기). 회원 응답 마스킹(v2.0 — inactive
+프로필을 빈 객체로)은 화면에서 감출 뿐 파일은 버킷에 무기한 남았다. v2.25는 "퇴사 시 지우지 않는다"를
+명시했는데(복직 시 깨진 이미지 우려), `photo_url`을 함께 비우면 그 우려는 생기지 않는다.
+
+### 무엇이 바뀌나 — `POST /v1/staff/{uid}/deactivate`
+
+```
+① Firebase 계정 잠금(DisableUser)              — 그대로. 실패하면 아무것도 바꾸지 않은 채 에러
+② UserIndex 강등(member)                       — 그대로. 즉시 차단의 본체
+③ [신설] 프로필 사진 파기
+     prevPath := ownedStaffPhotoPath(uid, photo_url)  // firebasestorage 호스트 + staff/photos/{uid}- 명의
+                                                      // + (STORAGE_BUCKET 설정 시) 같은 버킷일 때만
+     prevPath != "" ∧ purger 구성됨 → MediaPurger.DeleteObjects([prevPath])
+         실패 → 500 (status는 active로 남고 photo_url도 유지 — 재시도 자격 보존)
+         성공 → photo_url = ""
+     prevPath != "" ∧ purger 미구성 → 파기 건너뜀 + 로그 "staff photo purge skipped uid=… path=…",
+                                      photo_url **유지**, 퇴사는 진행(아래 "미구성 purger" 절)
+     prevPath == "" (사진 없음·외부 URL·다른 uid 명의·다른 버킷) → DeleteObjects를 부르지 않고 photo_url 무변경
+④ Staff 레코드 저장(status=inactive · left_at · photo_url) — 한 번의 쓰기
+```
+
+**명의 결속(검증 반영).** 초판은 접두 `staff/photos/`만 봤다 — A의 photo_url이 재직자 B의 파일을
+가리키면(대표가 URL을 복사해 붙여 넣으면 된다, PUT은 http(s)면 무엇이든 받는다) A의 퇴사·[사진 지우기]가
+**B의 얼굴을 지우고** B의 photo_url은 죽은 링크로 남았다. 업로드 명명 규칙 `staff/photos/{uid}-{난수}.{ext}`의
+uid가 곧 소유권이므로 판정에 넣는다(`{uid}-` 하이픈까지 비교 — "t1"이 "t10-…"에 걸리지 않게). 다른 버킷의
+URL도 제외한다 — DeleteObjects는 서버가 묶인 버킷 안의 경로만 지우므로 동명 파일을 지우게 된다. 남의 uid
+명의·다른 버킷 URL은 **외부 URL과 완전히 같게** 다룬다(파일·포인터 무변경).
+
+**순서의 근거.** 삭제는 불가역이므로 ①② **뒤**다 — ①②가 실패하면 퇴사 자체가 실패인데 사진만 먼저
+사라지면 "재직 중인데 사진이 없어진" 부작용이 남는다. ④ **앞**인 이유: 저장 뒤에 지우면 삭제 실패 시
+포인터가 이미 비어 파일이 발견 경로 없는 고아가 된다(P22). 앞에 두면 ④가 실패했을 때 "파일은 없는데
+URL은 남은" 창이 생기지만, status가 아직 active라 재시도가 `이미 퇴사` 400에 막히지 않고, 재시도의
+삭제는 `ErrObjectNotExist`를 성공으로 세므로(v2.11 `firebaseMediaPurger`) 그때 URL이 비워진다 —
+**멱등으로 수렴**한다. 그 사이 어드민·앱 아바타는 onError/errorBuilder로 이니셜 폴백한다.
+
+**실패는 전파한다(best-effort가 아니다).** ②가 끝난 시점이라 500을 내도 사람은 이미 잠겨 있어 보안상
+잃는 것이 없고(기존 ④ SaveStaff 실패 전파와 같은 취급), status가 active로 남아 재시도가 수렴하며,
+어드민이 실패를 본다. 조용히 성공시키면 privacy.html의 "퇴사 처리되면 사진 파일도 함께 삭제됩니다"가
+**재시도 동사 없는 거짓 약속**이 된다(스태프판 reconcile이 없다). 회원탈퇴 파기(v2.11)와 같은 정책.
+
+**불변식.** `photo_url == ""` ⇔ **이 uid 명의의 우리 파일**(`staff/photos/{uid}-…`)이 없다(purger가
+구성된 환경에서). 외부 URL(v1.6 수기 입력)·다른 uid 명의·다른 버킷은 파일도 포인터도 건드리지 않는다 —
+우리가 파기할 수 없는(또는 우리 것이 아닌) 것을 "삭제됨"처럼 보이게 하지 않고, 다른 프로필 칸
+(직함·경력·자격·소개)은 보존되는데 외부 링크만 지울 근거도 없다. 회원에게는 어차피 마스킹된다.
+
+### `PUT /v1/staff/{uid}/profile`도 같은 파기 판정을 한다
+
+어드민 [사진 지우기]는 빈 `photo_url`로 프로필 PUT을 보내는데, 종전엔 포인터만 비워 업로드 파일이
+고아가 됐다(외부 URL로 덮는 PUT도 동일). 이제 `prev := ownedStaffPhotoPath(uid, 기존)`, `next :=
+ownedStaffPhotoPath(uid, 새 값)`에서:
+
+```
+next != "" ∧ next != prev   → 409 "사진이 그 사이 바뀌었어요 — 새로고침 후 다시 저장해주세요"
+                              (파일·프로필 무변경)
+prev != "" ∧ prev != next   → 저장 전에 이전 파일 삭제(실패 → 500, 프로필 무변경)
+                              purger 미구성 → 삭제 건너뜀 + 로그, photo_url은 기존 값 **유지**, 나머지 칸 저장
+그 외(prev == next · 둘 다 "")  → 삭제 없음
+```
+
+**409 가드(검증 반영 — 통 교체 시맨틱의 유일한 예외, v1.6 절에 표기).** 프로필 PUT은 **우리 파일 포인터를
+새로 만들 수 없다** — 그 포인터는 업로드 엔드포인트만 박는다. 저장된 값과 다른 우리 파일 URL이 오면 그것은
+stale이다(이 화면이 열린 뒤 다른 창에서 사진이 교체·삭제됐다): 초판은 이를 "교체"로 보고 **현재 파일을
+지우고 이미 없는 옛 파일의 URL을 박아** 죽은 링크를 만들었다. 퇴사가 파기한 URL을 되돌려 보내는 것도 같은
+409다(`prev == ""`, `next` = 우리 파일 — 파기의 역행 차단). 어드민은 서버 `error` 문구를 그대로 그리고(api.ts
+`req` — JSON 본문의 error가 상태코드 폴백을 덮는다) 그 문구가 remedy(새로고침)를 말하므로 어드민 코드
+변경은 없다.
+
+통 교체라 어드민(대표·본인 트레이너 모두)은 같은 URL을 그대로 되돌려 보내므로 `prev == next` → 삭제 없음.
+외부 URL·다른 uid 명의·다른 버킷 URL을 지우거나 덮는 PUT은 `prev == ""`라 삭제 호출이 없다.
+
+**실패 창.** 삭제 성공 뒤 SaveStaff가 실패하면 파일은 없고 URL은 남는다(재직자 → 앱·어드민 아바타 이니셜
+폴백). **같은 PUT을 재시도**하면 수렴한다(재시도의 삭제는 `ErrObjectNotExist`를 성공으로 세고 그 뒤 저장이
+URL을 비운다). 같은 URL을 되돌려 보내는 일반 저장은 `prev == next`라 이 창을 닫지 않는다 —
+`TestUpdateStaffProfileSaveFailureAfterDeleteConvergesOnRetry`(hookStore SaveStaff n==2)가 고정한다.
+
+### `POST /v1/staff/{uid}/photo` — 교체(⑤)도 전파 정책이다 (검증 반영, v2.25 개정)
+
+```
+① 검증 → ② 스태프 조회(퇴사자 400) → ③ 새 파일 업로드
+⑤ prev := ownedStaffPhotoPath(uid, 기존 photo_url); prev != "" ∧ prev != 새 경로 → 삭제
+     실패 → 방금 올린 새 파일 best-effort 되지우기 → 에러 전파(프로필 무변경, 옛 URL·옛 파일 그대로)
+     purger 미구성 → 삭제 건너뜀 + 로그(옛 파일 잔존, 새 URL은 저장됨 — 그 환경에선 업로더도 미구성이라
+                    실제로는 503에서 끝난다)
+④ 프로필 저장(photo_url = 새 URL)
+     실패 → 방금 올린 새 파일 best-effort 되지우기 → 에러 전파
+```
+
+v2.25는 ⑤를 ④ 뒤 best-effort로 뒀다("성공한 업로드를 실패로 보이게 하지 않기 위해"). 그 정책은 삭제 실패
+시 옛 파일을 **발견 경로 없는 고아**로 만들고, privacy.html "교체하거나 지우면 이전 파일은 삭제되며"를
+실패한 삭제 뒤에 숨기는 고지로 만들었다 — 이제 삭제가 실패하면 **교체 자체가 실패**하고 대표는 다시 올린다.
+그래야 그 문장이 참이다(퇴사 ③·프로필 PUT과 같은 정책, 같은 헬퍼 `purgeStaffPhoto`).
+
+**실패 창.** ⑤ 성공 뒤 ④가 실패하면 "새 파일 고아(되지우기까지 실패한 경우) + 옛 URL 죽은 링크"다(옛
+파일은 이미 없다). 재시도(업로드 다시 → prev 삭제 = `ErrObjectNotExist` 성공 → 저장)로 수렴한다.
+
+### `POST /v1/staff/{uid}/photo` — 퇴사자 400
+
+`GetStaff` 뒤 `!IsActive()`면 **400** `"퇴사 처리된 스태프의 사진은 올릴 수 없어요 — 재입사 처리 후
+올려주세요"`. 업로드 전이라 파일이 생기지 않는다. 퇴사가 파기한 것을 실수 한 번으로 되살리는 역행 경로를
+막는다. 재입사(reactivate·같은 이메일 재초대) 뒤엔 자연히 열린다. 프로필 PUT은 우리 파일을 만들지
+않으므로 퇴사자에게도 그대로 열려 있다(외부 URL 입력 가능 — 범위 밖).
+
+**동시성 한계**: 트랜잭션이 없어 deactivate ③~④ 사이에 들어온 업로드는 가드를 통과할 수 있고, 그 경우
+deactivate의 stale 저장이 새 URL을 덮어 새 파일이 고아가 된다. 기존 last-writer-wins 경로들과 같은
+급이며, 이 절은 그 창이 있음을 적어 둘 뿐 닫지 않는다.
+
+### 복직·재고용
+
+`reactivate`와 재초대(`POST /v1/staff` → rehire)는 코드 무변경 — 프로필은 보존하되 `photo_url`은 퇴사 때
+이미 비어 있다(v2.0 "profile·offdays는 보존"에 photo_url 예외 표기). 복직은 이니셜 아바타로 시작하고
+필요하면 대표가 다시 올린다. 어드민 재입사·초대·퇴사 모달이 이를 말한다.
+
+### 미구성 purger의 창 (`STORAGE_BUCKET` 없음 · Storage 초기화 실패)
+
+`unconfiguredPurger.DeleteObjects`는 no-op 성공이다(v2.28 — 파기 실패가 탈퇴를 막으면 안 된다). 초판은 그
+성공을 믿고 `photo_url`을 비웠다 — **파일은 남고 포인터만 사라지는** 고아다(검증 이슈 5, 정정). 이제
+`MediaPurger.Configured() bool`(신설 — unconfigured=false, firebase=true)을 보고 스태프 경로 세 자리(퇴사 ③·
+프로필 PUT·교체 ⑤)는 미구성이면 **파기를 건너뛰고 `photo_url`을 유지**한다: 요청당 로그 `staff photo purge
+skipped uid=… path=…` 한 줄, 퇴사·프로필 저장 자체는 진행(에러 아님 — 즉시 차단의 본체는 ①②). 남은
+포인터가 버킷이 구성되는 날 파일을 좇을 유일한 발견 경로다. 회원탈퇴 경로는 종전대로(no-op 성공 — 메타도
+함께 지워져 포인터가 남을 자리가 없다). 기동 경고 3분기 문구도 "파기를 건너뛰고 photo_url을 유지합니다"로
+정정. `TestDeactivateWithUnconfiguredPurgerKeepsURL`·`TestUpdateStaffProfileWithUnconfiguredPurgerKeepsURL`이
+고정한다.
+
+### 기존 잔류분 정리 (코드로 소급되지 않는다)
+
+이 배포 이전에 퇴사 처리된 스태프의 파일과, [사진 지우기]가 남긴 고아는 남아 있다. 측정은 람이 한다:
+`gcloud storage ls gs://<STORAGE_BUCKET>/staff/photos/ | wc -l` vs Firestore `staff` 컬렉션에서
+`profile.photo_url`이 `firebasestorage…/staff%2Fphotos`인 문서 수(active/inactive 별). 차이 = 고아(교체
+삭제 실패분·지우기 잔류분) + inactive 문서가 가리키는 파일. 0이면 할 일 없음, 소수면 `gcloud storage rm` +
+Firestore 콘솔에서 해당 inactive 문서 `profile.photo_url=""`(코드 0) — 또는 서버 배포 뒤 어드민 퇴사 행의
+[사진 지우기] 후 저장(파일·포인터를 서버가 함께 지운다, 문서당 1클릭). 재발 방지 도구가 필요하면
+`POST /v1/staff/photos/reconcile`(v2.28 reconcile의 스태프판 — `known` = active 스태프의 경로 집합)을
+별도 P로. 또한 버킷의 `softDeletePolicy`(2024-03 이후 생성 버킷 기본 7일)가 켜져 있으면 "삭제" 뒤에도
+최대 7일 복구 가능 상태로 잔존한다 — 확인: `gcloud storage buckets describe gs://<STORAGE_BUCKET>
+--format='value(softDeletePolicy)'`.
+
+### 클라이언트 · 법정문서 · 배포 순서
+
+- 어드민(`Settings.tsx`): 퇴사 행에서 여는 ProfileModal은 `photoEditable=false`([사진 선택] 숨김 — 서버 400)
+  + `clearable`([사진 지우기]만 노출 — 퇴사자 PUT은 서버가 허용한다, 검증 반영). 문장은 저장된 `photo_url`
+  값으로 가른다: 빈 값이면 "퇴사 때 업로드했던 사진 파일은 삭제됐어요", 값이 남아 있으면(이 배포 이전 퇴사분·
+  미구성 건너뜀·외부 주소) "이전 방식으로 남았거나 외부 주소인 사진이에요 — [사진 지우기] 후 저장하면
+  파일도 삭제돼요". 명사는 서버 400과 같은 '스태프'. 퇴사·재입사·초대 모달 문안에 "사진 파일 삭제·재입사 시
+  비복원"을 적는다. 앱은 **무변경** — 회원 응답은 이미 inactive 프로필을 마스킹하고 TrainerAvatar는 빈 값/
+  실패 모두 이니셜 폴백.
+- privacy.html: ① 수집 항목 표의 프로필 사진 행 "사진을 교체하거나 지우면 이전 파일은 삭제되며, 스태프가
+  퇴사 처리되면 사진 파일도 함께 삭제됩니다"(교체 삭제가 실패하면 교체 자체가 실패하므로 참이다 — 위 ⑤ 절).
+  ② **처리위탁 표의 Cloud Storage 행**(검증 반영): 위탁 항목이 "체형사진"뿐이었는데 스태프 프로필 사진도
+  같은 버킷에 있다 → "체형사진, 스태프 프로필 사진".
+- **배포 순서(검증 반영)**: ① 서버 배포 → ② 잔류 측정·정리(아래 절 — `gcloud storage rm` + inactive 문서
+  `photo_url` 비움, 또는 어드민 퇴사 행의 [사진 지우기] 후 저장 — 이 경로는 서버가 파일까지 지운다) →
+  ③ 어드민·privacy.html Hosting. 고지가 구현을 앞서면 거짓 약속 창이 생기고, 어드민의 "삭제됐어요" 문장은
+  잔류분이 정리된 뒤에야 참이다.
+- 범위 밖(후속): 스태프 프로필의 나머지 칸(직함·경력·자격·소개)도 목적이 회원 앱 공개뿐인데 퇴사 후 보존
+  근거는 재고용 편의(v2.0)뿐이고, privacy.html 보유기간 표에 스태프 정보 행이 없다 — P56 후속.
+
+## v2.32 멀티센터 가입 연결 — 번호가 센터를 정한다 (2026-09-06, P65, 이 섹션도 계약의 일부)
+
+### 무엇이 고장나 있었나
+
+`POST /v1/join/match`와 `POST /v1/join/confirm`이 **`Principal.CenterID`로** 회원을 찾았다.
+그런데 앱을 처음 켠 사람은 `UserIndex`가 없어 인증 미들웨어가 **`DEFAULT_CENTER_ID`를 꽂아
+준다**(`auth.enrich`). 즉 2호점 데스크가 회원을 등록해도 그 회원의 앱은 **1호점에서만** 자기를
+찾았고, 영원히 "아직 연결된 센터가 없어요"에 갇혔다. 관리 평면(v2.16)으로 센터를 만들 수 있게
+된 뒤에도 **신규 센터의 회원 연결이 통째로 불가능**했다는 뜻이다.
+
+### 규약
+
+두 endpoint는 `Principal.CenterID`를 **쓰지 않는다**. **검증된 전화번호**(`joinPhone` — 운영에서는
+Firebase 토큰의 `phone_number`만)로 **전 센터를 훑어** 회원을 찾고, 그 회원이 있는 센터가 곧
+그 사람의 센터다. 회원은 센터를 고르지 않는다(설계04 §4: PT는 데스크 상담 → 등록 → 앱 연결
+순서라 회원이 센터를 고르는 순간이 현실에 없다).
+
+```
+조회 대상 센터   DEFAULT_CENTER_ID ∪ GET /v1/admin/centers 목록. 정렬·중복 제거.
+                 **기본 센터를 항상 포함한다** — ListCenters는 상호(center.name)가 등록된
+                 문서만 돌려주는데 1호 고객이 그 상태라(2026-09-06 실측 name:"")
+                 목록만 믿으면 기존 회원 전원의 연결이 끊긴다.
+살아 있는 1건    그 (센터, 회원)으로 매칭·연결.
+살아 있는 2건+   409 conflict "여러 센터에 등록된 번호예요 — 다니시는 센터 데스크에 문의해주세요".
+                 **고르지 않는다**: UserIndex가 uid당 센터 1건이라(memberships[]는 Phase D)
+                 한쪽을 고르면 그 선택이 굳고 회원은 다니지 않는 센터의 회원권을 본다.
+살아 있는 0건 +  탈퇴 회원을 돌려준다(센터 ID 오름차순 첫 건) — 호출부의
+탈퇴 1건+        "탈퇴한 회원이에요" 안내를 살리기 위해서다.
+아무것도 없음    match → 200 {needs_confirm:false} · confirm → **400**(404 아님).
+```
+
+### 응답 변경 — `POST /v1/join/match`
+
+```
+center   객체(선택) — 매칭된 **그 회원의 센터** 신원 {name, phone, address}.
+         GET /v1/center·PUT /v1/center의 center 절과 같은 모양(CenterIdentityView).
+         미매칭이거나 **상호가 미등록이면 필드 자체를 생략**한다(빈 문자열 세 칸을 보내면
+         클라이언트가 "센터를 받았다"고 판단해 빈 이름을 그린다).
+```
+
+추가 필드이므로 기존 클라이언트는 무시하고 그대로 동작한다. 앱 대기실은 아직 센터 상호를
+무인증 `GET /v1/public/center`(기본 센터 고정)에서 읽으므로 **2호점 회원에게 1호점 상호를
+보여준다** — 앱이 이 `center`를 읽도록 바꾸는 것이 남은 일이다(work_log/P65 후속).
+
+### `POST /v1/join/confirm` 방어선 순서 변경
+
+종전: 클라이언트의 `member_id`로 레코드를 열고 → 번호를 대조.
+현행: **번호로 서버가 레코드를 고르고** → 클라이언트의 `member_id`가 그것과 같은지 대조
+(다르면 400 "회원 정보가 일치하지 않아요"). 클라이언트가 센터도 레코드도 고르지 못한다.
+
+400 문구는 이유를 특정하지 않는다(탈퇴·없는 member_id·번호 변경 셋 다 같은 문구) —
+갈라 말하면 `mem_000001` 꼴의 ID를 넣어 보며 존재를 알아내는 오라클이 된다.
+
+### 아직 열리지 않은 것
+
+**미등록 번호의 가입 요청**(`POST /v1/join/request`)은 여전히 `Principal.CenterID`(= 기본 센터)
+큐로 간다. 서버는 그 사람이 어느 센터를 원하는지 알 방법이 없다 — 설계04 §4의 권고대로
+**센터별 초대 코드/QR**이 정답이고, 그건 앱 화면 변경을 동반한다(P65 후속).
+
+## v2.33 센터 선택 가입 요청 · 법정 문서의 센터 차원 (2026-09-06, P66, 이 섹션도 계약의 일부)
+
+v2.32가 **등록된 회원**의 센터를 번호로 풀었다면, 이 절은 **아직 등록되지 않은 사람**과
+**법정 문서**의 센터를 푼다.
+
+### 1) `GET /v1/join/centers` (신설, 인증 필요)
+
+가입 요청을 보낼 수 있는 센터 목록.
+
+```
+응답  [{id, name, address?, phone?}]   — 센터 ID 오름차순, 중복 없음
+집합  DEFAULT_CENTER_ID ∪ ListCenters  (v2.32의 joinCenterIDs와 같은 집합)
+```
+
+- **상호가 빈 센터도 뺀 목록이 아니다.** `ListCenters`는 상호 미등록 문서를 유령으로 거르는데
+  1호 고객이 그 상태다 — 걸러 버리면 그 센터를 고를 방법이 사라져 기존 신규 회원의 가입
+  요청 경로가 통째로 막힌다. `name: ""`로 실어 보내고 클라이언트가 자기 폴백 라벨을 쓴다.
+- 정책·사업자 정보·회원 수는 **싣지 않는다**: 읽는 사람이 아직 어느 센터의 회원도 아니고,
+  B2B2C에서 타 센터의 운영 수치는 남에게 보일 값이 아니다.
+- **무인증으로 열지 않는다.** 센터 목록은 이 서비스를 쓰는 사업장의 목록이라 익명 크롤링
+  표면으로 둘 값이 아니다. 전화 인증만 끝난 신규 사용자면 읽을 수 있다(역할 게이트 없음).
+
+### 2) `POST /v1/join/request` — `center_id`를 **쓴다**
+
+종전에는 바디의 `center_id`를 **무시**했다(P41). 그 봉인의 이유는 "임의 문자열을 신뢰하면
+존재하지 않는 센터로 200이 나가고, 그 요청은 어느 대표의 큐에도 안 떠 신청자가 영원히
+기다린다"였고, 열 조건 셋을 코드 주석이 미리 적어 뒀다: ① 신원 등록 센터 2곳 이상
+② 회원이 읽을 수 있는 목록 ③ 실재 검증. ②·③이 이 절이고 ①은 런타임 조건이다.
+
+```
+center_id 생략   Principal.CenterID(신규 uid면 기본 센터) — 종전 동작, 구버전 앱 호환
+center_id 지정   `GET /v1/join/centers` 집합에 있으면 그 센터, 없으면 **400**
+정규화           소문자 · 앞뒤 공백 제거(문서 키가 되므로)
+```
+
+**신뢰 경계는 그대로다**: 클라이언트가 고를 수는 있어도 만들 수는 없다.
+
+앱 규약: 목록이 **2곳 이상일 때만** 선택을 묻고, 그때는 고르지 않으면 요청을 보내지 않는다.
+1곳 이하면 선택 UI를 그리지 않고 `center_id`를 비워 보낸다(선택지 없는 선택 화면은 방해다).
+
+### 3) `GET /v1/public/business` · `GET /v1/public/center` — `?center=`
+
+```
+?center 없음     기본 센터 (배포된 구 링크 호환)
+?center=<known>  그 센터
+?center=<모름>   **404**
+```
+
+**모르는 센터에 기본 센터로 폴백하지 않는다.** 이 응답이 개인정보처리방침의 "개인정보처리자"와
+계정 삭제 안내의 접수 창구로 인쇄된다 — 폴백하면 그 문서는 단순 오표기가 아니라 **거짓 고지**다.
+404를 받으면 문서는 자기 자리표시자를 유지한다.
+
+`PublicCenter`의 전화·주소 폴백도 **그 센터의** 사업자 정보에서 가져온다(종전 기본 센터 고정).
+
+### 4) 법정 문서 HTML · 앱 링크
+
+- 문서 5장 + 지원 페이지는 자기 URL의 `?center=`를 그대로 API에 넘기고, **같은 폴더 링크에
+  그 값을 승계**시킨다(승계하지 않으면 이용약관 → 개인정보처리방침 한 번에 다른 센터의 고지가 된다).
+- 앱 마이 탭의 약관·방침 4행은 **세션의 센터**를 붙여 연다(`LegalLinks.forCenter`).
+  센터를 모르는 자리(대기실)에서는 붙이지 않는다 — 빈 파라미터는 404가 된다.
+
+### 이미 센터별이던 것 (확인만)
+
+**전자계약**은 처음부터 센터 스코프였다(`gatherContractVars(ctx, p.CenterID, …)` → 두 호출부
+모두 `p.CenterID`). 계약서에 남의 사업자 정보가 인쇄될 경로는 없었다.
+
+
+## v2.34 대기실의 센터 차원 · 승인의 번호 중복 가드 · 공개 센터의 수업 시간 (2026-09-08, P69, 이 섹션도 계약의 일부)
+
+람이 두 가지를 가져왔다 — "앱에서 가입 요청을 보내면 어드민에서 신청한 회원을 볼 곳이 없다"와
+대기실 실사 화면("친구가 생각한 대기실은 이런 모습이 아니다"). 어드민 쪽 답은 와이어 변경 없이
+**큐를 회원 관리 탭 최상단으로** 옮기는 것이었고(어드민 갈래), 대기실 쪽을 조사하다 v2.33이 연
+센터 선택을 v2.27의 대기 상태 조회가 **못 따라가고 있던 결함**을 찾았다. 이 절은 그 결함과,
+같은 조사에서 드러난 승인 쪽 구멍 하나, 대기실 카드가 그릴 공개 값 하나를 닫는다.
+
+### 왜 (이미 배포돼 있던 CRITICAL 1건)
+
+```
+① 회원이 앱에서 2호점(gangnam-2)을 골라 가입 요청     join_requests에 center_id=gangnam-2로 저장(v2.33)
+② 앱이 GET /v1/me로 대기 상태를 묻는다                 latestJoinRequest가 **Principal.CenterID 큐**만 훑는다
+③ 미연결 uid의 Principal.CenterID = 기본 센터 폴백      (v2.32가 match/confirm에서 이미 지적한 "진실 아님")
+   → 1호점 큐에 그 사람의 요청이 없다 → join_request 키 생략
+④ 앱은 "요청 없음"으로 읽고 재요청 버튼을 연다         → 같은 센터 409("이미 보낸 요청") 반복 — 막다른 길
+```
+
+같은 조회가 대기실 연락 카드도 틀리게 했다: `join_request`에 센터가 없으니 앱은 항상 기본 센터의
+`GET /v1/public/center`를 찍었다 — 2호점 신청자가 1호점 전화번호를 본다.
+
+### 와이어 변경
+
+```
+GET  /v1/me                → join_request{status, center_id, created_at}   center_id 추가(3칸), 조회는 uid 기준
+POST /v1/join/request      → 409 본문 {error, code:"join_pending", center_id}   code·center_id 추가
+POST /v1/join/approve      → 409 추가: 같은 번호의 살아 있는 회원이 이 센터에 있음
+GET  /v1/public/center     → {name, phone, address, open_hour, close_hour}   수업 시간 2칸 추가(?center= 승계)
+```
+
+#### GET /v1/me — `join_request.center_id`
+
+```jsonc
+{ "uid":"u_abc", "role":"member", "center_id":"rise",
+  "join_request": { "status":"pending", "center_id":"gangnam-2", "created_at":"2026-09-08T05:14:00Z" } }
+```
+
+- **조회는 uid 기준이다**(`Store.ListJoinRequestsByUID`, 센터 무관, 최신 먼저). 미연결 uid의
+  Principal 센터는 폴백이라 진실이 아니다 — match/confirm이 번호로 전 센터를 훑는 것(v2.32)과
+  같은 원칙이다. 비용도 준다: 센터 큐 전체(N, 상태 무관, 운영 기간에 비례해 자란다) 대신 그
+  사람의 요청(k, 보통 1~2)만 읽는다. Firestore는 `uid ==` 단일 필드 쿼리라 복합 인덱스가 없다.
+- v2.27의 "center_id는 싣지 않는다" 근거("v1 단일 센터라 진실이 아닌 선택지 암시")는 v2.33이
+  선택을 열면서 소멸했다. 자기 uid 스코프의, 신청자가 방금 자기 손으로 고른 값이라
+  (`GET /v1/join/centers`가 인증 사용자에게 이미 주는 집합의 원소) 새 오라클 표면은 없다.
+  `id`·`name`·`phone`은 계속 싣지 않는다.
+- 앱은 이 값으로 **그 센터의** `GET /v1/public/center?center=`를 그리고, 코치 미리보기는
+  `me.center_id == join_request.center_id`일 때만 그린다(`GET /v1/staff`는 Principal 센터 고정이라
+  다른 센터 코치는 어차피 못 받는다 — 타 센터 명부를 미연결에 열지 않는다).
+
+#### POST /v1/join/request — 409 본문
+
+```jsonc
+{ "error":"이미 보낸 가입 요청이 있어요 — 센터에서 확인하면 연결돼요", "code":"join_pending", "center_id":"rise" }
+```
+
+- **판정 범위는 종전대로 그 센터**(같은 uid의 pending이 그 센터에 있을 때). 다른 센터에 pending이
+  있어도 이 센터 요청은 받는다 — 잘못 고른 센터를 바로잡을 철회 동사가 없는 상태에서 전 센터로
+  넓히면 사용자를 가둔다. 두 번째 요청의 승인은 `JoinApprove`의 "이미 연결된 uid" 가드(v2.27)가
+  막으므로 데이터 손실은 없다(남는 pending은 대표가 거절로 정리). 철회 동사(`DELETE
+  /v1/join/request`)와 전 센터 409는 **함께** 들어와야 하는 한 쌍이라 후속으로 남긴다.
+- `code`는 판별자, `error`는 표시 문구다(라우터 404의 `route_not_found`와 같은 규약). 새 앱은
+  이 409를 "서버 확답 pending"으로 승격시켜 대기 화면으로 돌아간다 — 종전엔 이 409가 일반
+  실패로 떨어져 사용자가 같은 버튼을 반복해서 눌렀다. 구앱은 `error`만 읽으므로 무해.
+
+#### POST /v1/join/approve — 같은 번호의 활성 회원이 있으면 409
+
+```jsonc
+{ "error": "같은 번호로 등록된 회원(김민지)이 이미 있어요 — 승인하면 회원이 2명이 돼요. 그 회원의 번호를 확인하고, 회원에게 앱에서 '번호 다시 인증하기'를 눌러 달라고 안내해주세요" }
+```
+
+- 승인은 `jr.Phone`으로 **새** 회원 레코드를 만든다(v1.7). 그 번호의 살아 있는 회원이 이 센터에
+  이미 있다는 것은 "데스크가 이 사람을 (요청 이후에) 등록했다"는 뜻이고, 옳은 연결은 승인이
+  아니라 회원의 재인증(`join/match → confirm`, 연결되면 A-5가 pending을 파기)이다. 승인하면 같은
+  사람이 둘이 되고 회원권·예약은 데스크 레코드에, 앱 계정은 빈 레코드에 붙는다 — C-2의 변종.
+- 대조는 `FindMemberByPhone`(정규화 비교 — 표기가 달라도 같은 번호). **탈퇴자는 걸리지 않는다**
+  (탈퇴는 번호를 파기하고, 재가입은 승인이 유일한 길 — v2.27 `TestJoinApproveAllowsRejoinAfterWithdrawal`).
+  가족이 한 번호를 쓰는 경우는 두 번째 사람을 다른 번호로 등록해야 한다 — 번호는 앱 매칭의 키라
+  둘이 같으면 어느 쪽도 자동 연결이 안정적이지 않다.
+- 어드민 큐는 같은 판정을 **화면에서 먼저** 보여준다(같은 번호·같은 이름 힌트, 승인 확인 창의
+  경고) — 그러나 화면 경고는 방어선이 아니라 서버가 막는다.
+
+#### GET /v1/public/center — `open_hour`·`close_hour`
+
+```jsonc
+{ "name":"라이즈 컨디셔닝", "phone":"02-…", "address":"…", "open_hour":9, "close_hour":21 }
+```
+
+- 의미는 `GET /v1/center`의 policy와 같다(첫 슬롯 시작·마지막 슬롯 시작, **양끝 포함**). 앱은
+  "수업 09:00–22:00"처럼 **`close_hour+1`**로 끝 시각을 그린다(21:00 시작 수업이 마지막이다).
+- 운영시간은 간판·지도에 공개되는 값이라 익명 노출에 거절 논거가 없다. 정책의 나머지(용량·
+  위약금율·매출 목표)는 여전히 나가지 않는다(키 집합 잠금 테스트 5키). 응답 타입은 신원 3칸
+  `CenterIdentityView`와 분리한 `PublicCenterView` — 3칸 타입은 `PUT /v1/center`의 `center` 덩어리와
+  공용이라 거기에 시간을 섞으면 대표의 편집 폼이 시간 칸을 되돌려 보낸다.
+- 값은 정책 실값이다 — 대표가 정한 적이 없으면 기본 9·21이 나가는데, 그 값이 곧 앱 예약 격자가
+  실제로 여는 시간이므로 지어낸 사실이 아니다.
+
+### 호환·배포
+
+- 심사 중인 앱 1.0.0+8: 생성 파서가 지정 키만 읽어 `center_id`·`open_hour` 추가는 무시된다.
+  409 본문 확장도 `error`만 읽으므로 무해. 새 앱 + 구서버: DTO 기본값(`''`·null)으로 종전 동작.
+- 순서: **Cloud Run → Hosting(어드민) → 앱 빌드 +9**. 어드민 회원 탭 큐는 기존 `GET
+  /v1/join/requests`로 동작하므로 서버와 독립이지만, 승인 409 문구는 서버 배포 후에야 나온다.
+
+### 후속(이 절이 열지 않은 것)
+
+- `DELETE /v1/join/request`(본인 pending 철회) + 전 센터 409 — 한 쌍으로.
+- `GET /v1/join/requests`의 trainer 열람(어드민 회원 탭에서 트레이너도 큐를 보게) — 승인·거절은 owner 유지.
+- 승인 푸시(FCM) — 대기실 폴링은 푸시가 와도 남는다.
+
+## v2.35 관리 평면 센터 목록에 기본 센터 상시 포함 (2026-09-08, P70, 이 섹션도 계약의 일부)
+
+### 왜
+superadmin이 처음 연 **센터 관리** 화면이 "아직 등록된 센터가 없습니다"였다 — 운영 중인 1호점
+(라이즈)이 있는데도. `GET /v1/admin/centers`가 v2.16부터 **상호가 등록된 문서만** 돌려줬고
+(정책 지연 시딩·헬스체크가 만드는 정책-only 유령 문서를 거르려고), 1호점이 정확히 그 상태
+(`GET /v1/public/center` → `name:""`, 2026-09-08 재실측)였기 때문이다. P65는 이 사실을 화면 각주로
+설명하고 넘겼는데, 람이 그 각주보다 빈 목록을 먼저 읽었다 — 운영 중인 센터가 안 보이는 목록은
+유령을 거른 것이 아니라 진실을 거른 것이다.
+
+### 변경
+```
+GET /v1/admin/centers   → 200 [Center]
+  집합   DEFAULT_CENTER_ID ∪ 상호 등록 센터   (v2.33 GET /v1/join/centers와 같은 집합)
+  순서   기본 센터 맨 앞 → 나머지 id 오름차순
+  기본 센터가 상호 미등록이면   {id, name:"", status:"active", created_at: "0001-01-01T00:00:00Z"}
+                               — 빈 채로 보낸다(JoinCenters 규약). 클라이언트가 "상호 미등록"으로 그린다.
+  기본 센터가 상호를 등록하면   같은 자리에 한 번만(중복 없음).
+  기본 센터가 아닌 상호 미등록 문서   여전히 제외(유령).
+```
+
+### 무변경
+- 응답 모양(`[Center]`)·키 집합 그대로. `name`이 빈 문자열일 수 있게 된 것뿐이다 — 어드민 외
+  소비자 없음(superadmin 전용 경로).
+- `POST /v1/admin/centers`는 name 필수 그대로 — 관리 평면으로 만든 센터는 항상 목록에 오른다.
+- 상호를 채우는 경로는 그대로 owner 전용 `PUT /v1/center {center}`(v2.27). superadmin은 못 고친다.
+
+### 자문자답
+- **기본 센터가 유령일 수 있나?** 없다. config가 운영 센터라고 선언한 값이라 문서 상태와 무관하게
+  실재한다(회원·스태프가 그 키 아래 산다).
+- **기본 센터 문서가 아예 없으면?** GetCenter가 ErrNotFound 대신 ID만 채운 빈 값을 주는 스토어 규약이
+  그대로 적용된다 — 목록에 `name:""`로 오른다. 없다고 숨기지 않는다.
+- **created_at 제로값을 서버에서 지워야 하나?** 응답 타입이 domain.Center라 `time.Time`은 omitempty가
+  안 듣는다. 어드민이 "0001-"을 "—"로 접는다. 다른 소비자가 생기면 그때 전용 응답 타입으로.

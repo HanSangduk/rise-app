@@ -27,6 +27,11 @@ func (h *Handlers) CreateHomework(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	// 접속기록 정보주체(v2.30): 배정 대상이 여럿(scope)일 수 있어 개인 배정(대상 1명)일 때만
+	// 확정한다 — 여럿을 한 칸에 욱여넣으면 점검 리포트의 uid×member 집계가 깨진다.
+	if len(hw.TargetMemberIDs) == 1 {
+		setAccessSubject(r.Context(), hw.TargetMemberIDs[0])
+	}
 	writeJSON(w, http.StatusOK, hw)
 }
 
@@ -43,6 +48,7 @@ func (h *Handlers) CreateHwCheck(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	setAccessSubject(r.Context(), c.MemberID) // 접속기록 정보주체(v2.30) — 스태프 대행 입력 시
 	writeJSON(w, http.StatusOK, c)
 }
 

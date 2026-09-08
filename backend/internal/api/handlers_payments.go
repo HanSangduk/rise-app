@@ -20,6 +20,7 @@ func (h *Handlers) CreatePayment(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	setAccessSubject(r.Context(), pay.MemberID) // 접속기록 정보주체(v2.30)
 	writeJSON(w, http.StatusOK, pay)
 }
 

@@ -35,6 +35,11 @@ abstract interface class CameraPermissionGate {
   Future<void> openSettings();
 }
 
+/// iOS 주의: permission_handler_apple은 카메라 코드를 `PERMISSION_CAMERA=1` 매크로가 있을 때만
+/// 컴파일한다(ios/Podfile post_install). 매크로가 빠지면 플러그인이 프롬프트 없이
+/// status=denied → request=permanentlyDenied 를 돌려주고, 이 게이트는 그걸 "사용자가 거부했다"로
+/// 읽어 곧장 설정 안내를 띄운다 — 2026-09-07 App Store 리젝 1.0(7) 5.1.1(iv)(work_log/P67).
+/// Dart에서는 두 경우를 구분할 수 없으므로 방어선은 빌드 페이즈(ios/scripts/check_release_target.sh)다.
 class PermissionHandlerCameraGate implements CameraPermissionGate {
   const PermissionHandlerCameraGate();
 
@@ -44,7 +49,8 @@ class PermissionHandlerCameraGate implements CameraPermissionGate {
       var status = await Permission.camera.status;
       // 안드로이드는 "한 번도 안 물어본" 상태도 denied로 준다 — 그래서 denied면
       // 곧바로 판정하지 않고 반드시 한 번 요청해 본다(요청 후의 denied가 진짜 거부).
-      if (!status.isGranted && !status.isPermanentlyDenied && !status.isRestricted) {
+      // limited(iOS 사진 전용 상태 — 카메라엔 안 오지만)도 이미 허용이라 묻지 않는다.
+      if (!status.isGranted && !status.isLimited && !status.isPermanentlyDenied && !status.isRestricted) {
         status = await Permission.camera.request();
       }
       if (status.isGranted || status.isLimited) return CameraPermissionResult.granted;

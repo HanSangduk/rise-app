@@ -52,7 +52,7 @@ abstract final class AppTypography {
   static const chipOn = TextStyle(
     fontSize: 10.5,
     fontWeight: FontWeight.w800,
-    color: AppColors.red,
+    color: AppColors.brand,
   );
 
   static const button = TextStyle(

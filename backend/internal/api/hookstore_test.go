@@ -113,6 +113,15 @@ func failFirst(op string, err error) func(string, int) error {
 
 // ---- 래핑(돈·세션 경로가 부르는 메서드) ----
 
+// GetUserIndex — P56: "가드가 조용히 꺼지지 않는다" 테스트가 이 조회를 실패시킨다.
+// JoinApprove의 좀비 승인 방어선(P55 C-2)이 이 호출 하나에 걸려 있다.
+func (h *hookStore) GetUserIndex(ctx context.Context, uid string) (*store.UserIndex, error) {
+	if err := h.enter("GetUserIndex"); err != nil {
+		return nil, err
+	}
+	return h.Store.GetUserIndex(ctx, uid)
+}
+
 func (h *hookStore) GetPass(ctx context.Context, centerID, id string) (*domain.Pass, error) {
 	if err := h.enter("GetPass"); err != nil {
 		return nil, err
@@ -300,6 +309,28 @@ func (h *hookStore) SaveStaff(ctx context.Context, centerID string, s *domain.St
 		return err
 	}
 	return h.Store.SaveStaff(ctx, centerID, s)
+}
+
+// SaveUserIndex — 퇴사 ②단계(UserIndex 강등, v2.31)의 **부분 실패** 재현용. ②가 실패했을 때
+// ③ 사진 파기가 일어나지 않아야(파일 무삭제·URL 유지·status active) "삭제는 불가역이라 ①② 뒤"라는
+// 순서 근거가 테스트로 고정된다 — Memory는 절대 실패하지 않아 이 래핑 없이는 주입할 수 없다.
+// hookedOps(돈·세션 원자성 스윕)에는 넣지 않는다 — 그쪽 관심사가 아니다.
+func (h *hookStore) SaveUserIndex(ctx context.Context, idx *store.UserIndex) error {
+	if err := h.enter("SaveUserIndex"); err != nil {
+		return err
+	}
+	return h.Store.SaveUserIndex(ctx, idx)
+}
+
+// DeleteJoinRequestsByUID — 탈퇴 ⑤단계(P53)의 **부분 실패** 재현용. 이 단계가 실패했을 때
+// 회원 문서가 아직 가명화되지 않아야(=재시도 자격이 남아야) 이름·번호가 영구히 살아남지
+// 않는다 — 단계 자리의 근거를 실측하는 유일한 수단이다. hookedOps(돈·세션 원자성 스윕)에는
+// 넣지 않는다 — 그쪽 관심사가 아니다.
+func (h *hookStore) DeleteJoinRequestsByUID(ctx context.Context, uid string) (int, error) {
+	if err := h.enter("DeleteJoinRequestsByUID"); err != nil {
+		return 0, err
+	}
+	return h.Store.DeleteJoinRequestsByUID(ctx, uid)
 }
 
 // hookedOps — 찢어진 쓰기 스윕이 하나씩 실패시켜 볼 메서드 목록. 위에서 래핑한 것과 같아야

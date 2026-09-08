@@ -2,30 +2,49 @@ import 'package:flutter/foundation.dart';
 
 /// API 서버 설정. Base `/v1` (API계약_v1.md).
 ///
-/// 로컬 백엔드 기본값 — 실제 배포 시 `--dart-define=API_BASE_URL=https://...`
-/// 로 오버라이드(TODO: CI/CD에서 환경별 주입).
+/// **기본값이 빌드 모드로 갈린다**(P46):
+///   · 디버그(`flutter run`·테스트) → 로컬 백엔드. 개발자가 매번 `--dart-define`을
+///     붙이지 않아도 되고, 로컬 서버를 띄워 놓고 바로 개발한다.
+///   · 릴리스·프로파일 → **프로덕션 Cloud Run**. 종전엔 릴리스도 기본값이
+///     `localhost`라 `--dart-define`을 빠뜨린 빌드가 조용히 전멸했다(그 화면은
+///     "연결이 불안정해요"라 회원도 대표도 원인을 못 찾는다 — 실제로 실기기
+///     테스트에서 이 증상이 났다).
+///
+/// `--dart-define=API_BASE_URL=...`을 주면 **모드와 무관하게** 그 값이 이긴다
+/// (스테이징·에뮬레이터 `10.0.2.2`·실기기에서 로컬 서버 붙이기 등).
 abstract final class ApiConfig {
-  static const baseUrl = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: 'http://localhost:8080',
-  );
+  /// 프로덕션 백엔드(Cloud Run, asia-northeast3). 어드민 Hosting의 `/api` 리라이트가
+  /// 가리키는 것과 같은 서비스다.
+  static const productionBaseUrl =
+      'https://rize-api-773077624928.asia-northeast3.run.app';
+
+  /// 로컬 개발 기본값. 에뮬레이터에서는 호스트가 `10.0.2.2`라 dart-define이 필요하다.
+  static const localBaseUrl = 'http://localhost:8080';
+
+  /// 빌드 시 주입된 값(없으면 빈 문자열).
+  static const _override = String.fromEnvironment('API_BASE_URL');
+
+  /// 실제로 쓰이는 주소. const가 아닌 이유는 [kDebugMode] 분기 때문이고,
+  /// 앱 수명 동안 바뀌지 않는다(dio 생성 시 한 번 읽는다).
+  static final String baseUrl = _override.isNotEmpty
+      ? _override
+      : (kDebugMode ? localBaseUrl : productionBaseUrl);
 
   /// 릴리스 빌드가 로컬 주소를 들고 나가지 못하게 한다.
   ///
-  /// **조용히 틀리는 종류다.** `--dart-define`을 빠뜨린 릴리스 APK는 빌드도 되고
-  /// 설치도 되고 실행도 되는데, 모든 요청이 `localhost:8080`으로 가서 **전부**
-  /// 실패한다. 그 화면은 "연결이 불안정해요"라 회원도 대표도 원인을 못 찾는다.
-  /// CI나 스크립트로 강제하는 자리가 지금 없으므로 앱이 스스로 막는다.
-  ///
-  /// 디버그·테스트에서는 로컬 백엔드가 정상 사용이라 검사하지 않는다.
+  /// 기본값이 모드별로 갈린 뒤에도 이 가드는 남는다 — 이제 막는 대상이 "빠뜨린
+  /// dart-define"이 아니라 **잘못 넣은 dart-define**이다(에뮬레이터용
+  /// `10.0.2.2`나 로컬 주소를 그대로 둔 채 스토어 빌드를 뽑는 실수).
   static void assertConfiguredForRelease() {
     if (!kReleaseMode) return;
-    final local = baseUrl.contains('localhost') || baseUrl.contains('127.0.0.1');
+    final local = baseUrl.contains('localhost') ||
+        baseUrl.contains('127.0.0.1') ||
+        baseUrl.contains('10.0.2.2');
     if (local) {
       throw StateError(
-        'API_BASE_URL이 설정되지 않았습니다 — 릴리스 빌드는 '
-        '--dart-define=API_BASE_URL=https://... 로 빌드해야 합니다. '
-        '(현재: $baseUrl)',
+        '릴리스 빌드가 로컬 주소를 가리키고 있습니다 — '
+        '--dart-define=API_BASE_URL 을 빼거나(기본값이 프로덕션입니다) '
+        'https 주소로 지정해주세요. (현재: $baseUrl)',
       );
     }
   }

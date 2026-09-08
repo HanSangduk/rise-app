@@ -66,6 +66,15 @@ type MediaPurger interface {
 	// (부분 실패·과거 버그) 서버는 그 존재조차 모른다 — 메타에서 출발하는 어떤
 	// 경로로도 닿을 수 없다. 버킷 쪽에서 거꾸로 훑어야만 보인다.
 	ListObjects(ctx context.Context, prefix string) ([]string, error)
+
+	// Configured — 이 구현이 **실제 버킷에 닿는지**(v2.31 개정, P62 검증 반영). 미구성 구현은
+	// DeleteObjects를 no-op 성공으로 돌려주는데(위 주석 — 탈퇴를 막지 않기 위해), 스태프 사진
+	// 경로(퇴사·프로필 PUT·교체)는 그 "성공"을 믿고 photo_url을 비우면 **파일은 남고 포인터만
+	// 사라진다**(발견 경로 0 — 고아). 호출측이 이 값으로 "지운 척"을 피한다: 미구성이면 파일을
+	// 지운 것으로 치지 않고 photo_url을 유지한 채 로그만 남긴다. 회원탈퇴 경로는 종전대로
+	// no-op 성공을 그대로 쓴다(탈퇴는 파기 실패로 막히면 안 되고, 메타도 함께 지워져 포인터가
+	// 남을 자리가 없다).
+	Configured() bool
 }
 
 // MediaUploader — 서버가 Cloud Storage에 파일을 **올리는** 경계(v2.25, P51). MediaPurger의
@@ -178,26 +187,33 @@ func (a *Authenticator) Provisioner() UserProvisioner {
 }
 
 // MediaPurger — 인증 모드에 맞는 파일 파기 구현. Firebase 모드라도 **버킷 이름이 없으면
-// dev no-op으로 떨어진다**(STORAGE_BUCKET 미설정). 기동을 막지 않는 이유: 이 값이 없다고
+// 미구성 구현으로 떨어진다**(STORAGE_BUCKET 미설정). 기동을 막지 않는 이유: 이 값이 없다고
 // 예약·결제·수업기록이 멈춰야 할 이유가 없다. 대신 **기동 로그에 경고를 남긴다** — 조용히
 // no-op이 되면 탈퇴 화면이 "사진을 삭제했어요"라고 말하는데 실제로는 남는다.
+//
+// 미구성 구현(unconfiguredPurger)은 **두 동사의 실패 모양이 다르다**(v2.28, P56 A4):
+// DeleteObjects는 no-op(탈퇴를 막지 않는다), ListObjects는 명시적 에러(reconcile을 조용히
+// "고아 0건"으로 만들지 않는다). 그 이유는 타입 주석에 있다. reason 문구는 강등 원인마다
+// 다르게 — 503 본문이 "무엇을 설정해야 하는지"를 말해야 고칠 사람이 원인에 도달한다
+// (MediaUploader와 같은 규율).
 func (a *Authenticator) MediaPurger(ctx context.Context, bucket string) MediaPurger {
 	if a.fbApp == nil {
-		return devMediaPurger{}
+		// 로컬 개발(FIREBASE_PROJECT 미설정). 이 상태에서는 STORAGE_BUCKET만 채워도 열리지 않는다.
+		return unconfiguredPurger{reason: "사진 저장소가 설정되지 않았어요(서버에 FIREBASE_PROJECT·STORAGE_BUCKET 설정이 필요해요)"}
 	}
 	if bucket == "" {
-		log.Printf("경고: STORAGE_BUCKET 미설정 — 회원탈퇴 시 체형사진 **원본 파일이 버킷에 그대로 남습니다**(메타데이터만 삭제). 버킷 이름을 설정하세요")
-		return devMediaPurger{}
+		log.Printf("경고: STORAGE_BUCKET 미설정 — 회원탈퇴 시 체형사진 **원본 파일이 버킷에 그대로 남습니다**(메타데이터만 삭제). 스태프 퇴사·프로필 사진 지우기는 파기를 건너뛰고 photo_url을 유지합니다(요청당 skipped 로그, v2.31). 고아 훑기(POST /v1/body-photos/reconcile)는 503으로 거부됩니다. 버킷 이름을 설정하세요")
+		return unconfiguredPurger{reason: "사진 저장소가 설정되지 않았어요(관리자에게 STORAGE_BUCKET 설정을 요청해주세요)"}
 	}
 	client, err := a.fbApp.Storage(ctx)
 	if err != nil {
-		log.Printf("경고: Storage 클라이언트 초기화 실패(%v) — 회원탈퇴 시 체형사진 원본 파일이 남습니다", err)
-		return devMediaPurger{}
+		log.Printf("경고: Storage 클라이언트 초기화 실패(%v) — 회원탈퇴 시 체형사진 원본 파일이 남습니다. 스태프 퇴사·프로필 사진 지우기는 파기를 건너뛰고 photo_url을 유지합니다. 고아 훑기는 503으로 거부됩니다", err)
+		return unconfiguredPurger{reason: "사진 저장소에 연결할 수 없어요(관리자 확인 필요)"}
 	}
 	handle, err := client.Bucket(bucket)
 	if err != nil {
-		log.Printf("경고: Storage 버킷 %q 접근 실패(%v) — 회원탈퇴 시 체형사진 원본 파일이 남습니다", bucket, err)
-		return devMediaPurger{}
+		log.Printf("경고: Storage 버킷 %q 접근 실패(%v) — 회원탈퇴 시 체형사진 원본 파일이 남습니다. 스태프 퇴사·프로필 사진 지우기는 파기를 건너뛰고 photo_url을 유지합니다. 고아 훑기는 503으로 거부됩니다", bucket, err)
+		return unconfiguredPurger{reason: "사진 저장소에 연결할 수 없어요(관리자 확인 필요)"}
 	}
 	return firebaseMediaPurger{bucket: handle}
 }
@@ -220,19 +236,41 @@ func (devUserProvisioner) DisableUser(_ context.Context, _ string) error { retur
 func (devUserProvisioner) EnableUser(_ context.Context, _ string) error  { return nil }
 func (devUserProvisioner) DeleteUser(_ context.Context, _ string) error  { return nil }
 
-// devMediaPurger — dev 모드엔 지울 버킷이 없다. 건수는 **요청받은 경로 수 그대로** 돌려준다:
-// 0을 돌려주면 로컬 탈퇴 응답이 "사진 0장 삭제"라고 말하는데, 인메모리 스토어에는 실제로
-// 메타가 지워져 있어 화면과 사실이 어긋난다.
-type devMediaPurger struct{}
+// ErrMediaListUnavailable — 파기 경계가 구성되지 않아 버킷을 **훑을 수 없음**(503 매핑, v2.28).
+// ErrUploadUnavailable과 같은 성격이다: 요청은 옳고 서버 설정이 문제라 4xx가 아니다.
+var ErrMediaListUnavailable = errors.New("api: media listing unavailable")
 
-// dev 모드엔 버킷이 없다 — 훑을 대상이 0개라는 뜻이지 실패가 아니다.
-func (devMediaPurger) ListObjects(_ context.Context, _ string) ([]string, error) {
-	return nil, nil
+// unconfiguredPurger — 파기 경계 미구성(로컬 개발 / STORAGE_BUCKET 미설정 / 버킷 접근 실패).
+// **두 동사의 실패 모양이 일부러 다르다**(v2.28, P56 A4):
+//
+//   - DeleteObjects = no-op(요청받은 경로 수 그대로 성공). 이 경계를 쓰는 파기 경로는 탈퇴·
+//     회원 삭제·유예 스윕인데, **파기 실패가 탈퇴를 막으면 안 된다**(P51 결정 — 버킷이 없다고
+//     예약·결제·탈퇴가 멈출 이유가 없다). 건수를 0이 아니라 len(paths)로 돌려주는 이유: 0이면
+//     로컬 탈퇴 응답이 "사진 0장 삭제"라고 말하는데 인메모리 스토어에는 실제로 메타가 지워져
+//     있어 화면과 사실이 어긋난다. 이 no-op의 대가(원본 잔존)는 기동 로그 경고가 알린다.
+//
+//   - ListObjects = **명시적 에러**. 종전엔 nil,nil을 돌려줘 고아 훑기(reconcile)가 미구성 상태에서
+//     항상 "고아 0건"이었다 — 그 도구는 바로 이 no-op이 남긴 고아 50개(v2.15) 때문에 만들어졌는데,
+//     같은 강등이 그 도구까지 조용히 무력화했다. "버킷에 아무것도 없다"와 "버킷을 볼 수 없다"는
+//     다른 사실이고, 후자를 전자로 보고하면 대표는 파일이 깨끗하다고 믿는다. 훑기는 조회 동사라
+//     실패해도 아무것도 잃지 않는다 — 크게 실패하는 비용이 0이고, 조용히 성공하는 비용은
+//     고지와 어긋난 잔존이다(unconfiguredUploader와 같은 판단: 조용한 성공을 만들지 않는다).
+//
+// 왜 DeleteObjects까지 에러로 만들지 않는가: 그러면 미구성 서버에서 탈퇴가 500이 되고, 자기
+// 개인정보를 지울 권리(§36)가 배포 설정 하나에 막힌다. 탈퇴는 "메타·계정·인덱스 파기"가
+// 본체이고 파일 파기는 그 일부라, 일부가 안 됐다고 본체를 거부하는 것이 더 큰 거짓이다.
+type unconfiguredPurger struct{ reason string }
+
+func (u unconfiguredPurger) ListObjects(_ context.Context, _ string) ([]string, error) {
+	return nil, errors.Join(ErrMediaListUnavailable, errors.New(u.reason))
 }
 
-func (devMediaPurger) DeleteObjects(_ context.Context, paths []string) (int, error) {
+func (unconfiguredPurger) DeleteObjects(_ context.Context, paths []string) (int, error) {
 	return len(paths), nil
 }
+
+// 미구성 — 스태프 사진 경로는 이 값을 보고 "지운 척"을 하지 않는다(MediaPurger.Configured 주석).
+func (unconfiguredPurger) Configured() bool { return false }
 
 // firebaseUserProvisioner — Firebase Admin SDK 구현(프로덕션).
 type firebaseUserProvisioner struct{ client *fbauth.Client }
@@ -307,6 +345,9 @@ func (f firebaseUserProvisioner) DeleteUser(ctx context.Context, uid string) err
 
 // firebaseMediaPurger — Admin SDK로 버킷 오브젝트를 지운다(보안 규칙을 지나지 않는다).
 type firebaseMediaPurger struct{ bucket *gcs.BucketHandle }
+
+// 실제 버킷 핸들을 쥐고 있다 — DeleteObjects의 성공은 실제 삭제다.
+func (firebaseMediaPurger) Configured() bool { return true }
 
 func (p firebaseMediaPurger) DeleteObjects(ctx context.Context, paths []string) (int, error) {
 	n := 0

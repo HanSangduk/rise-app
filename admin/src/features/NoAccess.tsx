@@ -27,7 +27,7 @@ export function NoAccess() {
               <b className="text-ink">{account}</b> 계정에는{" "}
             </>
           )}
-          라이즈 어드민을 사용할 수 있는 권한(대표·트레이너)이 없습니다.
+          이 어드민을 사용할 수 있는 권한(대표·트레이너)이 없습니다.
         </p>
 
         <div className="mt-3.5 rounded-[10px] border border-line bg-panel-2 p-3 text-left text-[11px] leading-relaxed text-muted">

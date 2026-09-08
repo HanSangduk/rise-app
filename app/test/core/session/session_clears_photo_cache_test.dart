@@ -38,7 +38,7 @@ void main() {
   test('세션을 비우면 사진 캐시도 비운다', () {
     expect(loader.cleared, 0);
 
-    container.read(sessionProvider.notifier).clear();
+    container.read(sessionProvider.notifier).clear(reason: SessionEndReason.signedOut);
 
     expect(container.read(sessionProvider), isNull);
     expect(loader.cleared, 1, reason: '남의 사진이 프로세스에 남는다');

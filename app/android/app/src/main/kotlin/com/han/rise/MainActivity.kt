@@ -1,4 +1,4 @@
-package ai.stra.rize
+package com.han.rise
 
 import io.flutter.embedding.android.FlutterActivity
 

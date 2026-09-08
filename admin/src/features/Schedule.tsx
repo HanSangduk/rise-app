@@ -90,7 +90,7 @@ export function Schedule() {
   // 뭉개진다(누구 수업인지 구분 불가).
   const staffByUid = useMemo(() => {
     const map = new Map<string, { name: string; color: string }>();
-    for (const s of staffQ.data ?? []) map.set(s.uid, { name: staffLabel(s), color: s.color || "#f43f5e" });
+    for (const s of staffQ.data ?? []) map.set(s.uid, { name: staffLabel(s), color: s.color || "#7fa0c4" });
     return map;
   }, [staffQ.data]);
 
@@ -168,7 +168,7 @@ export function Schedule() {
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             {legend.map((s) => {
-              const color = s.color || "#f43f5e";
+              const color = s.color || "#7fa0c4";
               return (
                 <Badge
                   key={s.uid}
@@ -308,9 +308,9 @@ function HourRow({
               onClick={() => onTeamClick(team)}
               className="min-h-[34px] rounded-lg border-l-[3px] p-1.5 text-left font-bold leading-snug transition hover:brightness-110"
               style={{
-                background: `${staffByUid.get(team.trainer_id)?.color ?? "#f43f5e"}26`,
-                borderLeftColor: staffByUid.get(team.trainer_id)?.color ?? "#f43f5e",
-                color: staffByUid.get(team.trainer_id)?.color ?? "#f43f5e",
+                background: `${staffByUid.get(team.trainer_id)?.color ?? "#7fa0c4"}26`,
+                borderLeftColor: staffByUid.get(team.trainer_id)?.color ?? "#7fa0c4",
+                color: staffByUid.get(team.trainer_id)?.color ?? "#7fa0c4",
               }}
             >
               {displayName(team)} {KIND_LABEL[team.kind]}

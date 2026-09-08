@@ -170,6 +170,7 @@ final class HoldAllowance {
     required this.usedDaysTotal,
     required this.maxCount,
     required this.maxTotalDays,
+    this.capsUnknown = false,
   });
 
   final int usedCount;
@@ -179,8 +180,16 @@ final class HoldAllowance {
   final int maxCount;
   final int maxTotalDays;
 
-  bool get countCapped => !HoldRules.countUnlimited(maxCount);
-  bool get daysCapped => !HoldRules.daysUnlimited(maxTotalDays);
+  /// 상한 자체를 **모른다**(정책 조회 실패 → `CenterPolicy.isFallback`, P56 H4).
+  ///
+  /// "무제한"과 다르다 — 무제한은 서버가 준 사실이고 이쪽은 아무것도 못 받은 상태다.
+  /// 그래서 [maxCount]·[maxTotalDays]에 들어 있는 폴백 숫자(2회/30일)를 **한 글자도
+  /// 화면에 내지 않는다**: 잔여를 계산하지도, "제한 없음"이라고 말하지도 않는다.
+  /// 사실인 것(이 회원권이 지금까지 쉰 횟수·일수)만 말하고, 판정은 서버에 맡긴다.
+  final bool capsUnknown;
+
+  bool get countCapped => !capsUnknown && !HoldRules.countUnlimited(maxCount);
+  bool get daysCapped => !capsUnknown && !HoldRules.daysUnlimited(maxTotalDays);
 
   /// 잔여 횟수 — 무제한이면 null(없는 상한으로 숫자를 지어내지 않는다).
   /// 음수는 0으로 클램프([HoldTotalDaysExceeded.remainingDays]와 같은 데이터 방어).
@@ -197,6 +206,9 @@ final class HoldAllowance {
 
   /// 요약 첫 줄 — "남은 것" 중심. 무제한 축은 숫자를 만들지 않는다.
   String get headline {
+    // 모르면 모른다고 말한다 — 폴백 2회/30일로 "남은 일시정지 27일 · 1회"를 찍으면
+    // 센터 실제 상한이 5회/90일인 회원에게 없는 소진을 예고하는 셈이다.
+    if (capsUnknown) return '남은 일시정지를 확인하지 못했어요';
     if (exhausted) return '남은 일시정지가 없어요';
     if (!countCapped && !daysCapped) {
       return '지금까지 $usedCount회 · $usedDaysTotal일 쉬었어요';
@@ -211,6 +223,11 @@ final class HoldAllowance {
 
   /// 요약 둘째 줄 — 상한·사용량 근거. 필요 없는 상태(이력 0회 등)는 null.
   String? get detail {
+    if (capsUnknown) {
+      // 사실인 것만 — 이 회원권의 사용 이력은 서버가 준 값이다. 다음 행동도 말한다:
+      // 신청은 열려 있고 상한 판정은 서버가 한다(hold_rules 헤더의 원칙).
+      return '지금까지 $usedCount회 · $usedDaysTotal일 쉬었어요 — 신청하면 센터 정책에 따라 판정돼요';
+    }
     if (exhausted) {
       // 서버 판정 순서(횟수 → 일수)와 같은 순서로 원인을 말한다.
       return remainingCount == 0
@@ -281,6 +298,13 @@ abstract final class HoldRules {
   /// KST 고정이라 기기 로컬 날짜로 재면 해외 체류 시 하루씩 어긋난다.
   /// [maxHoldsPerPass]·[maxHoldTotalDays]는 센터 정책 실값(GET /v1/center)이며,
   /// 화면에 상한을 표기할 때도 **같은 값**을 써야 한다([allowance]).
+  ///
+  /// [capsUnknown]이 참이면(정책 조회 실패 — `CenterPolicy.isFallback`) **3단계 상한
+  /// 검사를 통째로 건너뛴다**(P56 H4). 두 값에 폴백 숫자(2회/30일)가 들어 있는 상태에서
+  /// 종전처럼 판정하면, 센터 실제 정책이 5회/90일인데 홀딩 2건을 쓴 회원의 신청 버튼을
+  /// "최대 2회예요 — 이미 2회를 썼어요"로 **잠근다.** 서버는 통과시킬 신청이다 — 파일
+  /// 헤더가 금지한 바로 그 동작이다. 1·2단계(상태·구간·겹침)는 정책과 무관한 사실이라
+  /// 그대로 판정한다.
   static HoldRequestState evaluate({
     required PassDetail pass,
     required DateTime from,
@@ -288,6 +312,7 @@ abstract final class HoldRules {
     required DateTime today,
     required int maxHoldsPerPass,
     required int maxHoldTotalDays,
+    bool capsUnknown = false,
   }) {
     // 1) HoldPass가 가장 먼저 보는 것 — 상태.
     if (!canRequestFor(pass)) {
@@ -316,11 +341,13 @@ abstract final class HoldRules {
     }
 
     // 3) ValidateNewHold — 횟수 상한 → 총 일수 상한.
+    // 상한을 모르면 여기서 끝 — 애매하면 통과시키고 서버 응답을 보여준다(헤더).
+    final requestedDays = durationDays(f, t);
+    if (capsUnknown) return HoldAllowed(requestedDays);
     final used = pass.holds.length;
     if (!countUnlimited(maxHoldsPerPass) && used + 1 > maxHoldsPerPass) {
       return HoldCountExceeded(used: used, maxCount: maxHoldsPerPass);
     }
-    final requestedDays = durationDays(f, t);
     if (!daysUnlimited(maxHoldTotalDays)) {
       final priorDays = usedDays(pass.holds);
       if (priorDays + requestedDays > maxHoldTotalDays) {
@@ -335,16 +362,20 @@ abstract final class HoldRules {
   }
 
   /// 잔여 요약 — [evaluate]와 같은 입력에서 [HoldAllowance]를 만든다.
+  /// [capsUnknown]도 [evaluate]와 **같은 값**을 넣는다 — 표시는 "확인하지 못했어요"인데
+  /// 판정은 폴백 상한으로 막는 조합(또는 그 반대)이 이 파일이 막으려는 불일치다.
   static HoldAllowance allowance({
     required PassDetail pass,
     required int maxHoldsPerPass,
     required int maxHoldTotalDays,
+    bool capsUnknown = false,
   }) {
     return HoldAllowance._(
       usedCount: pass.holds.length,
       usedDaysTotal: usedDays(pass.holds),
       maxCount: maxHoldsPerPass,
       maxTotalDays: maxHoldTotalDays,
+      capsUnknown: capsUnknown,
     );
   }
 

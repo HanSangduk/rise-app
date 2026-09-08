@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:rise_member/core/widgets/rise_sheet.dart';
 import 'package:rise_member/core/theme/app_colors.dart';
 import 'package:rise_member/core/theme/app_radius.dart';
 import 'package:rise_member/core/utils/date_format.dart';
@@ -32,12 +33,8 @@ Future<void> showContractDetailSheet(
   required ContractItem contract,
   double? penaltyRate,
 }) {
-  return showModalBottomSheet<void>(
-    context: context,
-    // 서명 시트와 같은 이유로 루트 Navigator에 띄운다 — 셸 Navigator에 올리면
-    // 하단 탭바가 스크림 위에 남는다(contract_sign_sheet 주석, P09).
-    useRootNavigator: true,
-    isScrollControlled: true,
+  return showRiseSheet<void>(
+    context,
     builder: (_) => _ContractDetailSheet(contract: contract, penaltyRate: penaltyRate),
   );
 }
@@ -199,7 +196,7 @@ class _ContractDetailSheetState extends State<_ContractDetailSheet> {
             borderRadius: BorderRadius.circular(AppRadius.card),
             onTap: () => setState(() => _bodyOpen = !_bodyOpen),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 14),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -210,7 +207,7 @@ class _ContractDetailSheetState extends State<_ContractDetailSheet> {
                   Text(
                     _bodyOpen ? '접기' : '보기',
                     style: const TextStyle(
-                        fontSize: 11.5, color: AppColors.red, fontWeight: FontWeight.w700),
+                        fontSize: 11.5, color: AppColors.brand, fontWeight: FontWeight.w700),
                   ),
                 ],
               ),

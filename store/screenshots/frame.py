@@ -11,6 +11,9 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 ROOT = Path(__file__).resolve().parents[2]
 CREAM, NAVY, BEIGE = "#F6F4EF", "#3B4C60", "#CEBBAA"
+
+# iPhone 16 Pro Max의 상태바 높이(1320x2868 기준). 위 주석 참조.
+IOS_STATUS_BAR_H = 145
 FONT = str(ROOT / "app/assets/fonts/PretendardVariable.ttf")
 
 # ASO 확정 순서·캡션 (metadata/play.md 표와 단일 진실 — 수정 시 양쪽 함께).
@@ -84,7 +87,18 @@ def main(platform: str) -> None:
             print(f"skip(원본 없음): {src.name}")
             continue
         raw = Image.open(src).convert("RGB")
-        img = frame_one(raw, head, sub, raw.size)
+        # **출력 캔버스 크기는 원본 그대로 고정한다** — iOS 1320x2868은 App Store의
+        # 6.9" 슬롯 요건이라 한 픽셀만 달라도 업로드가 거부된다. 아래 크롭은 캔버스가
+        # 아니라 **안에 얹히는 스크린샷**만 줄인다(실제로 한 번 캔버스까지 줄여 2723이
+        # 나왔고, 그대로면 제출이 막혔을 자리다).
+        canvas_size = raw.size
+        # iOS 원본은 **Flutter 표면만** 담긴다(`integration_test`의 takeScreenshot) —
+        # 시스템 상태바가 없어 위쪽에 빈 띠가 남는다. Android는 `adb screencap`이라
+        # 실제 상태바(9:41)가 들어오므로 이 처리를 하지 않는다. 없는 상태바를 그려
+        # 넣지는 않는다 — 빈 자리를 덜어낼 뿐이다.
+        if platform == "ios":
+            raw = raw.crop((0, IOS_STATUS_BAR_H, raw.width, raw.height))
+        img = frame_one(raw, head, sub, canvas_size)
         out = out_dir / f"{i:02d}_{name[3:]}.png"
         img.save(out, optimize=True)
         made += 1

@@ -190,7 +190,7 @@ func TestPublicBusinessNeedsNoAuth(t *testing.T) {
 		}
 	}
 
-	// 무인증이 열린 것은 이 경로 하나뿐이다 — 인증 라우트가 함께 열리면 안 된다.
+	// 무인증 표면은 /v1/public/business·/v1/public/center(v2.29) 둘뿐이다 — 인증 라우트가 함께 열리면 안 된다.
 	for _, path := range []string{"/v1/center", "/api/v1/center", "/v1/me", "/v1/members"} {
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))

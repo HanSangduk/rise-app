@@ -21,17 +21,27 @@ import 'package:rise_member/features/shell/app_shell.dart';
 /// null = 기존 온보딩 흐름). P06 세션 복원 + 승인 대기 영속 복귀.
 ///
 /// 이 redirect는 **첫 1회만** 동작한다(restoreAttempted 래치) — 이후 화면들이
-/// 부르는 context.go('/login')(로그아웃·"다른 번호로 다시 시도")와 충돌하지 않는다.
+/// 부르는 context.go('/login')(로그아웃·"번호 다시 인증하기")와 충돌하지 않는다.
 ///
 /// 세션 소멸(만료·토큰 폐기) 시 로그인 복귀는 **여기가 아니라 `app.dart`의
 /// `ref.listen(sessionProvider)`** 가 담당한다. redirect에 넣지 않은 이유: 위 래치가
 /// 첫 1회만 도는 구조라 이후 세션 변화를 잡지 못하고, 래치를 풀면 화면들이 직접 부르는
 /// `context.go('/login')`과 서로 밀어내며 루프가 된다.
-/// 세션을 비우는 쪽은 로그아웃·회원탈퇴 화면과 dio 인터셉터의 401이다.
+/// 세션을 비우는 쪽은 로그아웃·회원탈퇴 화면·dio 인터셉터의 401·캐시 재검증의 미연결
+/// 확답이고, 착지는 그 이유(`SessionEndReason`)가 고른다.
 GoRouter createRouter({Future<String?> Function()? restoreLanding}) {
   // 복원은 첫 redirect에서만 시도 — 이후 모든 내비게이션은 통과.
   var restoreAttempted = restoreLanding == null;
   return GoRouter(
+    // **플랫폼 초기 라우트를 무시한다**(P64 D4). go_router는 OS가 넘긴 기본 라우트
+    // (`platformDispatcher.defaultRouteName`)가 '/'가 아니면 `initialLocation`을 그걸로
+    // 덮어쓴다(`_effectiveInitialLocation`). 그 값이 `/home`이고 복원할 세션이 없으면
+    // 위 redirect가 null을 돌려 **세션 없이 셸에 착지**했고 — 4탭 뷰모델이 세션을
+    // 요구하는 에러를 그렸다. 이 앱엔 딥링크가 없으므로 플랫폼 값이 옳을 경우가 없다.
+    // 딥링크(예: 데스크 QR로 예약 열기)를 넣는 날 이 플래그를 풀어야 하는데, 그때는
+    // redirect에 "복원 결과가 null이면 셸 경로를 /login으로" 가드를 넣어야 한다 —
+    // `test/core/router/shell_gate_test.dart`가 그 회귀를 잡는다.
+    overridePlatformDefaultLocation: true,
     initialLocation: '/login',
     redirect: (context, state) async {
       if (restoreAttempted) return null;

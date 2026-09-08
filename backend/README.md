@@ -455,6 +455,80 @@ Firestore 보안 규칙은 저장소 루트 `firestore.rules`가 소스 오브 �
 서버가 붙인 **다운로드 토큰 URL**로만 읽는다(그 URL도 규칙을 거치지 않는다 — 규칙 주석이
 적어 둔 설계 그대로다).
 
+### 접속기록(안전성 확보조치 기준 §8) — 2년 버킷 · 월 1회 점검 (v2.30, P61)
+
+privacy.html이 약속하는 "개인정보처리시스템 접속기록 2년 이상 보관 · 위·변조 방지 · 점검"의 서버·인프라
+구현이다. 근거는 「개인정보의 안전성 확보조치 기준」(개인정보보호위원회고시 제2026-9호, 2026.7.1. 일부개정·같은 날 시행 —
+law.go.kr 헤더 [시행 2026. 7. 1.] 확인)
+§8 — ①항 2호(고유식별정보 또는 **민감정보**를 처리하는 시스템 → 2년 이상. 이 서비스는 체형사진·체성분을
+민감정보로 취급하므로 회원 수와 무관하게 2년), ②항(점검의 주기·방법·사후조치를 **내부 관리계획으로 정하고
+이행** — 현행 고시에 "월 1회" 문구는 없다; 아래 주기는 우리가 정한 값이고 정했으면 지켜야 이행이다),
+③항(위·변조·도난·분실 방지). 이 절이 그 내부 관리계획이다.
+
+**무엇을 남기나** — 서버(`internal/api/accesslog.go`)가 `/v1`·`/api/v1` 요청 하나당 stdout에 JSON 한 줄
+(`log_type:"access"`). 고시 §2의 접속기록 정의 5요소를 그대로 매핑한다:
+
+| 고시 §2 요소 | 필드 |
+|---|---|
+| 식별자(취급자) | `uid` · `role` · `center_id` |
+| 접속일시 | `time`(RFC3339Nano UTC → LogEntry.timestamp) |
+| 접속지 정보 | `remote_ip`(RealIP 결과: True-Client-IP → X-Real-IP → XFF **첫** 값 순 — **셋 다 클라이언트가 지정할 수 있어 위조 가능**) · `xff_last`(XFF **마지막** 값 = 프록시(GFE)가 덧붙인 값 → **신뢰 값**; Hosting 리라이트 경유는 끝값이 Hosting 프록시라 `x_forwarded_for`의 끝에서 둘째가 클라이언트) · `x_forwarded_for`(원 헤더 전체, 512자 클립) · `user_agent`(512자 클립) |
+| 처리한 정보주체 | `subject.member_id`(path `/members/{id}` · 쿼리 `member` · 핸들러 훅 `setAccessSubject`) · `subject.resource_id`(그 외 `{id}`) · `subject.staff_uid`(`{uid}`) |
+| 수행업무 | `method` · `route`(chi 패턴) · `path`(쿼리 제외) · `status`(헤더 미기록이면 타임아웃 504 / 그 외 500) · `aborted`(패닉으로 끊긴 요청만 true — 헤더가 이미 나갔으면 status는 나간 값 유지) · `latency_ms` · `bytes` |
+| 상관 | `request_id` · `logging.googleapis.com/trace`(Cloud Run 요청 로그와 연결, `GCP_PROJECT` 있을 때만) · `severity`(INFO / 401·403 WARNING / 5xx ERROR) · `message` |
+
+**무엇을 절대 남기지 않나**(`accesslog_test.go`가 못 박는다): 요청·응답 본문, `Authorization`·`X-Dev-*` 값,
+쿠키, **쿼리 문자열 원문**(`GET /v1/members?q=이름·번호`가 들어온다 — 화이트리스트 `member` 값만 subject로
+옮긴다), `Principal.Phone`, 이름.
+
+**기록 범위** — 스태프(owner/trainer/superadmin) 요청 **전부** + 역할 무관 **401·403**. 회원(member) 요청은
+**401·403 외에는 기록하지 않는다(400·404·5xx 포함)**(§8① "정보주체는 제외한다" + 회원 IP를 2년 쥐는 것은
+최소수집에 역행 — Cloud Run 요청 로그 30일이 운영 목적을 덮는다). `/healthz`·`/health`·`/api/health`·`/v1/public/*`는 v1 클로저 밖이라
+지나지 않는다. 401은 라우팅 전 거부라 `route:"/v1/*"`로 남고 `path`가 단서다. 패닉도 500·ERROR 라인을
+남긴 뒤 같은 값으로 재패닉해 `recoverJSON`이 계약 포맷 500을 만든다.
+
+**어디에 얼마나 쌓이나** — `backend/scripts/setup-access-log.sh`(멱등, 실행은 람):
+
+| 항목 | 값 |
+|---|---|
+| 로그 버킷 | `access-log-2y` · 위치 **asia-northeast3**(privacy.html "서울 리전 보관" — 위치는 생성 후 변경 불가라 global 금지) · 보존 **740일**(2년 731일 + 여유) |
+| sink | `access-log-2y` · 필터 `resource.type="cloud_run_revision" AND resource.labels.service_name="rize-api" AND jsonPayload.log_type="access"` · 같은 프로젝트 버킷이라 IAM 부여 불필요 |
+| _Default 버킷 | 그대로(30일 운영 뷰 유지). access 라인은 두 곳에 들어간다 — 중복량 월 수 MB, 50GiB 무료 한도 안 |
+| 잠금(위·변조 방지) | **미적용**. `--lock`은 불가역(수정·삭제·보존 변경 불가)이라 첫 라인 확인 후 1~2주 운영 → 스키마 안정 확인 → 람 결정. 잠금 전에도 Cloud Logging은 엔트리 편집 API가 없고 보존 정책+IAM으로 삭제를 제한하므로 "위·변조 방지"는 약하게 참, 잠그면 강하게 참 |
+| sink 시작일(2년 시계) | **미실행 — 람이 스크립트 실행 시 기입**. sink는 **비소급**이라 이 날 이전의 접속기록은 존재하지 않는다 |
+| Log Analytics | 켜지 않는다(`--enable-analytics` 불가역). 점검은 `gcloud logging read`만 쓴다 |
+
+**내부 관리계획(§8②)** — 주기 **매월 첫 영업일** · 담당 **람** · 방법 `backend/scripts/access-log-review.sh [YYYY-MM]`
+→ `work_log/access-review/YYYY-MM.md`(uid×업무 건수 · 401/403 목록(시각·remote_ip·xff_last·XFF 전체) · 심야 23~06 KST
+스태프 접속 · 민감정보 경로 `/body-photos`·`/inbody` 상위 uid · 대량 조회(목록 GET — router.go의 목록 라우트
+화이트리스트 `/members`·`/passes`·`/bookings`·`/body-photos`·`/inbody`… 만, `{id}` 단건·`/me`·`/stats`는 제외) —
+이 서비스에 파일 다운로드 기능은 없어 §8②의 "다운로드 상황"은 목록 GET을 route로 식별한다). 점검 기록 파일
+자체가 이행 증거다. 리포트의 `remote_ip`는 위조 가능한 값이므로 접속지 판단은 `xff_last`로 한다(위 표). 사후조치:
+이상 uid → 스태프 deactivate(`POST /v1/staff/{uid}/deactivate`) + 정보주체 통지 여부 판단 + 리포트 6절에 기록.
+
+**점검 절차(매월)** — ① `gcloud auth login`(rizejoy91@gmail.com) → ② `./backend/scripts/access-log-review.sh`
+(지난달; 조회 실패는 exit 1로 멈추고 빈 리포트를 만들지 않는다 — 0건과 실패를 섞지 않는다) → ③ 생성된
+`work_log/access-review/YYYY-MM.md` 6절 판정 체크. **dry-run 스모크**(gcloud 없이 스크립트·리포트 형식 확인 —
+스크립트를 고쳤을 때 반드시): `bash backend/scripts/access-log-review.sh --dry-run backend/scripts/testdata/access-log-entries.sample.json 2026-08`
+→ `/tmp/access-review-2026-08.md`(dry-run은 `work_log/access-review/`에 쓰지 않는다; `--out PATH`로 위치 지정 가능).
+샘플은 실제 LogEntry 모양 — Cloud Logging은 stdout JSON의 `time`·`severity`를 jsonPayload에서 **떼어** 최상위
+`timestamp`·`severity`로 승격하므로 스크립트는 `e.timestamp`를 읽는다(jsonPayload.time은 폴백).
+
+**chi `middleware.Logger`를 제거한 이유** — (1) `RequestURI`에 쿼리가 통째로 실려 `?q=이름·번호`가 30일
+운영 로그에 평문으로 남았다(P56 L9). (2) IP·URL·status·latency·UA는 Cloud Run 요청 로그
+(`run.googleapis.com/requests`)가 자동으로 남긴다. (3) 평문은 필터가 안 된다. **정직한 고지**: 쿼리 문자열
+(예: `GET /v1/members?q=`)은 Cloud Run 요청 로그(30일)에는 **여전히 남는다** — 이번 작업이 없앤 것은
+우리 컨테이너 로그의 두 번째 사본이고, 접속기록 라인(2년)에는 싣지 않는다는 것이다. 요청 로그에서도
+지우려면 `_Default` sink에 제외 필터를 거는 별도 결정이 필요하다(요청 로그 전체가 운영 디버깅에 쓰인다).
+
+**로컬 개발** — 접속기록이 stdout에 찍혀 요청 로그를 대신한다(dev 헤더는 대부분 스태프 uid라 기록됨).
+회원 역할 요청은 안 보인다 — 운영 규칙과 분기를 만들지 않으려고 dev 스위치를 두지 않았다.
+
+**배포 순서(참이 되는 순서)** — ① 서버 배포(라인 생성 시작) → ② 람이 `setup-access-log.sh` 실행(sink 생성
+= 2년 시계 시작) → ③ 위 표의 "sink 시작일" 기입 + privacy.html 개정 이력에 적용일 행 추가 → Hosting 배포.
+②·③ 전에는 privacy.html의 "2년·위변조 방지·점검"이 아직 거짓이다(P56 L9 — 문서에서 의무를 지우는 것은
+답이 아니라 순서를 지키는 것이 답).
+
 ## 알려진 갭 / TODO(정직한 목록)
 
 이 절은 "무엇을 안 만들었는가"를 숨기지 않기 위한 목록이다. API계약_v1.md가 모든 세부사항을
@@ -478,10 +552,34 @@ Firestore 보안 규칙은 저장소 루트 `firestore.rules`가 소스 오브 �
 - **멀티센터 해석은 단일 센터로 단순화**: `users/{uid}.memberships[]`(설계03 §6, 여러 센터 가입)
   대신 `store.UserIndex`가 uid당 센터 1건만 유지한다. 실제 1호 고객(라이즈 컨디셔닝)이 단일
   센터라 v1엔 충분하지만, 진짜 멀티센터 전환 시 슬라이스로 승격해야 한다.
-- **센터 생성·최초 owner는 v2.16 관리 평면으로 닫혔다**(멀티센터 Phase A, P41): superadmin이
-  `POST /v1/admin/centers`로 센터 신원 + 정책 기본값 + 최초 owner(계정·인덱스·레코드)를 한
-  요청으로 만든다. 남은 수작업은 **최초 superadmin 1회 시딩**뿐 — Firestore 콘솔에서
-  `users/{uid}` = `{role:"superadmin", center_id:""}`. (기존 rise 센터는 신원 미등록 상태로도
+- **센터 생성·최초 owner는 v2.16 관리 평면으로 닫혔고, v2.32에서 화면까지 붙었다**(Phase A P41 ·
+  Phase B P65): superadmin이 어드민 **센터 관리** 탭에서 센터 신원 + 정책 기본값 + 최초
+  owner(계정·인덱스·레코드)를 한 번에 만든다(`POST /v1/admin/centers`). 남은 수작업은
+  **최초 superadmin 1회 시딩**뿐 — Firestore 콘솔에서 `users/{uid}` = `{role:"superadmin",
+  center_id:""}`.
+  - **관리 평면 목록에 1호점이 안 보이던 것은 v2.35(P70)에서 닫혔다** — `GET /v1/admin/centers`가
+    기본 센터를 상호 없이도 항상 맨 앞에 싣는다(회원용 `GET /v1/join/centers`와 같은 집합).
+  - **그 uid는 센터 owner 계정과 달라야 한다.** UserIndex는 uid당 역할 1개라, 기존 owner 계정을
+    superadmin으로 바꾸면 그 사람은 자기 센터 어드민에서 잠긴다(superadmin은 `/v1/admin/*`과
+    `/v1/me` 외 전부 403). 별도 이메일로 Firebase 계정을 만들고 그 uid를 시딩할 것.
+  - 새 센터 owner는 **비밀번호를 모른 채** 계정만 생긴다(`EnsureUser`가 임의 임시 비밀번호로
+    만든다) — 첫 로그인은 반드시 **비밀번호 재설정 메일**로 한다.
+- **미등록 번호의 가입 요청은 회원이 센터를 고른다**(v2.33, P66): `GET /v1/join/centers`가
+  고를 수 있는 목록(기본 센터 ∪ 신원 등록 센터)을 주고, `POST /v1/join/request`의 `center_id`는
+  **그 목록에 있을 때만** 통과한다(없으면 400). 생략하면 종전대로 Principal의 센터다.
+  앱은 목록이 2곳 이상일 때만 선택을 묻는다.
+- **법정 문서는 센터별이다**(v2.33): `GET /v1/public/business`·`/v1/public/center`가 `?center=`를
+  받는다. 모르는 센터는 **404** — 기본 센터로 폴백하면 그 문서가 거짓 고지가 된다.
+  전자계약은 처음부터 센터 스코프였다(`gatherContractVars`).
+- **대기 상태는 uid로 묻는다**(v2.34, P69): `GET /v1/me.join_request`가 `{status, center_id, created_at}`
+  3칸이고 조회는 `Store.ListJoinRequestsByUID`(센터 무관·최신 먼저). 종전엔 Principal 센터(미연결
+  uid = 기본 센터 폴백) 큐만 훑어 **2호점에 보낸 요청이 /v1/me에 안 실렸다**. 중복 409 본문은
+  `{error, code:"join_pending", center_id}`(판정은 그 센터). `POST /v1/join/approve`는 같은 번호의
+  살아 있는 회원이 있으면 409(승인은 새 레코드를 만든다 — 옳은 연결은 회원의 재인증).
+  `GET /v1/public/center`에 `open_hour`·`close_hour`(대기실 센터 카드용, 양끝 포함 · 앱은 close+1 표기).
+- **회원의 센터는 전화번호가 정한다**(v2.32, P65): `join/match`·`join/confirm`이 `Principal.CenterID`
+  (신규 uid에서는 `DEFAULT_CENTER_ID` 폴백)가 아니라 검증된 번호로 전 센터를 훑는다. 이게
+  없으면 2호점 회원은 앱에서 영원히 연결되지 않는다. (기존 rise 센터는 신원 미등록 상태로도
   종전과 동일하게 동작한다 — `GET /v1/center`의 name이 ""일 뿐.)
   `store.SeedDemo`는 여전히 `DEV_SEED=true` + 인메모리 전용이라 프로덕션 부트스트랩에 못 쓴다.
 - **예약 생성 바디의 `kind`**: 계약 예시는 `{slot_key, member_id, pass_id}`뿐이라 kind(pt/group/ot)

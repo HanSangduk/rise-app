@@ -45,7 +45,11 @@ func NewService(st store.Store, cfg config.Config, users UserProvisioner) *Servi
 		users = devUserProvisioner{}
 	}
 	return &Service{
-		store: st, cfg: cfg, users: users, media: devMediaPurger{},
+		store: st, cfg: cfg, users: users,
+		// 주입되지 않으면 파기는 no-op, 훑기는 503이다(unconfiguredPurger 주석, v2.28). 테스트·
+		// 로컬이 SDK 없이 도는 것과, 미구성 서버가 "고아 0건"이라고 거짓말하지 않는 것을 같은
+		// 기본값으로 만족시킨다 — uploader의 기본값이 503 구현인 것과 같은 규율.
+		media: unconfiguredPurger{reason: "사진 저장소가 설정되지 않았어요(관리자에게 STORAGE_BUCKET 설정을 요청해주세요)"},
 		// 주입되지 않으면 업로드는 503이다 — 테스트·로컬이 SDK 없이 도는 것과, 미구성
 		// 서버가 가짜 URL을 돌려주지 않는 것을 **같은 기본값**으로 만족시킨다.
 		uploader: unconfiguredUploader{reason: "사진 업로드 저장소가 설정되지 않았어요(관리자에게 STORAGE_BUCKET 설정을 요청해주세요)"},
@@ -86,6 +90,35 @@ type MeResponse struct {
 	// 이게 없어서 앱은 세션 복원 후 헤더가 센터명으로 떨어졌고, 어드민은 이메일 원문을 감추려고
 	// GET /v1/staff 목록을 받아 uid로 조인하고 있었다 — 이름 하나 때문에 목록 조회에 의존했다.
 	Name string `json:"name,omitempty"`
+	// JoinRequest — **member_id가 없을 때만** 실리는 대기 상태(v2.27). 종전엔 "가입 요청을
+	// 보냈다"는 사실의 주인이 앱의 SharedPreferences였다 — 기기를 바꾸거나 앱을 지우면
+	// 사라져서, 이미 큐에 서 있는 사람이 화면상 아무것도 안 한 사람이 되고 재요청을 누른다
+	// (그 재요청이 큐를 늘렸고, 늘어난 큐가 C-2 좀비 승인의 재료였다). 대기 상태의 주인을
+	// 서버로 옮긴다.
+	//
+	// 연결된 회원·스태프에겐 나가지 않는다(omitempty + Me의 분기) — member_id가 있다는 것
+	// 자체가 "대기 끝"이고, 두 값이 동시에 실리면 앱이 어느 쪽을 믿을지 정해야 한다.
+	JoinRequest *MeJoinRequest `json:"join_request,omitempty"`
+}
+
+// MeJoinRequest — 대기 상태의 **최소 노출**(v2.27). 두 칸뿐이다.
+//
+// 왜 id·name·phone·center_id를 싣지 않는가: JoinMatchMember(연결 전 단계 최소 노출)와 같은
+// 규율이다. 이름·번호는 신청자가 **방금 자기 손으로 적은 값**이라 서버가 되돌려줄 이유가
+// 없고(화면에 다시 띄울 곳도 없다), id는 승인·거절이 owner 전용 동사라 신청자에게 쓸모가
+// 없다 — 있으면 "그 id로 무엇을 할 수 있나"를 찾게 만드는 표면만 는다. center_id는 v1이
+// 단일 센터라 진실이 아닌 선택지를 암시한다(JoinRequestCreate의 봉인 주석 참고).
+//
+// 오라클 표면도 없다: 이 값은 **자기 uid로만** 스코프되므로 남의 존재를 캐낼 수 없다.
+type MeJoinRequest struct {
+	Status string `json:"status"` // pending|approved|rejected
+	// CenterID — 요청이 귀속된 센터(v2.34, P69). v2.27은 "v1 단일 센터라 진실이 아닌 선택지를
+	// 암시한다"며 이 칸을 뺐는데, v2.33이 `POST /v1/join/request.center_id`로 선택을 열면서
+	// 그 근거가 소멸했다. 이제는 **감추는 쪽이 거짓**이다 — 요청은 2호점에 있는데 앱 대기실은
+	// 1호점 연락처를 찍는다. 자기 uid 스코프의, 신청자가 방금 자기 손으로 고른 값이라
+	// (`GET /v1/join/centers`가 인증 사용자에게 이미 주는 ID 집합의 원소) 새 오라클 표면은 없다.
+	CenterID  string    `json:"center_id"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Me — GET /v1/me. 세션 부트스트랩이자 **모든 클라이언트가 가장 먼저 부르는 엔드포인트**다.
@@ -104,8 +137,47 @@ func (s *Service) Me(ctx context.Context, p Principal) MeResponse {
 		if mem, err := s.store.GetMember(ctx, p.CenterID, p.MemberID); err == nil {
 			res.Name = mem.Name
 		}
+	case p.IsMember():
+		// 회원인데 member_id가 없다 = **대기실**(v2.27). 이 분기가 스태프·연결된 회원보다
+		// 뒤에 오는 것이 규약이다: 스태프는 member_id가 늘 비어 있어 앞 case가 먼저 잡지
+		// 않으면 대표의 /v1/me가 매 호출마다 가입 요청 큐를 훑게 된다(그리고 대표에게
+		// 신청자의 대기 상태를 보여줄 이유가 없다). superadmin은 어느 case에도 걸리지 않는다.
+		if jr := s.latestJoinRequest(ctx, p); jr != nil {
+			res.JoinRequest = jr
+		}
 	}
 	return res
+}
+
+// latestJoinRequest — 호출자 uid의 **가장 최근** 가입 요청 한 건(v2.27). 없으면 nil.
+//
+// 왜 최신 1건인가: 앱이 답해야 하는 질문은 "지금 내 요청은 어떻게 됐나" 하나다. 과거 이력을
+// 주면 화면이 목록을 그려야 하고, 그 목록에 답이 여러 개면 어느 것이 현재인지 다시 정해야 한다.
+// 스토어의 ListJoinRequests가 이미 최신 먼저로 정렬해 돌려준다(두 구현 공통 규약).
+//
+// **Me의 이름 채우기와 같은 best-effort다** — 조회가 실패해도 에러를 올리지 않는다. 이
+// 호출이 실패하면 앱은 온보딩도 시작하지 못하는데(Me 주석), 대기 상태 하나 때문에 그
+// 위험을 지지 않는다. 값이 없으면 앱은 기존 폴백(로컬 플래그)을 쓰면 된다.
+//
+// pending으로 좁히지 **않는** 이유: 거절(D-3)도 결론이고, 그 결론을 신청자에게 전달하는 것이
+// 이 필드의 절반이다(rejected를 감추면 신청자는 pending과 구별하지 못해 영원히 기다리거나
+// 무한 재요청한다 — D-3이 문서를 통째로 지우지 않기로 한 이유와 같은 자리).
+//
+// **uid로 묻는다, 센터로 묻지 않는다**(v2.34). 종전엔 `ListJoinRequests(p.CenterID)`였는데
+// 미연결 uid의 `p.CenterID`는 기본 센터 폴백이라(v2.32) v2.33이 연 센터 선택을 못 따라갔다 —
+// 2호점에 보낸 요청이 여기서 0건이 되어 앱은 "요청 없음"을 읽고, 사용자는 재요청 → 409에
+// 갇혔다(P69 팀 C 1-b). 큐 전체(N)가 아니라 그 사람의 요청(k)만 읽으니 폴링 비용도 준다.
+func (s *Service) latestJoinRequest(ctx context.Context, p Principal) *MeJoinRequest {
+	list, err := s.store.ListJoinRequestsByUID(ctx, p.UID)
+	if err != nil {
+		log.Printf("me: join request lookup failed (best-effort skip): uid=%s: %v", p.UID, err)
+		return nil
+	}
+	if len(list) == 0 {
+		return nil
+	}
+	jr := list[0] // 최신 먼저 — 첫 항목이 곧 현재 상태다
+	return &MeJoinRequest{Status: jr.Status, CenterID: jr.CenterID, CreatedAt: jr.CreatedAt}
 }
 
 // ---- 가입 매칭(P48) ----
@@ -126,6 +198,14 @@ type JoinMatchMember struct {
 type JoinMatchResponse struct {
 	Member       *JoinMatchMember `json:"member,omitempty"`
 	NeedsConfirm bool             `json:"needs_confirm"`
+	// Center — 매칭된 **그 회원의 센터** 신원(v2.32, 멀티센터). 미매칭이거나 센터 상호가
+	// 미등록이면 생략된다.
+	//
+	// 싣는 이유: 대기실은 센터 상호를 `GET /v1/public/center`(무인증이라 기본 센터 고정)에서
+	// 읽으므로, 2호점 회원에게 1호점 이름을 보여준다. 매칭 응답이 곧 "당신의 센터"를 아는
+	// 유일한 지점이라 여기서 함께 준다. 앱이 이 값을 읽기 시작하면 그 표시가 정정된다
+	// (앱 반영은 다음 빌드 — work_log/P65 후속).
+	Center *CenterIdentityView `json:"center,omitempty"`
 }
 
 // joinPhone — join 계열이 신뢰할 전화번호를 고른다.
@@ -169,19 +249,24 @@ func (s *Service) JoinMatch(ctx context.Context, p Principal, phone string) (Joi
 	if err != nil {
 		return JoinMatchResponse{}, err
 	}
-	mem, err := s.store.FindMemberByPhone(ctx, p.CenterID, phone)
+	// **`p.CenterID`를 쓰지 않는다**(v2.32). 처음 앱을 켠 사람은 UserIndex가 없어 그 값이
+	// 기본 센터로 채워지므로, 2호점 회원은 라이즈에서만 조회돼 영원히 못 찾는다
+	// (service_join_center.go 헤더 주석). 번호가 센터를 정한다.
+	match, err := s.resolveMemberByPhone(ctx, phone)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return JoinMatchResponse{NeedsConfirm: false}, nil
 		}
 		return JoinMatchResponse{}, err
 	}
+	mem := match.Member
 	return JoinMatchResponse{
 		Member: &JoinMatchMember{
 			ID: mem.ID, Name: mem.Name, Phone: mem.Phone,
 			TrainerID: mem.TrainerID, Status: mem.Status,
 		},
 		NeedsConfirm: true,
+		Center:       s.joinCenterView(ctx, match.CenterID),
 	}, nil
 }
 
@@ -222,9 +307,32 @@ func (s *Service) JoinConfirm(ctx context.Context, p Principal, req JoinConfirmR
 		return JoinConfirmResponse{}, err
 	}
 
-	mem, err := s.store.GetMember(ctx, p.CenterID, req.MemberID)
+	// 센터는 **번호가 정한다**(v2.32) — `p.CenterID`는 신규 uid에서 기본 센터로 채워지는
+	// 값이라 2호점 회원의 확인이 라이즈 문서를 열려다 404가 된다(JoinMatch와 같은 근거,
+	// service_join_center.go 헤더 주석).
+	match, err := s.resolveMemberByPhone(ctx, checkPhone)
 	if err != nil {
+		// **번호로 아무도 못 찾은 건 400이다**(404가 아니라). 탈퇴 회원은 가명화로 번호가
+		// 비어 있어 이 경로로 떨어지는데, 계약과 테스트가 그 시도를 400으로 못박아 뒀다
+		// (service_account_test "가입 재연결(되살리기)" — 탈퇴는 종단 상태다).
+		//
+		// 문구가 이유를 특정하지 않는 것도 의도다: 여기 도착하는 세 경우(탈퇴·없는 member_id·
+		// 등록 번호 변경)를 갈라 말하면 **member_id를 넣어 보며 존재를 알아내는 오라클**이
+		// 된다(ID가 mem_000001 꼴이라 추측이 싸다). 회원이 할 일은 셋 다 같다.
+		if errors.Is(err, store.ErrNotFound) {
+			return JoinConfirmResponse{}, errors.Join(errBadRequest,
+				errors.New("연결할 수 없는 회원이에요 — 센터에 등록된 번호가 맞는지 확인하고, 새로 가입 요청을 해주세요"))
+		}
 		return JoinConfirmResponse{}, err
+	}
+	centerID, mem := match.CenterID, match.Member
+	// 번호가 가리킨 회원과 클라이언트가 지목한 회원이 다르면 연결하지 않는다. 종전에는
+	// `GetMember(p.CenterID, req.MemberID)`로 **클라이언트가 레코드를 골랐고** 번호 대조가
+	// 뒤따랐다. 이제 서버가 번호로 먼저 고르고 클라이언트의 지목은 대조 대상일 뿐이다 —
+	// 방어선의 순서가 바뀌었을 뿐 세기는 종전 이상이다.
+	if mem.ID != req.MemberID {
+		return JoinConfirmResponse{}, errors.Join(errBadRequest,
+			errors.New("회원 정보가 일치하지 않아요 — 다시 확인해주세요"))
 	}
 	// 탈퇴한 레코드에는 다시 연결하지 않는다(v2.11 — 탈퇴는 되돌릴 수 없는 종단 상태다).
 	//
@@ -240,19 +348,44 @@ func (s *Service) JoinConfirm(ctx context.Context, p Principal, req JoinConfirmR
 		return JoinConfirmResponse{}, errors.Join(errBadRequest, errors.New("전화번호가 회원 정보와 일치하지 않아요"))
 	}
 	mem.AppLinked = true
-	if _, err := s.store.SaveMember(ctx, p.CenterID, mem); err != nil {
+	if _, err := s.store.SaveMember(ctx, centerID, mem); err != nil {
 		return JoinConfirmResponse{}, err
 	}
 	if err := s.store.SaveUserIndex(ctx, &store.UserIndex{
-		UID: p.UID, Role: domain.RoleMember, CenterID: p.CenterID, MemberID: mem.ID,
+		UID: p.UID, Role: domain.RoleMember, CenterID: centerID, MemberID: mem.ID,
 	}); err != nil {
+		return JoinConfirmResponse{}, err
+	}
+	// **연결됐으면 그 uid의 가입 요청은 파기한다**(v2.27 — C-2의 원인 제거).
+	//
+	// 종전엔 이 함수가 join_requests를 전혀 건드리지 않았다. 그래서 "앱으로 먼저 요청 →
+	// 데스크에서 따로 등록 → 회원이 재인증해 진짜 레코드에 연결"이라는 **실제로 흔한 동선**이
+	// 큐에 좀비 pending을 남겼고, 며칠 뒤의 승인 한 번이 그 회원의 회원권·예약·기록·체형사진을
+	// 통째로 잃게 만들었다(JoinApprove의 "이미 연결된 uid" 가드 주석 참고). 여기서 지우면
+	// 그 좀비가 애초에 생기지 않는다.
+	//
+	// **P53이 만든 DeleteJoinRequestsByUID를 그대로 쓴다**(새 스토어 동사를 만들지 않는다).
+	// 그 동사의 규약이 이 자리에 정확히 맞는다: uid 전체 스코프(다른 센터 큐의 요청도 같은
+	// 사람의 것이고, 연결된 지금은 어느 센터도 승인해선 안 된다) · 없는 uid도 성공(0건) ·
+	// 몇 번을 돌려도 결과가 같다(멱등).
+	//
+	// 자리가 왜 **맨 뒤**인가: 앞의 두 쓰기(SaveMember·SaveUserIndex)가 연결의 본체다. 이걸
+	// 그보다 앞에 두면, 삭제만 성공하고 연결이 실패했을 때 신청자는 큐에서도 사라지고 연결도
+	// 안 된 상태가 된다 — 대표에게 보이지 않는 사람이 생긴다. 뒤에 두면 반대로 "연결됐는데
+	// 큐에 남은" 상태가 될 수 있지만, 그쪽은 JoinApprove의 가드가 이미 무해하게 만들었고
+	// 재시도(JoinConfirm 자체가 멱등이다)가 마저 지운다.
+	//
+	// 에러를 삼키지 않는 이유: 삼키면 잔여를 아무도 모른다. 호출측에 500이 올라가면 앱이
+	// 재시도하고, 재시도는 위 세 쓰기가 전부 멱등이라 깨끗하게 다시 돈다.
+	if _, err := s.store.DeleteJoinRequestsByUID(ctx, p.UID); err != nil {
 		return JoinConfirmResponse{}, err
 	}
 	return JoinConfirmResponse{Linked: true, Member: mem}, nil
 }
 
 type JoinRequestBody struct {
-	// CenterID — 계약 호환을 위해 받기만 하고 **쓰지 않는다**(아래 JoinRequestCreate 주석).
+	// CenterID — **선택한 센터**(계약 v2.33). 비면 종전대로 Principal의 센터(신규 uid면 기본
+	// 센터)를 쓴다. 값이 있으면 `GET /v1/join/centers` 목록에 있는 것만 통과한다.
 	CenterID string `json:"center_id"`
 	Name     string `json:"name"`
 	Phone    string `json:"phone"`
@@ -272,7 +405,25 @@ func (s *Service) JoinRequestCreate(ctx context.Context, p Principal, req JoinRe
 	// 인덱스가 없는 신규 가입자면 cfg.DefaultCenterID로 폴백한다(auth.go enrich). v1은 단일 센터라
 	// 호출자가 고를 여지 자체가 없다 — 멀티센터로 갈 때 "그 센터의 회원인가"를 검증하는 자리가
 	// 여기다(지금 바디 값을 신뢰하면 그 검증 없이 열려 있는 셈).
-	centerID := p.CenterID
+	//
+	// **v2.27에서도 열지 않았다 — 이유가 갱신됐다.** 종전의 이유는 "검증할 자리가 없다"였고
+	// 지금의 이유는 **넣을 목록이 없다**이다: 회원용 센터 목록 API가 존재하지 않고
+	// (GET /v1/admin/centers는 superadmin 전용), 그 아래의 ListCenters는 `name`이 빈 센터를
+	// 거르는데 운영 센터(rise)가 바로 그 상태였다 — 열어 봐야 고를 것이 0개인 선택지다.
+	// v2.27은 그 선행조건 쪽을 먼저 고친다(PUT /v1/center의 `center` 덩어리로 센터가 신원을
+	// 갖는다). 선택을 여는 조건은 셋이다: ① 신원 등록된 센터가 2곳 이상 ② 회원이 읽을 수 있는
+	// 목록 엔드포인트 ③ 여기에 "그 센터가 실재하고 가입을 받는가" 검증. 셋이 갖춰지기 전에
+	// 바디 값을 믿으면 종전 결함(존재하지 않는 센터로 200 → 영원한 pending)이 그대로 돌아온다.
+	// **선택을 연다**(v2.33). 위 주석이 적어 둔 조건 셋 중 ②(회원용 목록 endpoint)와
+	// ③(실재 검증)이 갖춰졌다 — `GET /v1/join/centers`와 `resolveJoinCenter`다. ①(신원 등록
+	// 센터 2곳 이상)은 런타임 조건이라 앱이 목록 길이로 판단한다.
+	//
+	// 신뢰 경계는 그대로다: 클라이언트가 **고를 수는 있어도 만들 수는 없다** — 서버가 만든
+	// 목록에 없는 값은 400이다. 봉인했던 것은 "임의 문자열 신뢰"였지 선택 자체가 아니었다.
+	centerID, err := s.resolveJoinCenter(ctx, p, req.CenterID)
+	if err != nil {
+		return nil, err
+	}
 	// 스태프가 가입 요청을 내면 owner 승인 시 JoinApprove가 그 uid를 member로 덮어써 강등된다.
 	// 요청 단계에서 막는다(v1.9 — confirm과 같은 규칙).
 	if err := s.guardNotStaff(ctx, p.UID); err != nil {
@@ -295,6 +446,34 @@ func (s *Service) JoinRequestCreate(ctx context.Context, p Principal, req JoinRe
 			// 일치 — 입력 표기 그대로 보존.
 		default:
 			return nil, errors.Join(errBadRequest, errors.New("인증한 번호와 다른 번호로는 가입을 요청할 수 없어요"))
+		}
+	}
+	// pending 중복은 409(v2.27) — CreateConsultRequest(v2.20)와 **같은 규칙·같은 문구 형태**다.
+	// 새 패턴이 아니라 같은 "회원발 요청 큐"에 이미 있던 규칙을 이쪽에도 맞춘 것이다.
+	//
+	// 무엇을 막는가: 앱의 대기 화면에 [다시 요청] 버튼이 있고, 상태의 주인이 로컬이라
+	// 재설치·기기 변경이 그 상태를 지웠다 — 같은 사람이 큐에 2·3건씩 쌓였다. 그 잔여가
+	// C-2(좀비 승인이 회원 기록을 통째로 날리는 사고)의 재료다. 입구를 하나로 만든다.
+	//
+	// 이 409는 사용자를 가두지 않는다: 응답 자체가 "요청이 살아 있다"는 사실의 전달이고
+	// (문구가 그렇게 말한다), 같은 사실을 GET /v1/me의 join_request가 항구적으로 들고 있다
+	// (A-1) — 재요청 버튼이 필요했던 이유 자체가 사라진다. 막다른 길이 생기는 경우는
+	// "요청이 영원히 pending으로 남는 것"인데, 그쪽은 D-3(거절)이 대표에게 결론을 낼 수단을
+	// 주고 그 결론이 다시 /v1/me로 신청자에게 간다.
+	//
+	// v2.34: 조회를 uid로(센터 큐 전체가 아니라 그 사람의 요청만 — latestJoinRequest와 같은 이유)
+	// 바꾸되 **판정 범위는 종전대로 그 센터**다. 다른 센터에 pending이 있어도 이 센터 요청은
+	// 받는다 — 잘못 고른 센터를 바로잡을 철회 동사가 없는 상태에서 전 센터로 넓히면 사용자를
+	// 가둔다(두 번째 요청의 승인은 JoinApprove의 "이미 연결된 uid" 가드가 막으므로 데이터
+	// 손실은 없다). 409 본문에는 `code:"join_pending"`과 그 요청의 `center_id`를 싣는다 —
+	// 앱이 이 409를 "서버 확답 pending"으로 승격시켜 대기 화면으로 돌아가게(막다른 길 차단).
+	existing, err := s.store.ListJoinRequestsByUID(ctx, p.UID)
+	if err != nil {
+		return nil, err
+	}
+	for _, prev := range existing {
+		if prev.CenterID == centerID && prev.Status == store.JoinPending {
+			return nil, &joinPendingError{centerID: prev.CenterID}
 		}
 	}
 	jr := &store.JoinRequest{CenterID: centerID, UID: p.UID, Name: req.Name, Phone: phone, Status: store.JoinPending}
@@ -320,13 +499,67 @@ func (s *Service) JoinApprove(ctx context.Context, p Principal, requestID string
 	}
 	// 멱등 가드(v1.9): 상태를 안 보면 두 번 누를 때 같은 사람의 회원 레코드가 둘 생기고,
 	// UserIndex는 나중 것만 가리켜 먼저 만든 레코드가 고아가 된다(목록·통계·번호 인덱스엔 잔류).
-	// 목록이 pending 필터를 하지 않아 승인된 요청이 큐에 남으므로 두 번 누르는 게 기본 동선이다.
+	// (v2.27 전까지는 목록이 pending 필터를 하지 않아 승인된 요청이 큐에 남았고, 그래서 두 번
+	// 누르는 것이 **기본 동선**이었다 — 지금은 ListJoinRequests가 pending만 돌려주므로 이
+	// 가드가 잡는 것은 연타·경합 같은 예외뿐이다.)
 	if jr.Status != store.JoinPending {
 		return nil, errors.Join(ErrConflict, errors.New("이미 처리된 가입 요청이에요"))
 	}
 	// 요청자가 스태프면 승인이 곧 강등이다 — confirm·request와 같은 가드를 승인 시점에도 건다
 	// (요청 이후에 스태프로 초대된 경우까지 잡는다).
 	if err := s.guardNotStaff(ctx, jr.UID); err != nil {
+		return nil, err
+	}
+	// **이미 회원으로 연결된 uid는 승인하지 않는다**(v2.27 — C-2의 마지막 방어선).
+	//
+	// 실측된 사고: 앱으로 가입 요청(pending) → 대표가 데스크에서 그 사람을 어드민에 직접 등록
+	// → 회원이 번호 인증으로 join/match+join/confirm을 태워 **진짜 레코드에 연결**(회원권·예약·
+	// 기록·체형사진이 그쪽에 붙는다) → ①의 pending은 그대로 남는다 → 며칠 뒤 대표가 큐를
+	// 정리하다 승인 → SaveMember가 **빈 회원 레코드를 새로 만들고** SaveUserIndex가 신원을
+	// 그리로 옮긴다 → 회원이 자기 회원권·예약·기록·사진을 전부 잃는다. 되돌릴 API가 없다.
+	// 위의 멱등 가드는 **그 요청 문서의 status만** 보므로 이 경로를 못 본다 — 좀비는 여전히
+	// pending이고, 진실은 다른 문서(UserIndex)에 있다.
+	//
+	// A-5(JoinConfirm 성공 시 pending 파기)가 원인을 없애지만, 그 삭제가 실패했거나 배포 이전에
+	// 만들어진 잔여 요청이 이미 프로덕션에 있다. 원인 제거와 방어선은 **둘 다** 필요하다.
+	//
+	// **탈퇴 후 재가입을 막지 않는다**: 탈퇴는 DeleteUserIndex를 수행하므로 GetUserIndex가
+	// ErrNotFound → 이 가드는 통과한다. 그리고 탈퇴자에게 JoinConfirm은 IsWithdrawn으로
+	// 막혀 있으므로 **가입 요청 승인이 재가입의 유일한 길**이다 — 여기서 막으면 탈퇴한 사람이
+	// 영원히 돌아올 수 없다. 테스트로 고정돼 있다(TestJoinApproveAllowsRejoinAfterWithdrawal).
+	// guardNotStaff가 이미 GetUserIndex를 부르므로 조회 자체는 같은 자리다(호출 1회 추가).
+	// **인프라 에러를 "조건 불성립"으로 삼키지 않는다**(P56). `err == nil`만 보면
+	// 스토어 순단에 아래 가드가 **조용히 함께 꺼진다** — 방어가 약한 게 아니라 방어가
+	// 사라지는 것이고, 로그에도 안 남는다. 부재(ErrNotFound)와 장애를 갈라, 장애면 멈춘다.
+	// 이 가드가 막는 사고는 P55 C-2 — 승인 한 번이 회원권·예약·기록·체형사진을 통째로
+	// 날리고 되돌릴 API가 없다. 인프라 순단에 조용히 꺼져도 되는 종류가 아니다.
+	if idx, err := s.store.GetUserIndex(ctx, jr.UID); err == nil {
+		if idx.MemberID != "" {
+			return nil, errors.Join(ErrConflict, errors.New("이미 회원으로 연결된 계정이에요"))
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+	// **같은 번호의 살아 있는 회원이 이 센터에 이미 있으면 승인하지 않는다**(v2.34, P69).
+	//
+	// 승인은 `jr.Phone`으로 **새** 회원 레코드를 만든다. 그 번호의 회원이 이미 있다는 것은
+	// "데스크가 이 사람을 (요청 이후에) 등록했다"는 뜻이고, 옳은 연결은 승인이 아니라 회원이
+	// 같은 번호를 다시 인증해 `join/match → confirm`으로 **그 레코드에** 붙는 것이다(연결되면
+	// v2.27 A-5가 이 pending을 파기한다). 여기서 승인하면 같은 사람이 두 명이 되고 회원권·예약은
+	// 데스크 레코드에, 앱 계정은 빈 레코드에 붙는다 — C-2의 변종이라 서버가 막는다. 어드민 큐의
+	// 중복 힌트가 같은 말을 먼저 하지만, 화면 경고는 방어선이 아니다.
+	//
+	// 탈퇴자는 걸리지 않는다 — 탈퇴는 번호를 파기하므로(v2.11) FindMemberByPhone에 잡히지
+	// 않고, 잡히더라도 IsWithdrawn을 뺀다(재가입은 승인이 유일한 길 — 위 주석·
+	// TestJoinApproveAllowsRejoinAfterWithdrawal). 부재(ErrNotFound)는 정상, 그 외 에러는 전파
+	// (위 가드와 같은 규약 — 인프라 순단에 방어가 조용히 꺼지지 않는다).
+	if dup, err := s.store.FindMemberByPhone(ctx, p.CenterID, jr.Phone); err == nil {
+		if !dup.IsWithdrawn() {
+			return nil, errors.Join(ErrConflict, errors.New(
+				"같은 번호로 등록된 회원("+dup.Name+")이 이미 있어요 — 승인하면 회원이 2명이 돼요. "+
+					"그 회원의 번호를 확인하고, 회원에게 앱에서 '번호 다시 인증하기'를 눌러 달라고 안내해주세요"))
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
 		return nil, err
 	}
 	mem := &domain.Member{
@@ -339,6 +572,26 @@ func (s *Service) JoinApprove(ctx context.Context, p Principal, requestID string
 	}
 	mem.ID = memberID
 	jr.Status = store.JoinApproved
+	// **이름·전화번호를 비운다**(v2.28, P56 A5) — JoinReject와 동형이다.
+	//
+	// 승인은 이름·번호를 **회원 레코드로 옮기는** 동작이지 복사하는 동작이 아니다. 위 SaveMember가
+	// 끝난 순간 그 값의 처리 목적(누구를 어느 레코드로 만들 것인가)은 끝났고, 진실은 members
+	// 문서에 있다. 그런데 종전엔 요청 문서에 원본이 그대로 남았다 — join_requests는 **최상위
+	// 컬렉션 + uid 키**라 센터 스코프 파기 스윕이 구조적으로 못 닿고(P53), 승인된 요청은 큐에서
+	// 사라져(ListJoinRequests가 pending만 돌려준다) 아무 화면도 읽지 않는다. 읽는 사람이 없는데
+	// 가장 오래 남는 개인정보였다. 배포된 방침은 *"처리 완료 또는 탈퇴 시 지체 없이 파기"*를
+	// 약속하는데 탈퇴 절반(P53의 DeleteJoinRequestsByUID)만 참이었다.
+	//
+	// 남기는 것: {uid, center_id, status=approved, created_at}. 감사 추적("이 uid가 언제
+	// 요청했고 승인됐다")은 이 넷으로 완결되고, /v1/me의 join_request도 status·created_at만
+	// 읽는다(MeJoinRequest). "승인 큐 이력에서 누구였는지"는 회원 레코드가 답한다 — 요청 문서의
+	// 이름은 그 레코드의 이름과 같은 값이고, 개명·정정은 회원 레코드에만 반영되므로 요청 문서
+	// 쪽 사본은 남길수록 틀려지는 사본이다.
+	//
+	// 순서: 반드시 SaveMember **뒤**다(위 mem이 jr.Name·jr.Phone을 복사한다). 이 줄이 위로
+	// 올라가면 빈 이름의 회원이 만들어진다.
+	jr.Name = ""
+	jr.Phone = ""
 	if err := s.store.UpdateJoinRequest(ctx, jr); err != nil {
 		return nil, err
 	}
@@ -352,11 +605,81 @@ func (s *Service) JoinApprove(ctx context.Context, p Principal, requestID string
 
 // ListJoinRequests — GET /v1/join/requests(어드민 가정 승인: 가입 요청 목록, v1.1 정합 패치). owner만
 // (JoinApprove와 동일한 권한 경계 — 승인 대상 목록이므로).
+//
+// **pending만 돌려준다**(v2.27). 종전엔 필터가 없어 승인·거절된 요청이 큐에 그대로 남았고,
+// 그래서 대표는 "이미 처리한 것"과 "처리할 것"을 눈으로 구별할 수 없었다 — 화면의 대기 건수가
+// 사실이 아니었고, 처리 표시를 위해 한 번 더 누르는 것이 기본 동선이 됐다(그 두 번째 누름이
+// JoinApprove의 멱등 가드에 걸려 409로 튀거나, 좀비 요청에서는 C-2 사고가 됐다).
+//
+// **감사 추적은 없어지지 않는다.** 필터는 여기(서비스 응답)에만 걸리고 스토어의 동사는
+// 여전히 전체를 돌려준다 — 문서는 status만 바뀐 채 그대로 남아 있고, 어느 것도 삭제되지
+// 않는다(삭제는 탈퇴 파기 DeleteJoinRequestsByUID뿐이다, v2.26). 이력이 필요해지면 이
+// 자리에 status 쿼리 파라미터를 여는 것이 다음 단계다 — 지금 열지 않는 이유는 그것을 읽을
+// 화면이 없어서다(어드민에 이력 뷰가 없다).
+//
+// 필터를 **스토어가 아니라 여기서** 하는 이유: Firestore에서 `Where(center_id)`에
+// `Where(status)`를 더하면 복합 인덱스가 필요해지고, 인덱스 없이 배포되면 프로덕션에서만
+// 500이 난다(Memory 구현으로는 보이지 않는다). 큐 규모가 센터당 수십 건이라 서버 필터의
+// 비용이 그 위험보다 싸다 — ListMembers의 trainerID/q 필터와 같은 판단이다.
 func (s *Service) ListJoinRequests(ctx context.Context, p Principal) ([]store.JoinRequest, error) {
 	if !p.IsOwner() {
 		return nil, ErrForbidden
 	}
-	return s.store.ListJoinRequests(ctx, p.CenterID)
+	list, err := s.store.ListJoinRequests(ctx, p.CenterID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]store.JoinRequest, 0, len(list))
+	for _, jr := range list {
+		if jr.Status == store.JoinPending {
+			out = append(out, jr)
+		}
+	}
+	return out, nil
+}
+
+// JoinReject — POST /v1/join/reject {request_id}(owner 전용, v2.27). 대표가 큐를 줄이는
+// 유일한 수단이다.
+//
+// 왜 지금까지 없었나: store.JoinRejected 상수는 v1.2부터 있었지만 **프로덕션 코드에서 한 번도
+// 대입되지 않았다**(유일한 사용처가 스토어 적합성 테스트였다). 그래서 처리할 수 없는 요청
+// — 장난·오입력·이미 데스크에서 다른 방식으로 등록된 사람 — 이 큐에 영원히 남았고, 대표가
+// 그것을 치우는 방법은 승인(=빈 회원 레코드 생성)뿐이었다. C-2 사고의 실제 동기가 이것이다.
+//
+// **이름·전화번호를 비운다.** P53(v2.26)이 탈퇴 파기에서 익명화를 기각한 근거는 "남은 것에
+// 쓸모가 없을 때"였는데(껍데기만 남는다), 여기서는 남은 `{uid, center_id, status, created_at}`에
+// 쓸모가 생긴다 — 신청자에게 **결론을 전달한다**(GET /v1/me의 join_request가 rejected를
+// 읽는다). 그래서 같은 문서를 한쪽에선 지우고 한쪽에선 비우는 것이 일관된 판단이다.
+//
+// **문서를 통째로 지우지는 않는다.** 지우면 신청자 화면은 "요청한 적 없음"으로 되돌아가고,
+// 그 사람은 "왜 아직도 승인이 안 되지"라며 다시 요청한다 — 끊을 수 없는 재요청 루프가 생기고
+// A-2의 409도 그것을 막지 못한다(pending이 없으니 통과한다). 거절은 결론이므로 남아야 한다.
+//
+// 가드는 JoinApprove와 **같은 두 겹**(owner + 센터 대조)이다. 큐를 줄이는 것도 승인과 같은
+// 무게의 결정이고, 남의 센터 요청을 거절하는 것 역시 남의 큐를 조작하는 일이다.
+func (s *Service) JoinReject(ctx context.Context, p Principal, requestID string) (*store.JoinRequest, error) {
+	if !p.IsOwner() {
+		return nil, ErrForbidden
+	}
+	jr, err := s.store.GetJoinRequest(ctx, requestID)
+	if err != nil {
+		return nil, err
+	}
+	if jr.CenterID != p.CenterID {
+		return nil, ErrForbidden
+	}
+	// JoinApprove와 같은 멱등 가드. 승인된 요청을 뒤늦게 거절로 덮으면 회원 레코드는 이미
+	// 만들어졌는데 큐에는 "거절됨"이 남아 두 기록이 서로 다른 말을 한다.
+	if jr.Status != store.JoinPending {
+		return nil, errors.Join(ErrConflict, errors.New("이미 처리된 가입 요청이에요"))
+	}
+	jr.Status = store.JoinRejected
+	jr.Name = ""  // 처리 목적이 끝난 개인정보 — 결론 전달에 이름은 필요 없다
+	jr.Phone = "" // 같은 이유. 여기 남으면 승인 경로가 없는데도 번호만 잔류한다
+	if err := s.store.UpdateJoinRequest(ctx, jr); err != nil {
+		return nil, err
+	}
+	return jr, nil
 }
 
 // ---- 회원 ----
@@ -392,6 +715,7 @@ func (s *Service) ListMembers(ctx context.Context, p Principal, trainerQuery, q 
 		// 응답 사본에만 구체화(v2.10) — 앱은 이 경로로 자기 포즈 시퀀스를 받는다.
 		// 저장 객체가 아니라 여기서 채우는 이유는 Member.BodyPoses 주석 참고.
 		mem.BodyPoses = mem.EffectiveBodyPoses()
+		normalizeMemberWire(mem) // 읽기 정규화(v2.28) — 이미 null로 굳은 문서도 배열로 나간다
 		return []MemberWithPasses{{Member: *mem, Passes: passes}}, nil
 	}
 	trainerID := trainerQuery
@@ -413,6 +737,7 @@ func (s *Service) ListMembers(ctx context.Context, p Principal, trainerQuery, q 
 			return nil, err
 		}
 		mem.BodyPoses = mem.EffectiveBodyPoses() // 응답 사본에만(v2.10) — 어드민 포즈 편집기의 초기값
+		normalizeMemberWire(&mem)                // 읽기 정규화(v2.28) — 회원 목록은 어드민이 가장 먼저 여는 화면이다
 		out = append(out, MemberWithPasses{Member: mem, Passes: passes})
 	}
 	return out, nil
@@ -599,6 +924,11 @@ func (s *Service) UpdateMember(ctx context.Context, p Principal, id string, body
 			}
 		}
 	}
+	// 쓰기 정규화(v2.28) — **SaveMember 앞**이라 PUT 한 번이 null 문서를 고친다. 머지 PUT은
+	// 기존 문서 위에 언마샬하므로 flags를 안 실은 요청이면 문서의 null이 그대로 남고(위
+	// slices.Clone(nil)도 nil이다), CreateMember의 정규화는 신규 생성만 지난다 — 이미 null인
+	// 문서를 되살릴 쓰기 경로가 없었다(와이어 감사 L-3). member self 경로(consent만)도 포함.
+	normalizeMemberWire(existing)
 	if _, err := s.store.SaveMember(ctx, p.CenterID, existing); err != nil {
 		return nil, err
 	}
@@ -666,6 +996,7 @@ func (s *Service) hydratePassRemaining(ctx context.Context, centerID string, pas
 	}
 	pass.Remaining = domain.Sum(entries)
 	pass.Status = pass.EffectiveStatus(today())
+	normalizePassWire(pass) // 읽기 정규화(v2.28) — 목록(GET /v1/passes · members[].passes)이 전부 여기를 지난다
 	return nil
 }
 
@@ -679,6 +1010,7 @@ func stampPassStatus(pass *domain.Pass) {
 		return
 	}
 	pass.Status = pass.EffectiveStatus(today())
+	normalizePassWire(pass) // 읽기 정규화(v2.28) — 단건 응답(발급·홀딩·재개·환불)은 hydrate를 안 지난다
 }
 
 // hydratePassesRemaining — 리스트 전체에 hydratePassRemaining을 적용한다(GET /v1/passes, GET
@@ -1494,7 +1826,14 @@ func (s *Service) cancelPenaltyEntry(ctx context.Context, p Principal, b *domain
 		return nil, nil
 	}
 	// 환불 처리된 패스의 잔존 회차 뒷정리 취소는 페널티 무의미(P04 M2 — 원장 음수 방지).
-	if pass, err := s.store.GetPass(ctx, p.CenterID, b.PassID); err == nil && pass.Status == domain.PassStatusRefunded {
+	// 인프라 에러를 "환불 아님"으로 삼키지 않는다(P56). 스토어 순단에
+	// 이 가드가 조용히 꺼지면 **환불된 패스에 차감이 붙는다** — 바로 아래
+	// 주석이 막으려던 그 원장 음수다.
+	if pass, err := s.store.GetPass(ctx, p.CenterID, b.PassID); err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	} else if pass.Status == domain.PassStatusRefunded {
 		return nil, nil
 	}
 	history, err := s.store.ListLedger(ctx, p.CenterID, b.MemberID, b.PassID)
@@ -1524,7 +1863,14 @@ func (s *Service) CompleteBooking(ctx context.Context, p Principal, bookingID st
 	}
 	// 환불된 패스의 잔존 예약 방어(P03 HIGH-1의 이중 방어선 — RefundPass가 미래 예약을 일괄
 	// 취소하지만, 취소 실패·경합 잔존분이 완료 처리되면 원장이 음수로 내려간다).
-	if pass, err := s.store.GetPass(ctx, p.CenterID, b.PassID); err == nil && pass.Status == domain.PassStatusRefunded {
+	// 인프라 에러를 "환불 아님"으로 삼키지 않는다(P56). 스토어 순단에
+	// 이 가드가 조용히 꺼지면 **환불된 패스에 차감이 붙는다** — 바로 아래
+	// 주석이 막으려던 그 원장 음수다.
+	if pass, err := s.store.GetPass(ctx, p.CenterID, b.PassID); err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	} else if pass.Status == domain.PassStatusRefunded {
 		return nil, errors.Join(errBadRequest, errors.New("환불 처리된 패스의 예약이라 완료할 수 없어요"))
 	}
 	entry := &domain.Ledger{
@@ -1554,7 +1900,14 @@ func (s *Service) NoshowBooking(ctx context.Context, p Principal, bookingID stri
 		// 상태 전이 가드 — CompleteBooking과 동일(이중 차감·중복 유예 방지, v1.2 정합 패치).
 		return nil, errors.Join(errBadRequest, errors.New("confirmed 상태의 예약만 노쇼 처리할 수 있어요(이미 처리됨)"))
 	}
-	if pass, err := s.store.GetPass(ctx, p.CenterID, b.PassID); err == nil && pass.Status == domain.PassStatusRefunded {
+	// 인프라 에러를 "환불 아님"으로 삼키지 않는다(P56). 스토어 순단에
+	// 이 가드가 조용히 꺼지면 **환불된 패스에 차감이 붙는다** — 바로 아래
+	// 주석이 막으려던 그 원장 음수다.
+	if pass, err := s.store.GetPass(ctx, p.CenterID, b.PassID); err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	} else if pass.Status == domain.PassStatusRefunded {
 		return nil, errors.Join(errBadRequest, errors.New("환불 처리된 패스의 예약이라 노쇼 처리할 수 없어요"))
 	}
 	policy, err := s.store.GetPolicy(ctx, p.CenterID)
@@ -2466,6 +2819,11 @@ func (s *Service) CreatePayment(ctx context.Context, p Principal, req PaymentCre
 		MemberID: req.MemberID, PassID: req.PassID, Method: req.Method, Total: req.Total,
 		Installments: req.Installments, Channel: req.Channel,
 	}
+	// 쓰기 정규화(v2.28, P56 A3) — 일시불(installments 생략)은 nil로 들어오고, 스토어는 JSON
+	// 왕복이라 한 번 null이면 문서에 **영구히** null이다. 형제 배열(Flags·Holds)은 생성 경로에서
+	// 정규화하면서 여기만 빠져 있었다. 어드민 Members.tsx가 `pay.installments.filter`를 무가드로
+	// 부르므로 null 1건이 회원 상세를 여는 순간 어드민 전체 폴백이다(P55 C-1과 같은 폭발 반경).
+	normalizePaymentWire(pay)
 	id, err := s.store.CreatePayment(ctx, p.CenterID, pay)
 	if err != nil {
 		return nil, err
@@ -2499,6 +2857,9 @@ func (s *Service) PayInstallment(ctx context.Context, p Principal, paymentID str
 	if err != nil {
 		return nil, err
 	}
+	// 여기엔 읽기 정규화(normalizePaymentWire)를 두지 않는다 — 바로 아래 인덱스 가드가
+	// len(nil)==0으로 먼저 400을 내므로 installments가 null인 결제는 이 응답에 실릴 수 없다
+	// (뮤테이션으로 확인한 등가 자리 — 두면 죽일 수 없는 코드가 된다, v2.28).
 	if index < 0 || index >= len(pay.Installments) {
 		return nil, errors.Join(errBadRequest, errors.New("installment index out of range"))
 	}
@@ -2508,6 +2869,10 @@ func (s *Service) PayInstallment(ctx context.Context, p Principal, paymentID str
 	if pay.Installments[index].WaivedAt != nil {
 		return nil, errors.Join(errBadRequest, errors.New("환불로 청구가 종결된 회차예요"))
 	}
+	// **인프라 에러를 "조건 불성립"으로 삼키지 않는다**(P56). `err == nil`만 보면
+	// 스토어 순단에 아래 가드가 **조용히 함께 꺼진다** — 방어가 약한 게 아니라 방어가
+	// 사라지는 것이고, 로그에도 안 남는다. 부재(ErrNotFound)와 장애를 갈라, 장애면 멈춘다.
+	// 납부는 되돌릴 수단이 없다(계약: 회차 취소 동사 없음) — 여기서 여는 비용이 가장 크다.
 	if pass, err := s.store.GetPass(ctx, p.CenterID, pay.PassID); err == nil {
 		if pass.Status == domain.PassStatusRefunded {
 			return nil, errors.Join(errBadRequest, errors.New("환불 처리된 패스의 회차는 납부 처리할 수 없어요"))
@@ -2515,6 +2880,8 @@ func (s *Service) PayInstallment(ctx context.Context, p Principal, paymentID str
 		if p.IsTrainer() && pass.TrainerID != p.UID {
 			return nil, ErrForbidden // 쓰기 스코프: CreatePayment(v1.5)와 대칭 — 담당 패스만(P05 통합검수)
 		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return nil, err
 	}
 	now := time.Now().UTC()
 	pay.Installments[index].PaidAt = &now
@@ -2567,6 +2934,9 @@ func (s *Service) ListPayments(ctx context.Context, p Principal, memberQuery str
 				continue
 			}
 		}
+		// 읽기 정규화(v2.28) — 쓰기만 고치면 이미 프로덕션에 있는 null 문서는 영원히 안 낫는다.
+		// 결제는 PUT 경로가 없어 "다시 저장해서 고친다"가 성립하지 않으므로 읽기 쪽이 유일한 바닥이다.
+		normalizePaymentWire(&pay)
 		out = append(out, pay)
 	}
 	return out, nil
@@ -2915,13 +3285,66 @@ func (s *Service) checkBodyPhotoAccess(mem domain.Member, p Principal) error {
 	return ErrForbidden
 }
 
-func (s *Service) ListBodyPhotos(ctx context.Context, p Principal, memberID string) ([]domain.BodyPhoto, error) {
+// BodyPhotoMeta — 동의가 **유효하지 않은** 회원의 사진 목록을 스태프에게 줄 때의 원소(v2.28,
+// P56 B1 완결). 열람은 잠그되 **파기에 필요한 최소**만 준다: 어느 사진(id)인지 사람이 알아볼
+// 라벨(pose·direction·date)과, 휴지통 뷰를 위한 deleted_at. **storage_path·blurred는 없다** —
+// 경로가 나가는 순간 이미지에 닿을 수 있고(서명 URL의 재료), 그러면 "열람 잠금"이 거짓이 된다.
+//
+// 왜 필요한가: DeleteBodyPhoto가 동의를 보지 않게 됐어도(B1) 목록이 403이면 스태프는 지울 id를
+// 얻을 길이 없다 — "서버만 열린" 절반 수리다. 방침이 안내하는 경로("철회 후 데스크에 삭제 요청")는
+// 데스크가 그 사진을 **가리킬 수 있어야** 실재한다. 키 집합은 테스트로 잠근다(BodyPhoto의 필드가
+// 늘어도 여기로 새지 않는다 — 별도 타입인 이유).
+type BodyPhotoMeta struct {
+	ID        string     `json:"id"`
+	MemberID  string     `json:"member_id"`
+	Pose      string     `json:"pose"`
+	Direction string     `json:"direction"`
+	Date      string     `json:"date"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+}
+
+func bodyPhotoMetaOf(bp domain.BodyPhoto) BodyPhotoMeta {
+	return BodyPhotoMeta{ID: bp.ID, MemberID: bp.MemberID, Pose: bp.Pose, Direction: bp.Direction, Date: bp.Date, DeletedAt: bp.DeletedAt}
+}
+
+// BodyPhotoListing — ListBodyPhotos의 결과. **둘 중 하나만** 채워진다: Locked면 Meta(잠긴 목록),
+// 아니면 Full(계약 원본 BodyPhoto). 핸들러가 이 플래그로 응답 모양을 고른다 — 같은 엔드포인트가
+// 동의 상태에 따라 원소 모양을 바꾸는 것이 계약이고(v2.28), 어드민은 회원의 consent로 어느 쪽인지
+// 이미 안다(storage_path 키의 유무가 두 번째 판별자다).
+type BodyPhotoListing struct {
+	Locked bool
+	Full   []domain.BodyPhoto
+	Meta   []BodyPhotoMeta
+}
+
+// ListBodyPhotos — GET /v1/body-photos?member=&include_deleted=.
+//
+// 세 갈래(v2.28):
+//   - 동의 유효(또는 회원 본인) → Full. 종전과 같다.
+//   - 스태프 + 스코프 안 + 동의 **무효** → Locked=true, Meta만. 종전엔 403이었다(위 BodyPhotoMeta 주석).
+//   - 스코프 밖 → 403(무변경). 동의를 안 본다는 것이 남의 회원을 본다는 뜻은 아니다.
+//
+// include_deleted는 **스태프 전용**이다. v2.14가 "30일 안에 복원"을 약속하는데 목록이 삭제분을
+// 항상 걸러 어드민은 세션 휴지통("새로고침하면 사라져요")밖에 못 만들었다 — 삭제분(deleted_at 포함)을
+// 주면 그 약속이 새로고침 뒤에도 참이 된다. 회원에게는 **403**이다(조용히 무시하지 않는다): 회원
+// 화면에서 삭제분은 "즉시 사라진다"(v2.13)가 계약이라, 회원 앱이 이 파라미터를 보내는 순간 그것은
+// 버그이고 버그는 크게 실패해야 보인다.
+func (s *Service) ListBodyPhotos(ctx context.Context, p Principal, memberID string, includeDeleted bool) (BodyPhotoListing, error) {
+	var out BodyPhotoListing
+	if includeDeleted && !p.IsStaff() {
+		return out, ErrForbidden
+	}
 	mem, err := s.store.GetMember(ctx, p.CenterID, memberID)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 	if err := s.checkBodyPhotoAccess(*mem, p); err != nil {
-		return nil, err
+		// 스태프가 스코프 안에서 막힌 유일한 원인은 동의다(checkBodyPhotoAccess의 스태프 분기는
+		// 스코프 → 동의 순서). 그 경우만 잠긴 목록으로 내리고, 나머지(스코프 밖·회원 타인)는 그대로 403.
+		if !p.IsStaff() || s.checkMemberScope(p, *mem) != nil {
+			return out, err
+		}
+		out.Locked = true
 	}
 	// 스케줄러가 없어(Cloud Scheduler API 미활성) 조회 시점에 센터 전체를 훑는다.
 	// 실패해도 목록 조회를 막지 않는다 — 파기가 안 됐다고 사진을 못 보게 할 이유가 없다.
@@ -2929,15 +3352,25 @@ func (s *Service) ListBodyPhotos(ctx context.Context, p Principal, memberID stri
 
 	all, err := s.store.ListBodyPhotos(ctx, p.CenterID, memberID)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 	// 삭제 표시된 것은 **즉시 사라진다** — 유예는 되돌리기 위한 것이지 계속 보이라는 게 아니다.
-	out := make([]domain.BodyPhoto, 0, len(all))
+	// 예외는 스태프의 include_deleted(휴지통 뷰)뿐이다.
+	rows := make([]domain.BodyPhoto, 0, len(all))
 	for _, bp := range all {
-		if !bp.IsDeleted() {
-			out = append(out, bp)
+		if bp.IsDeleted() && !includeDeleted {
+			continue
 		}
+		rows = append(rows, bp)
 	}
+	if out.Locked {
+		out.Meta = make([]BodyPhotoMeta, 0, len(rows))
+		for _, bp := range rows {
+			out.Meta = append(out.Meta, bodyPhotoMetaOf(bp))
+		}
+		return out, nil
+	}
+	out.Full = rows
 	return out, nil
 }
 
@@ -2953,6 +3386,17 @@ func (s *Service) ListBodyPhotos(ctx context.Context, p Principal, memberID stri
 //     보관 근거(원래 동의)가 그대로 살아 있고, 잘못 지운 사진은 그날의 몸이라 다시 못 찍는다.
 //
 // 두 경우 모두 회원·코치 화면에서는 **즉시 사라진다**.
+//
+// **동의(sensitive)는 보지 않는다**(v2.28, P56 B1) — DeleteInbody와 같은 판단이다: *"삭제는
+// 동의 철회 이후에 더 필요한 동작이지, 동의를 전제로 하는 동작이 아니다."* 종전엔 열람용
+// checkBodyPhotoAccess를 재사용해 회원이 동의를 철회하면 스태프 삭제가 403이었다. 그런데
+// 배포된 개인정보처리방침이 안내하는 경로가 바로 그것이다 — *"철회 후 데스크에 삭제 요청"*.
+// 열람을 막는 게이트가 파기까지 막으면, 철회한 회원의 사진은 30일 유예 스윕이 돌 때까지
+// 아무도 지울 수 없고 방침의 "지체 없이"가 거짓이 된다. 열람(ListBodyPhotos)·복원(Restore)은
+// 여전히 동의 게이트를 지난다 — 여기서 푸는 것은 **파기 동사 하나**뿐이다.
+//
+// 스코프는 그대로다(checkMemberScope: owner=전체, trainer=담당만, member=본인만). 동의를 안
+// 본다는 것이 남의 회원 사진을 지울 수 있다는 뜻은 아니다.
 func (s *Service) DeleteBodyPhoto(ctx context.Context, p Principal, id string) (*domain.BodyPhoto, error) {
 	bp, err := s.store.GetBodyPhoto(ctx, p.CenterID, id)
 	if err != nil {
@@ -2962,7 +3406,7 @@ func (s *Service) DeleteBodyPhoto(ctx context.Context, p Principal, id string) (
 	if err != nil {
 		return nil, err
 	}
-	if err := s.checkBodyPhotoAccess(*mem, p); err != nil {
+	if err := s.checkMemberScope(p, *mem); err != nil {
 		return nil, err
 	}
 	if bp.IsDeleted() {
@@ -3383,8 +3827,9 @@ func (s *Service) ListStaff(ctx context.Context, p Principal) ([]domain.Staff, e
 }
 
 // rehireStaff — 퇴사자 재초대(POST /v1/staff)의 재고용 경로(v2.0). 이름·역할과 명시된 색·정산은
-// 새 값으로 갱신하되 **프로필·휴무는 보존**한다 — 같은 사람이므로 경력·자격증을 다시 입력시킬
-// 이유가 없다. 순서는 ReactivateStaff와 동일(권한을 늘리는 쓰기는 마지막).
+// 새 값으로 갱신하되 **프로필(사진 제외 — 퇴사 시 파기, v2.31)·휴무는 보존**한다 — 같은 사람이므로
+// 경력·자격증을 다시 입력시킬 이유가 없다. 사진은 퇴사 때 파일과 photo_url이 함께 사라져 있어
+// 여기서 되살릴 것이 없다. 순서는 ReactivateStaff와 동일(권한을 늘리는 쓰기는 마지막).
 func (s *Service) rehireStaff(ctx context.Context, p Principal, st *domain.Staff, req domain.StaffCreate) (*domain.Staff, error) {
 	// 신규 경로의 "이미 회원으로 연결된 계정" 가드는 재고용에도 그대로 적용된다(퇴사 강등으로
 	// role=member가 된 계정은 member_id가 없어 통과한다 — 그래야 재고용이 막히지 않는다).
@@ -3431,6 +3876,35 @@ func (s *Service) UpdateStaffProfile(ctx context.Context, p Principal, uid strin
 	st, err := s.store.GetStaff(ctx, p.CenterID, uid)
 	if err != nil {
 		return nil, err
+	}
+	// 사진 포인터가 우리 파일(이 uid 명의 `staff/photos/{uid}-…`)에서 **다른 곳**(빈 값·외부 URL)으로
+	// 옮겨가면 이전 파일을 지운다(v2.31). 어드민 [사진 지우기]가 바로 이 경로(빈 photo_url PUT)인데,
+	// 종전엔 포인터만 비워 파일이 발견 경로 없는 고아가 됐다. 통 교체라 어드민은 같은 URL을 그대로
+	// 되돌려 보내므로 prev == next → 삭제 없음(트레이너 본인 편집도 사진 값을 손대지 않고 되보낸다).
+	// 저장 **전**에 지우고 실패는 전파한다 — 실패하면 프로필은 아무것도 바뀌지 않은 채 재시도되고,
+	// 저장이 실패한 경우엔 URL이 죽은 링크로 남지만 재시도의 삭제가 ErrObjectNotExist를 성공으로 세어
+	// 수렴한다(DeactivateStaff ③과 같은 순서·같은 근거). 다른 uid 명의·다른 버킷 URL은 외부 URL과 같다.
+	prev, next := s.ownedStaffPhotoPath(uid, st.Profile.PhotoURL), s.ownedStaffPhotoPath(uid, profile.PhotoURL)
+	// **이 PUT은 우리 파일 포인터를 새로 만들 수 없다** — 우리 파일을 가리키는 URL은 업로드 엔드포인트만
+	// 박는다(통 교체 시맨틱의 유일한 예외, v2.31). next가 우리 파일인데 prev와 다르면 그 URL은 stale이다:
+	// 이 화면이 열린 뒤 다른 창에서 사진이 교체·삭제됐다. 그대로 받으면 (a) 현재 파일(prev)을 지우고
+	// (b) 이미 없는 옛 파일의 URL을 박아 죽은 링크가 되거나, (c) 퇴사가 파기한 URL이 되살아난다.
+	// 400이 아니라 409인 이유: 요청 모양은 옳고 **서버 상태가 그 사이 바뀐 것**이다 — 어드민의 409
+	// 폴백 문구("다른 곳에서 먼저 바뀌었어요 — 새로고침")와 같은 뜻이고, 서버 문구가 그것을 그대로 말한다.
+	if next != "" && next != prev {
+		return nil, errors.Join(ErrConflict, errors.New("사진이 그 사이 바뀌었어요 — 새로고침 후 다시 저장해주세요"))
+	}
+	if prev != "" && prev != next {
+		// purger 미구성이면 지우지 않고 **포인터도 유지**한다(purgeStaffPhoto) — 파일이 남는데 URL만
+		// 비우면 고아다. 어드민의 [사진 지우기]는 그 환경에서 사진이 그대로인 것으로 보이고, 나머지
+		// 칸은 저장된다. 서버 로그가 그 사실을 말한다(요청당 한 줄).
+		deleted, err := s.purgeStaffPhoto(ctx, uid, prev, "프로필 편집 — 사진 지우기/교체")
+		if err != nil {
+			return nil, err
+		}
+		if !deleted {
+			profile.PhotoURL = st.Profile.PhotoURL
+		}
 	}
 	st.Profile = profile
 	if err := s.store.SaveStaff(ctx, p.CenterID, st); err != nil {
@@ -3480,14 +3954,41 @@ type CenterResponse struct {
 	CenterID string `json:"center_id"`
 	// Name — 센터 상호(멀티센터 Phase A). 미등록(기존 rise처럼 신원 없는 센터)이면 빈 문자열 —
 	// 클라이언트는 빈 값이면 기존 하드코딩 상호로 폴백한다(하위호환: 서버 먼저 배포).
-	Name     string        `json:"name"`
-	Policy   domain.Policy `json:"policy"`
-	Business BusinessView  `json:"business"`
+	//
+	// v2.27에서 아래 Center 블록이 생긴 뒤에도 **이 칸은 남는다.** 앱·어드민이 이미 읽고 있는
+	// 키라 지우면 배포 순서가 강제되고(서버 먼저 → 클라이언트 나중이 아니라 그 반대가 된다),
+	// 상호 하나만 필요한 화면이 블록을 파고들 이유가 없다. Center.Name과 항상 같은 값이다.
+	Name string `json:"name"`
+	// Center — 센터 신원 3칸(v2.27). 상호만 top-level에 있어서 **저장한 전화·주소를 되읽을
+	// 경로가 없었다** — 어드민이 저장 후 새로고침하면 그 두 칸이 빈 폼으로 돌아온다.
+	//
+	// domain.Center를 그대로 싣지 않는 이유는 요청 쪽(centerIdentityPatch)과 같다: id·status·
+	// created_at은 이 엔드포인트가 편집하지 않는 값이고, 응답에 실으면 다음 사람이 "그럼 보낼
+	// 수도 있겠지"로 읽는다. 요청과 응답의 키 집합을 같게 유지하는 편이 폼을 그대로 재장전하는
+	// 어드민에게도 맞는다(UpdateCenterFacility 응답이 3키인 것과 같은 규율).
+	//
+	// 세 칸 모두 omitempty가 **아니다** — 빈 값도 키로 나가야 폼이 "아직 안 적음"과 "키 없음"을
+	// 구별하지 않고 그대로 재장전한다(BusinessView가 12칸을 늘 내려보내는 것과 같은 이유).
+	Center   CenterIdentityView `json:"center"`
+	Policy   domain.Policy      `json:"policy"`
+	Business BusinessView       `json:"business"`
 	// Facility — 시설 신고 상태 선언(P42, v2.19). 역할별로 가리지 않는다(Business와 같은
 	// 이유 — 계약서에 그대로 인쇄되는 값이라 민감 정보가 아니다). 미선언이면 기본값
 	// {unknown,"",""} — 스토어 읽기 규약이 보장한다. 공개 응답(GET /v1/public/business)
 	// 에는 싣지 않는다 — 그쪽 키 집합은 전용 타입(BusinessView)으로 고정돼 있다.
 	Facility domain.Facility `json:"facility"`
+}
+
+// CenterIdentityView — 센터 신원 응답 3칸(v2.27). PUT /v1/center의 `center` 덩어리가 받는
+// 키 집합과 **정확히 같다** — 어드민이 GET으로 폼을 채우고 그 모양 그대로 PUT한다.
+type CenterIdentityView struct {
+	Name    string `json:"name"`
+	Phone   string `json:"phone"`
+	Address string `json:"address"`
+}
+
+func centerIdentityView(c domain.Center) CenterIdentityView {
+	return CenterIdentityView{Name: c.Name, Phone: c.Phone, Address: c.Address}
 }
 
 // BusinessView — 사업자 정보 응답. domain.Business 12칸을 그대로 펼치고 파생값 complete를 얹는다.
@@ -3537,7 +4038,10 @@ func (s *Service) GetCenter(ctx context.Context, p Principal) (CenterResponse, e
 	if err != nil {
 		return CenterResponse{}, err
 	}
-	return CenterResponse{CenterID: p.CenterID, Name: center.Name, Policy: pol, Business: businessView(*biz), Facility: *fac}, nil
+	return CenterResponse{
+		CenterID: p.CenterID, Name: center.Name, Center: centerIdentityView(*center),
+		Policy: pol, Business: businessView(*biz), Facility: *fac,
+	}, nil
 }
 
 // UpdateCenterPolicy — PUT /v1/center {policy}(v1.4, owner 전용). 설계00 §3.1 "정책은 설정값
@@ -3562,13 +4066,97 @@ func (s *Service) UpdateCenterPolicy(ctx context.Context, p Principal, rawPolicy
 	if err := s.store.SavePolicy(ctx, p.CenterID, &pol); err != nil {
 		return CenterResponse{}, err
 	}
-	// name을 여기서도 채운다 — GetCenter 응답에만 있으면 정책 저장 응답이 화면의 상호를
-	// 빈 값으로 되돌려 깜빡인다(응답으로 캐시를 갱신하는 클라이언트 패턴 전제).
+	// 센터 신원을 여기서도 채운다 — GetCenter 응답에만 있으면 정책 저장 응답이 화면의 상호를
+	// 빈 값으로 되돌려 깜빡인다(응답으로 캐시를 갱신하는 클라이언트 패턴 전제). v2.27에서
+	// 전화·주소가 같은 블록에 생겼으므로 그 셋을 함께 싣는다 — 하나만 채우면 같은 깜빡임이
+	// 나머지 두 칸에서 되풀이된다.
 	center, err := s.store.GetCenter(ctx, p.CenterID)
 	if err != nil {
 		return CenterResponse{}, err
 	}
-	return CenterResponse{CenterID: p.CenterID, Name: center.Name, Policy: pol}, nil
+	return CenterResponse{
+		CenterID: p.CenterID, Name: center.Name, Center: centerIdentityView(*center), Policy: pol,
+	}, nil
+}
+
+// centerIdentityPatch — PUT /v1/center {center} 의 수용 필드(v2.27). **세 칸뿐이다.**
+//
+// domain.Center를 그대로 받지 않는 이유가 여기서는 보안이다: 그 구조체엔 id·status·created_at이
+// 함께 있고, strictUnmarshal은 json 태그가 있는 필드를 전부 받아들인다. `{"id":"other-center"}`
+// 하나면 SaveCenter가 **다른 센터의 문서**에 쓴다(Firestore는 f.center(c.ID), Memory는
+// m.centers[c.ID] — 두 구현 모두 c.ID를 키로 쓴다). 대표가 자기 센터를 편집하는 폼이
+// 남의 센터를 덮어쓰는 경로가 되면 안 된다. 여기 없는 키는 decodeJSON/strictUnmarshal의
+// DisallowUnknownFields가 400으로 되돌린다 — 실수든 시도든 조용히 통과하지 않는다.
+//
+// 포인터인 이유는 부분 갱신 규약이다(policy 덩어리와 같은 시맨틱): **보내지 않은 칸은 그대로
+// 두고, 보낸 칸은 빈 문자열이어도 반영한다.** 값 타입이었다면 이름만 고치는 요청이 전화번호·
+// 주소를 조용히 지운다(v2.13이 policy를 머지로 만든 그 이유 — P03·P27·P49가 반복해서 배운 것).
+// 동시에 "잘못 적은 주소를 비워서 지우기"도 열려 있다(business가 통 교체로 얻은 성질을,
+// 머지에서 명시적 빈 값으로 얻는다).
+type centerIdentityPatch struct {
+	Name    *string `json:"name"`
+	Phone   *string `json:"phone"`
+	Address *string `json:"address"`
+}
+
+// UpdateCenterIdentity — PUT /v1/center {center}(v2.27, owner 전용). 센터 상호·전화·주소 등록.
+//
+// 왜 이제야: 센터 신원(domain.Center)은 v2.16이 superadmin의 POST /v1/admin/centers와 함께
+// 만들었는데, **그 경로로 만들어지지 않은 센터**(라이즈처럼 v1부터 지연 시딩으로 존재해 온
+// 문서)는 신원을 입력할 자리가 어디에도 없었다. 결과가 눈에 보이는 세 곳이었다:
+// ① GET /v1/center의 name이 빈 문자열이라 앱이 상호를 빌드 상수로 들고 있었고(배포로만 고칠
+// 수 있는 값이 되어 있었다), ② ListCenters가 `name == ""`를 유령 문서로 걸러 운영 센터가
+// 관리 평면 목록에 뜨지 않았고, ③ 회원의 센터 선택(JoinRequestCreate 봉인 주석)을 열 수
+// 없었다 — 목록에 넣을 센터가 없으니까.
+//
+// superadmin 전용이 아니라 owner 전용인 이유: 상호·전화·주소는 **일상 운영 정보**다(이전·개명·
+// 번호 변경이 실제로 일어난다). 센터를 만들고 없애는 것은 관리 평면의 일이지만, 자기 센터의
+// 이름을 고치는 것은 정책·사업자 정보와 같은 선에 있다. 반대로 ID·상태·생성시각은 여기서
+// 손댈 수 없다(centerIdentityPatch 주석) — 그쪽이 관리 평면의 몫이다.
+func (s *Service) UpdateCenterIdentity(ctx context.Context, p Principal, rawCenter []byte) (domain.Center, error) {
+	if !p.IsOwner() {
+		return domain.Center{}, ErrForbidden
+	}
+	var patch centerIdentityPatch
+	if err := strictUnmarshal(rawCenter, &patch); err != nil {
+		return domain.Center{}, err
+	}
+	// 기존 값 위에 보낸 칸만 얹는다. GetCenter는 미등록 센터에도 ErrNotFound가 아니라
+	// **빈 값**(ID만 채움)을 돌려주므로(스토어 규약), 최초 등록과 수정이 같은 코드를 탄다.
+	existing, err := s.store.GetCenter(ctx, p.CenterID)
+	if err != nil {
+		return domain.Center{}, err
+	}
+	c := *existing
+	// 문서 키가 진실 — 스토어가 c.ID를 쓰기 대상 키로 삼으므로 여기서 못 박는다(GetCenter가
+	// 이미 채워 주지만, 손편집된 문서의 어긋난 id가 흘러들 여지를 남기지 않는다).
+	c.ID = p.CenterID
+	if patch.Name != nil {
+		c.Name = *patch.Name
+	}
+	if patch.Phone != nil {
+		c.Phone = *patch.Phone
+	}
+	if patch.Address != nil {
+		c.Address = *patch.Address
+	}
+	// 최초 등록이면 생성 시각을 여기서 박는다 — 지연 시딩으로 생긴 문서엔 없다.
+	if c.CreatedAt.IsZero() {
+		c.CreatedAt = time.Now().UTC()
+	}
+	// 검증 **전에** 정규화(UpdateCenterBusiness·UpdateCenterFacility와 같은 이유 — 붙여넣기로
+	// 딸려 온 공백 때문에 400이 나면 무엇이 틀렸는지 눈에 보이지 않는다). 빈 Status는
+	// Normalize가 active로 접는다.
+	c.Normalize()
+	if err := c.Validate(); err != nil {
+		return domain.Center{}, err
+	}
+	// SaveCenter는 두 구현 모두 센터 문서의 `center` 절만 머지로 쓴다 — Policy·Business·
+	// Facility·CheckinQR은 건드리지 않는다(P27 SavePolicy 교훈, 스토어 규약).
+	if err := s.store.SaveCenter(ctx, &c); err != nil {
+		return domain.Center{}, err
+	}
+	return c, nil
 }
 
 // UpdateCenterBusiness — PUT /v1/center {business}(v2.13, owner 전용). 법정 고지 기재사항 등록.
@@ -3609,10 +4197,86 @@ func (s *Service) UpdateCenterBusiness(ctx context.Context, p Principal, rawBusi
 // 응답에 실리는 건 BusinessView 뿐이다: 정책(연 매출 목표·위약금율·용량)도, center_id도,
 // 회원·직원 수도 나가지 않는다. "필요한 것만 담는 전용 응답 타입"이라 GET /v1/center에 필드가
 // 늘어도 여기로 새지 않는다 — 마스킹 목록을 관리하는 방식이었다면 언젠가 하나를 빠뜨린다.
-func (s *Service) PublicBusiness(ctx context.Context) (BusinessView, error) {
-	b, err := s.store.GetBusiness(ctx, s.cfg.DefaultCenterID)
+// PublicBusiness — 법정 문서가 인쇄할 사업자 정보. [centerID]가 비면 기본 센터(구 링크 호환),
+// 값이 있으면 그 센터 — 모르는 센터면 404다(계약 v2.33, `resolvePublicCenter`).
+//
+// **센터별로 갈라야 하는 이유**: 이 응답이 개인정보처리방침의 "개인정보처리자"와 계정 삭제
+// 안내의 접수 창구로 인쇄된다. 센터가 둘인데 한 센터의 사업자 정보를 모두에게 보여주면
+// 나머지 센터의 법정 고지가 통째로 거짓이 된다.
+func (s *Service) PublicBusiness(ctx context.Context, centerID string) (BusinessView, error) {
+	id, err := s.resolvePublicCenter(ctx, centerID)
+	if err != nil {
+		return BusinessView{}, err
+	}
+	b, err := s.store.GetBusiness(ctx, id)
 	if err != nil {
 		return BusinessView{}, err
 	}
 	return businessView(*b), nil
+}
+
+// PublicCenter — GET /v1/public/center(**무인증**, v2.29). 회원 앱의 **센터 연결 화면(대기실)**이
+// 읽는다: 전화 인증만 끝난 미연결 사용자는 Principal에 센터가 없어 GET /v1/center를 못 부르는데,
+// 그 화면이 보여줘야 하는 것이 정확히 센터 상호·전화·주소다(P55). 이 경로가 없던 동안 앱은
+// 상호를 로컬 상수로 찍고 전화·주소는 사업자 정보에서 읽었다 — 어드민 "센터 신원" 폼이
+// "회원 앱에 이 이름으로 뜬다"고 약속했지만 앱은 그 값을 **어디서도 읽지 않았다**(P56 L10).
+//
+// 응답은 CenterIdentityView 3칸으로 **고정**한다 — PUT /v1/center {center}가 받는 키 집합과 같다.
+// domain.Center의 id·status·created_at은 싣지 않는다(익명에게 내부 식별자를 줄 이유가 없고,
+// BusinessView가 키 집합을 전용 타입으로 잠근 것과 같은 규율).
+//
+// **전화·주소는 사업자 정보로 폴백한다**, 상호는 폴백하지 않는다. 대표가 법정 고지 때문에
+// 사업자 정보 12칸은 채우고 센터 신원 3칸은 비워 두는 순서가 자연스러운데, 그때 대기실의
+// "센터에 전화하기"가 죽어 있으면 안 된다 — 두 번호 모두 이미 공개 값이라(GET /v1/public/business)
+// 새로 노출되는 것은 없다. 상호는 폴백하지 않는다: 사업자명(법인명)과 센터 상호는 다른 값이고
+// (어드민 폼이 두 칸을 나눠 둔 이유), 빈 상호는 클라이언트가 자기 임시 상수로 채운다
+// (CenterResponse.Name의 하위호환 규약과 같다). 폴백은 **서버 한 곳**에서 한다 — 앱·어드민이
+// 각자 합치면 어느 화면은 센터 번호를, 어느 화면은 사업자 번호를 보여주는 자기모순이 생긴다.
+//
+// v2.34(P69): 응답에 **수업 시간**(`open_hour`·`close_hour`)이 얹힌다 — 대기실 센터 카드가 그린다.
+// 별도 타입([PublicCenterView])인 이유: [CenterIdentityView] 3칸은 `PUT /v1/center`의 `center`
+// 덩어리·JoinMatch.center와 공용이라 거기에 시간을 섞으면 대표의 편집 폼이 시간 칸을 되돌려
+// 보내게 된다. 운영시간은 간판·지도에 공개되는 값이라 익명 노출에 거절 논거가 없고, 정책의
+// 나머지(용량·위약금율·매출 목표)는 여전히 나가지 않는다(키 집합 잠금 테스트).
+func (s *Service) PublicCenter(ctx context.Context, centerID string) (PublicCenterView, error) {
+	id, err := s.resolvePublicCenter(ctx, centerID)
+	if err != nil {
+		return PublicCenterView{}, err
+	}
+	c, err := s.store.GetCenter(ctx, id)
+	if err != nil {
+		return PublicCenterView{}, err
+	}
+	view := centerIdentityView(*c)
+	if strings.TrimSpace(view.Phone) == "" || strings.TrimSpace(view.Address) == "" {
+		b, err := s.store.GetBusiness(ctx, id)
+		if err != nil {
+			return PublicCenterView{}, err
+		}
+		b.Normalize()
+		if strings.TrimSpace(view.Phone) == "" {
+			view.Phone = b.Phone
+		}
+		if strings.TrimSpace(view.Address) == "" {
+			view.Address = b.Address
+		}
+	}
+	// GetPolicy는 문서 부재 시 기본 정책을 지연 시딩한다(쓰기). 여기 도달한 id는
+	// resolvePublicCenter가 실재 센터로 확인한 것이라 그 시딩은 인증된 GET /v1/center가 어차피
+	// 한 번은 할 일과 같다 — 익명 경로가 임의 문서를 만들 수는 없다.
+	pol, err := s.store.GetPolicy(ctx, id)
+	if err != nil {
+		return PublicCenterView{}, err
+	}
+	pol.Normalize() // 손으로 고친 문서의 잘못된 값이 그대로 인쇄되지 않게(v2.24 규약)
+	return PublicCenterView{CenterIdentityView: view, OpenHour: pol.OpenHour, CloseHour: pol.CloseHour}, nil
+}
+
+// PublicCenterView — `GET /v1/public/center` 응답(v2.34). 신원 3칸 + 수업 시간 2칸.
+// 시간 두 값은 GET /v1/center의 policy와 같은 의미(첫 슬롯 시작·마지막 슬롯 시작, 양끝 포함)다 —
+// 앱이 "09:00–22:00"으로 그리려면 close_hour+1을 써야 한다(domain.Policy 주석).
+type PublicCenterView struct {
+	CenterIdentityView
+	OpenHour  int `json:"open_hour"`
+	CloseHour int `json:"close_hour"`
 }

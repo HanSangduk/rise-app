@@ -56,7 +56,7 @@ class _PhoneScreenState extends ConsumerState<PhoneScreen> {
                     style: AppTypography.logo,
                     children: [
                       TextSpan(text: 'RISE '),
-                      TextSpan(text: 'CONDITIONING', style: TextStyle(color: AppColors.red)),
+                      TextSpan(text: 'CONDITIONING', style: TextStyle(color: AppColors.brand)),
                     ],
                   ),
                 ),

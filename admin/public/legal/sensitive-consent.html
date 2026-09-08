@@ -507,7 +507,14 @@ footer.doc p{margin:0 0 8px}
   var ctl = typeof AbortController === "function" ? new AbortController() : null;
   var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 6000);
 
-  fetch("/api/v1/public/business", ctl ? { signal: ctl.signal } : undefined)
+  /* **이 문서가 어느 센터의 고지인지는 URL이 정한다**(계약 v2.33). 여러 센터가 이 앱을 쓰므로
+   * 사업자 정보를 한 센터로 고정하면 나머지 센터의 법정 고지가 통째로 거짓이 된다.
+   * `?center=`가 없으면 서버가 기본 센터를 준다(배포돼 있는 구 링크 호환). 모르는 센터면 404이고,
+   * 그때는 아래 catch가 자리표시자를 그대로 남긴다 — 남의 사업자 정보를 대신 인쇄하지 않는다. */
+  var qsCenter = new URLSearchParams(location.search).get("center");
+  var bizUrl = "/api/v1/public/business" + (qsCenter ? "?center=" + encodeURIComponent(qsCenter) : "");
+
+  fetch(bizUrl, ctl ? { signal: ctl.signal } : undefined)
     .then(function (res) { return res.ok ? res.json() : null; })
     .then(function (data) {
       if (!data || typeof data !== "object") return;
@@ -537,6 +544,21 @@ footer.doc p{margin:0 0 8px}
   var b=document.getElementById('totop');
   addEventListener('scroll',function(){b.classList.toggle('on',scrollY>600)},{passive:true});
   b.addEventListener('click',function(){scrollTo({top:0,behavior:'smooth'})});
+})();
+</script>
+<script>
+/* 센터 승계 — 같은 폴더의 다른 법정 문서로 갈 때 `?center=`를 잃지 않게 한다(계약 v2.33).
+ * 잃으면 회원이 이용약관에서 개인정보처리방침으로 한 번 넘어가는 순간 **다른 센터의 고지**를
+ * 읽게 된다. 링크를 손으로 6장에 박지 않고 여기서 한 번에 붙인다. */
+(function () {
+  var center = new URLSearchParams(location.search).get("center");
+  if (!center) return;
+  var links = document.querySelectorAll('a[href^="./"]');
+  for (var i = 0; i < links.length; i++) {
+    var href = links[i].getAttribute("href");
+    if (href.indexOf("center=") !== -1) continue;
+    links[i].setAttribute("href", href + (href.indexOf("?") === -1 ? "?" : "&") + "center=" + encodeURIComponent(center));
+  }
 })();
 </script>
 </body>

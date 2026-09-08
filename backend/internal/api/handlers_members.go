@@ -33,6 +33,7 @@ func (h *Handlers) CreateMember(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	setAccessSubject(r.Context(), saved.ID) // 접속기록 정보주체(v2.30) — 생성된 id(본문엔 없다)
 	writeJSON(w, http.StatusOK, saved)
 }
 

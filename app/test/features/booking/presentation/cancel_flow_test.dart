@@ -57,10 +57,25 @@ void main() {
         status: 'confirmed',
       );
 
+  /// 서버가 준 정책 — 숫자는 폴백(24h/유예)과 같지만 `isFallback`이 false다.
+  ///
+  /// 무료/차감 판정 문구는 정책을 **아는** 상태에서만 나온다(P56 H2 — 폴백이면 다이얼로그가
+  /// "확인할 수 없어요"라고 말한다). 그래서 판정 문구를 재는 기본값은 서버 값이고, 폴백은
+  /// 아래 '정책을 못 받았으면' 테스트가 따로 잰다.
+  const serverPolicy = CenterPolicy(
+    slotCapacity: 3,
+    cancelCutoffHours: 24,
+    graceOnce: true,
+    penaltyRate: 0.10,
+    expiringDays: 7,
+    maxHoldsPerPass: 2,
+    maxHoldTotalDays: 30,
+  );
+
   Future<void> pump(
     WidgetTester tester, {
     required MyBooking myBooking,
-    CenterPolicy policy = CenterPolicy.fallback,
+    CenterPolicy policy = serverPolicy,
   }) async {
     bookingRepo.bookings = [myBooking];
     final container = ProviderContainer.test(
@@ -182,6 +197,21 @@ void main() {
     });
   });
 
+  group('정책을 못 받았으면 무료라고 단정하지 않는다 (P56 H2 — 이 자리가 `isFallback` dartdoc의 사고다)', () {
+    testWidgets('폴백이면 다이얼로그가 "확인할 수 없어요"라고 말하고 마감 시간도 찍지 않는다', (tester) async {
+      // 폴백 24h로 계산하면 48시간 뒤 예약은 `free=true` → 경고가 아예 안 뜬 채 회원은
+      // "취소할까요?"만 읽고 확정한다. 센터 실제 마감이 72시간이면 그 취소는 차감이다.
+      await pump(tester, myBooking: booking(slotKeyIn(48)), policy: CenterPolicy.fallback);
+
+      await tapCancel(tester);
+
+      expect(inDialog('취소 정책을 불러오지 못해서'), findsOneWidget);
+      expect(inDialog('차감되는지 확인할 수 없어요'), findsOneWidget);
+      expect(inDialog('24시간'), findsNothing, reason: '폴백 마감을 사실처럼 말했다');
+      expect(inDialog('마이 탭 이용내역'), findsOneWidget); // 확인처는 여전히 안내한다
+    });
+  });
+
   group('컷오프 이전 예약', () {
     testWidgets('취소 버튼은 그대로이고 확인 문구엔 차감 안내가 없다', (tester) async {
       await pump(tester, myBooking: booking(slotKeyIn(48))); // 48시간 뒤 = 무차감
@@ -239,11 +269,22 @@ void main() {
 
   group('안내 문구', () {
     testWidgets('컷오프 이후에도 취소가 가능하다는 사실을 카드 하단이 말한다', (tester) async {
-      await pump(tester, myBooking: booking(slotKeyIn(48)));
+      await pump(tester, myBooking: booking(slotKeyIn(48))); // 기본 = 서버 정책
 
       // 예전 문구는 "N시간 전까지 무료예요."에서 끊겨, 이후엔 취소가 아예 안 되는
       // 것처럼 읽혔다(그리고 버튼이 실제로 사라져 그 오독을 확증해줬다).
       expect(find.textContaining('24시간 전까지 무료 · 이후엔 세션 1회가 차감돼요'), findsOneWidget);
+    });
+
+    testWidgets('정책을 못 받았으면 시간·팀 수를 말하지 않는다 — 차감된다는 사실만 (P56 H1)', (tester) async {
+      // 폴백 24시간을 사실처럼 찍으면 센터 실제 마감이 48시간일 때 그 문구를 믿고
+      // 30시간 전에 취소한 회원이 차감된다(`isFallback` dartdoc의 사고).
+      await pump(tester, myBooking: booking(slotKeyIn(48)), policy: CenterPolicy.fallback);
+
+      expect(find.textContaining('24시간 전까지'), findsNothing, reason: '모르는 값을 사실처럼 말했다');
+      expect(find.textContaining('시간당 최대'), findsNothing);
+      expect(find.textContaining('취소 정책을 불러오지 못해'), findsOneWidget);
+      expect(find.textContaining('세션 1회가 차감돼요'), findsOneWidget, reason: '대가는 폴백이어도 말한다');
     });
   });
 }

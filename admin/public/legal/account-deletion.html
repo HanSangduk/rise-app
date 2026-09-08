@@ -95,7 +95,7 @@ footer.doc p{margin:0 0 8px}
   <p class="eyebrow">라이즈 컨디셔닝</p>
   <h1>계정·데이터 삭제 요청</h1>
   <p class="meta">
-    <b>대상 앱</b> 라이즈 컨디셔닝 회원 앱 (iOS · Android, <code>ai.stra.rize</code>)<br>
+    <b>대상 앱</b> 라이즈 컨디셔닝 회원 앱 (iOS · Android, <code>com.han.rise</code>)<br>
     <b>최종 갱신</b> <span class="ph" data-biz="effective_date">(시행일 미정)</span>
   </p>
   <div class="docnav">
@@ -123,6 +123,8 @@ footer.doc p{margin:0 0 8px}
 <div class="callout danger big">
   <span class="t">아래 중 편한 방법 하나로 요청하세요</span>
   <ul style="margin-bottom:0">
+    <li><b>앱에서 직접</b> — 마이 탭 → <b>회원탈퇴</b>. 센터에 아직 연결되지 않은 계정은 센터 연결 화면 하단의
+        <b>계정 삭제</b>에서 보낸 가입 요청과 인증 계정을 지울 수 있습니다. 별도 연락 없이 즉시 처리됩니다.</li>
     <li><b>이메일</b> — <span class="ph" data-biz="privacy_officer_email">(보호책임자 이메일 미정)</span><br>
         <span style="color:var(--dim);font-size:.95em">제목에 <b>“계정 삭제 요청”</b>을 적어 주세요.</span></li>
     <li><b>전화</b> — <span class="ph" data-biz="phone">(대표 전화 미정)</span></li>
@@ -187,6 +189,7 @@ footer.doc p{margin:0 0 8px}
 </tbody>
 </table>
 </div>
+<p class="callout"><b>이름과 휴대폰 번호가 완전히 사라지지 않는 경우가 있습니다.</b> 회원님이 <b>전자계약서에 서명한 적이 있으면</b>, 그 계약서에는 서명 당시의 이름과 전화번호가 계약 내용의 일부로 적혀 있습니다. 계약서는 위 표대로 5년간 보존해야 하고, 당사자가 지워진 계약서는 분쟁 시 증거로서 의미를 잃기 때문에 그 안의 이름·전화번호는 계약서와 함께 남습니다. 회원 계정 쪽의 이름·전화번호는 요청 즉시 파기되며, 계약서 안의 값은 보존 기간이 지나면 계약서와 함께 파기됩니다.</p>
 <p><b>체형사진·체성분 기록·건강 상태 메모는 이 보존 대상이 아닙니다.</b> 요청하시면 보존 의무를 이유로
 남겨 두지 않고 파기합니다.</p>
 
@@ -216,7 +219,7 @@ footer.doc p{margin:0 0 8px}
 <section class="en" lang="en">
   <h2>Account and Data Deletion Request (English)</h2>
   <p>To request deletion of your <strong>RISE Conditioning member app</strong> account
-  (<code>ai.stra.rize</code>) and its associated personal data, contact us by any of the following:</p>
+  (<code>com.han.rise</code>) and its associated personal data, contact us by any of the following:</p>
   <ul>
     <li><strong>Email</strong> — <span class="ph" data-biz="privacy_officer_email">(email not registered yet)</span> (subject: “Account deletion request”)</li>
     <li><strong>Phone</strong> — <span class="ph" data-biz="phone">(phone not registered yet)</span></li>
@@ -228,6 +231,7 @@ footer.doc p{margin:0 0 8px}
   <strong>all body-composition photos</strong>, InBody body-composition records, injury/health notes,
   workout logs and homework, booking and check-in records, and member management data.
   The account is <strong>permanently deleted, not deactivated or suspended</strong>.</p>
+  <p><b>Note on your name and phone number:</b> if you have ever signed an electronic contract, that contract records the name and phone number you signed with, as part of the contract itself. Contracts must be kept for 5 years under Korean law, and a contract with its parties erased loses its evidentiary meaning — so those values remain inside the contract document. The name and phone number on your member account are erased immediately.</p>
   <p><strong>Data that is retained after deletion,</strong> as required by Korean law, stored separately and
   used only for the retention purpose:</p>
   <ul>
@@ -282,7 +286,14 @@ footer.doc p{margin:0 0 8px}
   var ctl = typeof AbortController === "function" ? new AbortController() : null;
   var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 6000);
 
-  fetch("/api/v1/public/business", ctl ? { signal: ctl.signal } : undefined)
+  /* **이 문서가 어느 센터의 고지인지는 URL이 정한다**(계약 v2.33). 여러 센터가 이 앱을 쓰므로
+   * 사업자 정보를 한 센터로 고정하면 나머지 센터의 법정 고지가 통째로 거짓이 된다.
+   * `?center=`가 없으면 서버가 기본 센터를 준다(배포돼 있는 구 링크 호환). 모르는 센터면 404이고,
+   * 그때는 아래 catch가 자리표시자를 그대로 남긴다 — 남의 사업자 정보를 대신 인쇄하지 않는다. */
+  var qsCenter = new URLSearchParams(location.search).get("center");
+  var bizUrl = "/api/v1/public/business" + (qsCenter ? "?center=" + encodeURIComponent(qsCenter) : "");
+
+  fetch(bizUrl, ctl ? { signal: ctl.signal } : undefined)
     .then(function (res) { return res.ok ? res.json() : null; })
     .then(function (data) {
       if (!data || typeof data !== "object") return;
@@ -305,6 +316,21 @@ footer.doc p{margin:0 0 8px}
     })
     .catch(function () { /* 폴백이 이미 렌더돼 있다 — 배너도 그대로 둔다(fail-closed) */ })
     .then(function () { clearTimeout(timer); });
+})();
+</script>
+<script>
+/* 센터 승계 — 같은 폴더의 다른 법정 문서로 갈 때 `?center=`를 잃지 않게 한다(계약 v2.33).
+ * 잃으면 회원이 이용약관에서 개인정보처리방침으로 한 번 넘어가는 순간 **다른 센터의 고지**를
+ * 읽게 된다. 링크를 손으로 6장에 박지 않고 여기서 한 번에 붙인다. */
+(function () {
+  var center = new URLSearchParams(location.search).get("center");
+  if (!center) return;
+  var links = document.querySelectorAll('a[href^="./"]');
+  for (var i = 0; i < links.length; i++) {
+    var href = links[i].getAttribute("href");
+    if (href.indexOf("center=") !== -1) continue;
+    links[i].setAttribute("href", href + (href.indexOf("?") === -1 ? "?" : "&") + "center=" + encodeURIComponent(center));
+  }
 })();
 </script>
 </body>

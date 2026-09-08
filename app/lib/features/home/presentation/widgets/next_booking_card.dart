@@ -43,10 +43,15 @@ class NextBookingCard extends StatelessWidget {
     required this.cutoffHours,
     this.cutoffUnknown = false,
     this.checkedInBookingId,
+    this.centerName = AppConfig.centerFullName,
   });
 
   final NextBooking? booking;
   final VoidCallback onCheckIn;
+
+  /// 둘째 줄에 찍는 센터 상호 — 홈이 `centerDisplayNameProvider`(서버 값 우선)를 넘긴다.
+  /// 기본값은 임시 상수: 이 위젯은 Stateless라 provider를 직접 읽지 않는다(P56 L10).
+  final String centerName;
 
   /// 무료 취소 컷오프(policy.cancel_cutoff_hours) — 문구 표기와 판정
   /// ([NextBooking.isFreeCancelAt]) **양쪽**에 같은 값을 쓴다. 둘이 갈리면
@@ -125,7 +130,7 @@ class NextBookingCard extends StatelessWidget {
         children: [
           RiseCardHeader(
             title: '다음 예약',
-            trailing: b.isTodayAt(now) ? const RiseBadge('오늘', variant: RiseBadgeVariant.red) : null,
+            trailing: b.isTodayAt(now) ? const RiseBadge('오늘', variant: RiseBadgeVariant.brand) : null,
           ),
           Text(
             // **오늘이 아니면 날짜를 반드시 붙인다.** 종전엔 시각만 찍어서
@@ -144,7 +149,7 @@ class NextBookingCard extends StatelessWidget {
             // "담당 X 코치 (퇴사)"가 이미 같은 사람을 가리킨다 — 여기 또 붙이면
             // 한 화면에서 같은 사실을 세 번 읽게 된다.
             // resolve()는 이름이 ""로 와도 " 코치"(앞이 빈 자리)가 되지 않게 한다.
-            '${CoachLabel.resolve(b.trainerName)} 코치 · ${AppConfig.centerFullName}',
+            '${CoachLabel.resolve(b.trainerName)} 코치 · $centerName',
             style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
           ),
           const SizedBox(height: 9),

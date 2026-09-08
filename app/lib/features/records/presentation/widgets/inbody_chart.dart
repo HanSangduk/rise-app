@@ -55,7 +55,7 @@ class InbodyChart extends StatelessWidget {
         // 어느 쪽이 근육이고 어느 쪽이 체지방인지 화면 어디에도 없었다(실기기 확인).
         const Row(
           children: [
-            _Legend(color: AppColors.red, label: '골격근량(SMM)'),
+            _Legend(color: AppColors.brand, label: '골격근량(SMM)'),
             SizedBox(width: 12),
             _Legend(color: AppColors.warn, label: '체지방률(PBF)', dashed: true),
           ],
@@ -134,7 +134,7 @@ class _InbodyChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    _drawSeries(canvas, size, [for (final r in records) r.smm], AppColors.red);
+    _drawSeries(canvas, size, [for (final r in records) r.smm], AppColors.brand);
     _drawSeries(
       canvas,
       size,

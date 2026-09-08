@@ -13,7 +13,7 @@ import 'package:rise_member/features/auth/data/auth_repository_impl.dart';
 //
 // 앱을 껐다 켜면 세션은 GET /v1/me **하나**로 세워진다(매칭 응답이 없다). 그
 // 응답에 이름이 없던 시절엔 memberName이 항상 ''이라, 같은 홈 헤더가 최초
-// 로그인 땐 "김민지 님", 재실행 뒤엔 센터명("라이즈 컨디셔닝 센터 (강남)")으로
+// 로그인 땐 "김민지 님", 재실행 뒤엔 센터명(AppConfig.centerFullName 폴백)으로
 // 갈렸다 — 같은 화면이 실행 시점에 따라 다르게 보였다(실기기 점검에서 발견).
 //
 // 계약 v2.2가 name을 추가했지만 **best-effort**다(서버가 이름 조회에 실패해도

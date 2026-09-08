@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rise_member/core/widgets/rise_sheet.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rise_member/core/result/result.dart';
 import 'package:rise_member/core/theme/app_colors.dart';
@@ -18,21 +19,31 @@ Future<void> showConsentToggles(
   required ConsentState consent,
   bool consentUnknown = false,
 }) {
-  return showModalBottomSheet<void>(
-    context: context,
-    // 루트 Navigator에 띄운다 — 기본값(false)이면 셸 내부 Navigator에 올라가
-    // **하단 탭바가 시트와 스크림 위에 남는다**(실기기 점검에서 발견, P09).
-    // 모달이 뜬 채로 다른 탭을 누를 수 있어 확정 전 화면을 벗어나게 된다.
-    useRootNavigator: true,
-    isScrollControlled: true,
-    builder: (_) => _ConsentSheet(consent: consent, consentUnknown: consentUnknown),
+  // 제출 중 잠금 신호(P56 M1) — 철회 PUT이 날아가는 동안 시트를 쓸어 내리면 실패 스낵바가
+  // 죽은 context로 가고, 회원은 철회됐다고 믿는다(rise_sheet.dart 헤더).
+  final submitting = ValueNotifier(false);
+  return showRiseSheet<void>(
+    context,
+    submitting: submitting,
+    builder: (_) => _ConsentSheet(
+      consent: consent,
+      consentUnknown: consentUnknown,
+      submitting: submitting,
+    ),
   );
 }
 
 class _ConsentSheet extends ConsumerStatefulWidget {
-  const _ConsentSheet({required this.consent, this.consentUnknown = false});
+  const _ConsentSheet({
+    required this.consent,
+    required this.submitting,
+    this.consentUnknown = false,
+  });
   final ConsentState consent;
   final bool consentUnknown;
+
+  /// 제출 중 신호 — 래퍼의 잠금과 같은 객체.
+  final ValueNotifier<bool> submitting;
 
   @override
   ConsumerState<_ConsentSheet> createState() => _ConsentSheetState();
@@ -41,7 +52,15 @@ class _ConsentSheet extends ConsumerStatefulWidget {
 class _ConsentSheetState extends ConsumerState<_ConsentSheet> {
   late bool _general = widget.consent.general;
   late bool _sensitive = widget.consent.sensitive;
-  bool _submitting = false;
+
+  /// 저장소는 [widget.submitting] 하나다(rise_sheet.dart `submitting` 절).
+  bool get _submitting => widget.submitting.value;
+
+  @override
+  void dispose() {
+    widget.submitting.dispose();
+    super.dispose();
+  }
 
   /// 지금 저장하면 **켜져 있던 동의가 꺼지는** 항목들의 결과 문구(없으면 빈 목록).
   ///
@@ -186,7 +205,7 @@ class _ConsentSheetState extends ConsumerState<_ConsentSheet> {
     // 그때도 `revoked_at`을 남긴 감사 기록 자체는 지워지지 않는다.
     if (!await _confirmRevocation()) return;
     if (!mounted) return;
-    setState(() => _submitting = true);
+    setState(() => widget.submitting.value = true);
     final result =
         await ref.read(myViewModelProvider.notifier).updateConsent(general: _general, sensitive: _sensitive);
     if (!mounted) return;
@@ -194,7 +213,7 @@ class _ConsentSheetState extends ConsumerState<_ConsentSheet> {
       case Ok():
         Navigator.of(context).pop();
       case Err(:final failure):
-        setState(() => _submitting = false);
+        setState(() => widget.submitting.value = false);
         ScaffoldMessenger.of(context)
             .showSnackBar(riseSnackBar(failure.message, kind: RiseSnackKind.danger));
     }

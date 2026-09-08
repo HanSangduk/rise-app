@@ -172,7 +172,7 @@ func (u *recordingUploader) Upload(_ context.Context, path, contentType string, 
 		return u.baseURL, nil
 	}
 	// 실제 firebaseMediaUploader와 **같은 모양**이어야 한다 — 교체 삭제가 이 URL을 되파싱한다.
-	return "https://firebasestorage.googleapis.com/v0/b/test-bucket.firebasestorage.app/o/" +
+	return "https://firebasestorage.googleapis.com/v0/b/" + testPhotoBucket + "/o/" +
 		strings.ReplaceAll(path, "/", "%2F") + "?alt=media&token=tok-" + fmt.Sprint(len(u.uploads)), nil
 }
 
@@ -182,8 +182,27 @@ func photoService(t *testing.T) (*Service, *recordingUploader, *recordingPurger)
 	up := &recordingUploader{}
 	pg := &recordingPurger{}
 	s := newTestService().WithMediaUploader(up).WithMediaPurger(pg)
+	// recordingUploader가 만드는 URL의 버킷과 같아야 한다 — 삭제 판정이 버킷 명의까지 본다(v2.31 개정).
+	s.cfg.StorageBucket = testPhotoBucket
 	seedStaff(t, s, "t1", domain.RoleTrainer, "정혜린")
 	return s, up, pg
+}
+
+// testPhotoBucket — recordingUploader의 URL 버킷 = photoService의 STORAGE_BUCKET.
+const testPhotoBucket = "test-bucket.firebasestorage.app"
+
+// seedStaffPhotoURL — 스토어에 직접 photo_url을 심는다. 프로필 PUT은 우리 파일 포인터를 **새로 만들
+// 수 없으므로**(409, v2.31 개정) 픽스처는 업로드 엔드포인트가 박아 둔 값처럼 스토어에 직접 쓴다.
+func seedStaffPhotoURL(t *testing.T, s *Service, uid, photoURL string) {
+	t.Helper()
+	st, err := s.store.GetStaff(context.Background(), testCenter, uid)
+	if err != nil {
+		t.Fatalf("GetStaff(%s): %v", uid, err)
+	}
+	st.Profile.PhotoURL = photoURL
+	if err := s.store.SaveStaff(context.Background(), testCenter, st); err != nil {
+		t.Fatalf("SaveStaff(%s): %v", uid, err)
+	}
 }
 
 func photoReq(t *testing.T, raw []byte, ct string) StaffPhotoRequest {
@@ -457,12 +476,10 @@ func TestStaffPhotoUploadRejectsPathTraversalUID(t *testing.T) {
 // 성공한 업로드를 스스로 되돌려 프로필이 죽은 링크를 가리킨다.
 func TestStaffPhotoReplacementNeverDeletesTheObjectItJustPointedTo(t *testing.T) {
 	ctx := context.Background()
-	const same = "https://firebasestorage.googleapis.com/v0/b/b1/o/staff%2Fphotos%2Ft1-same.png?alt=media&token=t"
+	const same = "https://firebasestorage.googleapis.com/v0/b/" + testPhotoBucket + "/o/staff%2Fphotos%2Ft1-same.png?alt=media&token=t"
 	s, up, pg := photoService(t)
 	up.baseURL = same // 업로더가 항상 같은 URL을 돌려준다(난수 충돌의 결정적 재현)
-	if _, err := s.UpdateStaffProfile(ctx, ownerP(), "t1", domain.StaffProfile{PhotoURL: same}); err != nil {
-		t.Fatal(err)
-	}
+	seedStaffPhotoURL(t, s, "t1", same)
 	if _, err := s.UploadStaffPhoto(ctx, ownerP(), "t1", photoReq(t, photoPNG(t, 200, 200), "image/png")); err != nil {
 		t.Fatal(err)
 	}
@@ -613,22 +630,72 @@ func TestStaffPhotoReplacementDeletesPreviousObject(t *testing.T) {
 	}
 }
 
-// 삭제 실패는 업로드를 실패시키지 않는다(best-effort). 대표 입장에서 사진은 이미 바뀌었고,
-// 남은 파일 한 개 때문에 성공한 일을 실패로 보여줄 이유가 없다.
-func TestStaffPhotoReplacementDeleteFailureDoesNotFailUpload(t *testing.T) {
+// 교체의 옛 파일 삭제 실패는 **전파**된다(v2.31 개정 — v2.25의 best-effort 기각). 프로필은 무변경
+// (옛 URL 유지 → 옛 파일이 여전히 가리켜져 고아가 아니다), 방금 올린 새 파일은 되지우기를 시도한다.
+// best-effort였다면 "교체하거나 지우면 이전 파일은 삭제되며"(privacy.html)가 실패한 삭제를 성공한
+// 교체 뒤에 숨기는 거짓 고지가 된다.
+func TestStaffPhotoReplacementDeleteFailurePropagatesAndKeepsProfile(t *testing.T) {
 	ctx := context.Background()
-	s, _, pg := photoService(t)
+	s, up, pg := photoService(t)
 	raw := photoPNG(t, 200, 200)
 	if _, err := s.UploadStaffPhoto(ctx, ownerP(), "t1", photoReq(t, raw, "image/png")); err != nil {
 		t.Fatal(err)
 	}
-	pg.fail = errors.New("storage delete down")
+	first, firstURL := up.uploads[0].path, staffPhotoURL(t, s, "t1")
+	boom := errors.New("storage delete down")
+	pg.fail = boom
+	if _, err := s.UploadStaffPhoto(ctx, ownerP(), "t1", photoReq(t, raw, "image/png")); !errors.Is(err, boom) {
+		t.Fatalf("교체 삭제 실패가 삼켜졌다: err = %v — 옛 파일은 남고 새 URL만 박혀 고아가 된다", err)
+	}
+	if got := staffPhotoURL(t, s, "t1"); got != firstURL {
+		t.Errorf("교체 실패 후 프로필 = %q, want 옛 URL %q 유지(옛 파일은 지워지지 않았다)", got, firstURL)
+	}
+	if len(up.uploads) != 2 {
+		t.Fatalf("업로드 = %d회, want 2(새 파일은 삭제 전에 올라간다)", len(up.uploads))
+	}
+	// 삭제 호출은 [옛 파일] 다음 [방금 올린 새 파일] 순 — 둘 다 실패 주입에 걸리지만 시도 자체가 증거다.
+	// recordingPurger는 실패 시 deleted에 기록하지 않으므로 calls로 센다.
+	if pg.calls != 2 {
+		t.Errorf("DeleteObjects 호출 = %d회, want 2(옛 파일 시도 + 새 파일 되지우기 시도)", pg.calls)
+	}
+	if len(pg.deleted) != 0 {
+		t.Errorf("실패한 삭제가 기록됨: %v", pg.deleted)
+	}
+
+	// 스토리지 복구 후 재시도 → 옛 파일 삭제 + 새 URL. 옛 파일 first는 이때 지워진다.
+	pg.fail = nil
 	res, err := s.UploadStaffPhoto(ctx, ownerP(), "t1", photoReq(t, raw, "image/png"))
 	if err != nil {
-		t.Fatalf("삭제 실패가 업로드를 실패시켰다: %v", err)
+		t.Fatalf("재시도 실패: %v", err)
+	}
+	if len(pg.deleted) != 1 || pg.deleted[0] != first {
+		t.Errorf("재시도 삭제 = %v, want [%s]", pg.deleted, first)
 	}
 	if got := staffPhotoURL(t, s, "t1"); got != res.PhotoURL {
-		t.Errorf("프로필 = %q, want %q", got, res.PhotoURL)
+		t.Errorf("재시도 후 프로필 = %q, want %q", got, res.PhotoURL)
+	}
+}
+
+// 새 파일 되지우기(교체 삭제 실패 시)는 best-effort다 — 그것까지 실패해도 **원래 에러**가 올라간다.
+// recordingPurger의 실패 주입은 두 호출에 같은 에러를 주므로 여기서는 호출 순서만 고정한다:
+// 첫 호출이 옛 파일, 둘째가 새 파일이어야 "옛 파일 삭제 실패 → 새 파일 정리"라는 정책이 맞다.
+func TestStaffPhotoReplacementCleansUpNewObjectWhenOldDeleteFails(t *testing.T) {
+	ctx := context.Background()
+	s, up, pg := photoService(t)
+	raw := photoPNG(t, 200, 200)
+	if _, err := s.UploadStaffPhoto(ctx, ownerP(), "t1", photoReq(t, raw, "image/png")); err != nil {
+		t.Fatal(err)
+	}
+	first := up.uploads[0].path
+	// 첫 삭제(옛 파일)만 실패시키고 둘째(새 파일 되지우기)는 통과시킨다.
+	boom := errors.New("storage delete down")
+	pg.failOnce = boom
+	if _, err := s.UploadStaffPhoto(ctx, ownerP(), "t1", photoReq(t, raw, "image/png")); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want %v", err, boom)
+	}
+	second := up.uploads[1].path
+	if len(pg.deleted) != 1 || pg.deleted[0] != second {
+		t.Fatalf("되지우기 = %v, want [%s] — 옛 파일 삭제가 실패했는데 새 파일이 남으면 고아다(옛 파일 %s는 남아야 한다)", pg.deleted, second, first)
 	}
 }
 
@@ -641,17 +708,59 @@ func TestStaffPhotoReplacementNeverDeletesForeignObjects(t *testing.T) {
 		"https://cdn.example.com/old.jpg",
 		"https://firebasestorage.googleapis.com/v0/b/test-bucket/o/members%2Fm1%2Fbody%2Ffront.jpg?alt=media&token=t",
 		"https://evil.example.com/v0/b/test-bucket/o/staff%2Fphotos%2Fx.png?alt=media&token=t",
+		// 재직자 t2 명의의 우리 파일 — 접두는 맞지만 명의가 다르다(v2.31 개정).
+		"https://firebasestorage.googleapis.com/v0/b/" + testPhotoBucket + "/o/staff%2Fphotos%2Ft2-ab12.png?alt=media&token=t",
+		// 우리 접두·이 uid 명의지만 다른 버킷 — 우리 버킷의 동명 파일을 지우면 안 된다.
+		"https://firebasestorage.googleapis.com/v0/b/other-bucket/o/staff%2Fphotos%2Ft1-ab12.png?alt=media&token=t",
 	} {
 		s, _, pg := photoService(t)
-		if _, err := s.UpdateStaffProfile(ctx, ownerP(), "t1", domain.StaffProfile{PhotoURL: prior}); err != nil {
-			t.Fatal(err)
-		}
+		seedStaffPhotoURL(t, s, "t1", prior)
 		if _, err := s.UploadStaffPhoto(ctx, ownerP(), "t1", photoReq(t, photoPNG(t, 200, 200), "image/png")); err != nil {
 			t.Fatal(err)
 		}
-		if len(pg.deleted) != 0 {
-			t.Fatalf("남의 오브젝트를 지웠다(prior=%s): %v", prior, pg.deleted)
+		if pg.calls != 0 {
+			t.Fatalf("남의 오브젝트에 삭제 호출(prior=%s): %v", prior, pg.deleted)
 		}
+	}
+}
+
+// staffOwnedPhotoPath — 명의(uid) 결속 표. 접두 판정(staffPhotoObjectPath) 위에 `{uid}-`를 얹는다.
+func TestStaffOwnedPhotoPath(t *testing.T) {
+	const base = "https://firebasestorage.googleapis.com/v0/b/b1/o/"
+	cases := []struct{ uid, in, want string }{
+		{"t1", base + "staff%2Fphotos%2Ft1-ab12.png?alt=media&token=x", "staff/photos/t1-ab12.png"},
+		// 다른 uid 명의.
+		{"t1", base + "staff%2Fphotos%2Ft2-ab12.png?alt=media&token=x", ""},
+		// 접두 일치 함정 — "t1"은 "t10-…"의 주인이 아니다(하이픈까지 비교).
+		{"t1", base + "staff%2Fphotos%2Ft10-ab12.png?alt=media&token=x", ""},
+		// 우리 폴더 밖·외부·빈 값·빈 uid.
+		{"t1", base + "members%2Fm1%2Fbody%2Fa.jpg?alt=media&token=x", ""},
+		{"t1", "https://cdn.example.com/t1-ab12.png", ""},
+		{"t1", "", ""},
+		{"", base + "staff%2Fphotos%2F-ab12.png?alt=media&token=x", ""},
+	}
+	for _, c := range cases {
+		if got := staffOwnedPhotoPath(c.uid, c.in); got != c.want {
+			t.Errorf("staffOwnedPhotoPath(%q, %q) = %q, want %q", c.uid, c.in, got, c.want)
+		}
+	}
+}
+
+// ownedStaffPhotoPath — 버킷 명의. STORAGE_BUCKET이 설정돼 있으면 URL의 버킷이 같아야 하고,
+// 비어 있으면(로컬·미구성) 비교 기준이 없어 uid 판정만으로 간다.
+func TestOwnedStaffPhotoPathBindsBucket(t *testing.T) {
+	ours := "https://firebasestorage.googleapis.com/v0/b/" + testPhotoBucket + "/o/staff%2Fphotos%2Ft1-ab12.png?alt=media&token=x"
+	other := "https://firebasestorage.googleapis.com/v0/b/other-bucket/o/staff%2Fphotos%2Ft1-ab12.png?alt=media&token=x"
+	s, _, _ := photoService(t)
+	if got := s.ownedStaffPhotoPath("t1", ours); got != "staff/photos/t1-ab12.png" {
+		t.Errorf("같은 버킷 = %q, want 경로", got)
+	}
+	if got := s.ownedStaffPhotoPath("t1", other); got != "" {
+		t.Errorf("다른 버킷 = %q, want \"\" — 우리 버킷의 동명 파일을 지우게 된다", got)
+	}
+	s.cfg.StorageBucket = ""
+	if got := s.ownedStaffPhotoPath("t1", other); got != "staff/photos/t1-ab12.png" {
+		t.Errorf("버킷 미설정 = %q, want uid 판정만(경로)", got)
 	}
 }
 

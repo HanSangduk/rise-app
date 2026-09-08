@@ -143,10 +143,12 @@ func TestCreateCenter(t *testing.T) {
 }
 
 func TestListCenters(t *testing.T) {
-	t.Run("superadmin 전용 + 신원 등록된 센터만", func(t *testing.T) {
+	// v2.35: 기본 센터는 상호가 없어도 **항상 맨 앞**에 오른다. v2.16~v2.34는 name==""를 유령으로
+	// 걸러 운영 중인 1호점이 관리 평면에서 사라졌었다(P70).
+	t.Run("superadmin 전용 + 기본 센터(상호 미등록) ∪ 신원 등록 센터", func(t *testing.T) {
 		s := newTestService()
 		ctx := context.Background()
-		// rise는 정책만 지연 시딩된 유령 상태로 만든다(신원 미등록 — 기존 운영 센터의 실상).
+		// rise는 정책만 지연 시딩된 상태(신원 미등록 — 기존 운영 센터의 실상).
 		if _, err := s.store.GetPolicy(ctx, testCenter); err != nil {
 			t.Fatal(err)
 		}
@@ -158,12 +160,48 @@ func TestListCenters(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(list) != 1 || list[0].ID != "gangnam-2" {
-			t.Fatalf("list = %+v, want gangnam-2 하나(유령 rise 제외)", list)
+		if len(list) != 2 || list[0].ID != testCenter || list[1].ID != "gangnam-2" {
+			t.Fatalf("list = %+v, want [rise(기본, 상호 미등록), gangnam-2]", list)
+		}
+		if list[0].Name != "" || list[0].Status != domain.CenterStatusActive {
+			t.Fatalf("기본 센터 항목 = %+v, want name=\"\" status=active(빈 채로 내보내고 화면이 미등록으로 그린다)", list[0])
 		}
 
 		if _, err := s.ListCenters(ctx, ownerP()); !errors.Is(err, ErrForbidden) {
 			t.Fatalf("owner ListCenters = %v, want ErrForbidden", err)
+		}
+	})
+
+	t.Run("기본 센터가 상호를 등록해도 한 번만 오른다", func(t *testing.T) {
+		s := newTestService()
+		ctx := context.Background()
+		if _, err := s.UpdateCenterIdentity(ctx, ownerP(), []byte(`{"name":"라이즈 컨디셔닝"}`)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.CreateCenter(ctx, superadminP(), validCenterCreate()); err != nil {
+			t.Fatal(err)
+		}
+		list, err := s.ListCenters(ctx, superadminP())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) != 2 || list[0].ID != testCenter || list[0].Name != "라이즈 컨디셔닝" || list[1].ID != "gangnam-2" {
+			t.Fatalf("list = %+v, want [rise(상호 등록), gangnam-2] — 중복 없음", list)
+		}
+	})
+
+	t.Run("기본 센터 외의 상호 미등록 문서는 여전히 유령으로 제외", func(t *testing.T) {
+		s := newTestService()
+		ctx := context.Background()
+		if _, err := s.store.GetPolicy(ctx, "ghost-1"); err != nil { // 헬스체크·오타가 만드는 정책-only 문서
+			t.Fatal(err)
+		}
+		list, err := s.ListCenters(ctx, superadminP())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) != 1 || list[0].ID != testCenter {
+			t.Fatalf("list = %+v, want [rise]만(ghost-1 제외)", list)
 		}
 	})
 }

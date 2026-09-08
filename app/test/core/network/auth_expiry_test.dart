@@ -46,6 +46,32 @@ void main() {
     });
   });
 
+  // P69 C2 — 계약 v2.34: POST /v1/join/request 409 `{code: join_pending, center_id}`.
+  group('409 join_pending — pending 확답', () {
+    test('code가 join_pending이면 JoinPendingFailure(centerId) — AuthFailure 하위', () async {
+      final f = await _failureOf(409, body: {
+        'error': '이미 보낸 가입 요청이 있어요 — 센터에서 확인하면 연결돼요',
+        'code': 'join_pending',
+        'center_id': 'gangnam-2',
+      });
+      expect(f, isA<JoinPendingFailure>());
+      expect((f as JoinPendingFailure).centerId, 'gangnam-2');
+      expect(f, isA<AuthFailure>());
+      expect(f.message, contains('이미 보낸'));
+    });
+
+    test('center_id가 없으면 \'\'', () async {
+      final f = await _failureOf(409, body: {'error': 'x', 'code': 'join_pending'});
+      expect((f as JoinPendingFailure).centerId, '');
+    });
+
+    test('code 없는 409(구서버)·다른 code는 종전대로 RejectedFailure — 문구로 판정하지 않는다', () async {
+      expect(await _failureOf(409, body: {'error': '이미 보낸 가입 요청이 있어요'}), isA<RejectedFailure>());
+      expect(await _failureOf(409, body: {'error': 'x', 'code': 'other'}), isA<RejectedFailure>());
+      expect(await _failureOf(409, body: 'not a map'), isA<RejectedFailure>());
+    });
+  });
+
   group('403은 로그아웃 사유가 아니다', () {
     test('RejectedFailure로 남는다 — 신원은 멀쩡한데 권한이 없다는 뜻이다', () async {
       // 담당 아닌 코치의 조회, 탈퇴 회원의 잔여 호출이 여기 해당한다.

@@ -314,6 +314,43 @@ func (m *Memory) ListJoinRequests(_ context.Context, centerID string) ([]JoinReq
 	return out, nil
 }
 
+// ListJoinRequestsByUID — 신청자 본인의 요청(센터 무관, v2.34). 계약·근거는 Store 인터페이스 주석.
+// joinReqs는 최상위 맵이라 uid 필드로만 좁힌다(DeleteJoinRequestsByUID와 같은 규칙).
+func (m *Memory) ListJoinRequestsByUID(_ context.Context, uid string) ([]JoinRequest, error) {
+	out := []JoinRequest{}
+	if uid == "" {
+		return out, nil // 빈 uid의 레거시 문서를 남의 대기 상태로 되돌려주지 않는다
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, jr := range m.joinReqs {
+		if jr.UID == uid {
+			out = append(out, *jr)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) }) // 최신 먼저
+	return out, nil
+}
+
+// DeleteJoinRequestsByUID — 회원탈퇴의 가입 요청 파기(P53). 계약·근거는 Store 인터페이스 주석.
+// joinReqs는 최상위 맵이라(센터 접두어 없음) uid 필드로만 좁힌다 — Firestore의 `uid ==` 쿼리와
+// 같은 규칙이다.
+func (m *Memory) DeleteJoinRequestsByUID(_ context.Context, uid string) (int, error) {
+	if uid == "" {
+		return 0, nil // 빈 uid의 문서까지 쓸어가지 않는다(Firestore 구현과 같은 가드)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for key, jr := range m.joinReqs {
+		if jr.UID == uid {
+			delete(m.joinReqs, key)
+			n++
+		}
+	}
+	return n, nil
+}
+
 // ---- 회원 ----
 
 func (m *Memory) ListMembers(_ context.Context, centerID, trainerID, q string) ([]domain.Member, error) {
@@ -412,6 +449,14 @@ func (m *Memory) PurgeMemberPersonalData(_ context.Context, centerID string, ano
 		if strings.HasPrefix(key, prefix) && r.MemberID == memberID {
 			delete(m.recurrings, key)
 			c.Recurrings++
+		}
+	}
+	// 재등록/상담 요청(P53) — 회원이 남긴 자유 서술 메모를 품는다. Firestore 쪽 스윕 목록의
+	// consult_requests와 짝이다(둘이 어긋나면 로컬에선 지워지고 운영에선 남는다).
+	for key, cr := range m.consults {
+		if strings.HasPrefix(key, prefix) && cr.MemberID == memberID {
+			delete(m.consults, key)
+			c.ConsultRequests++
 		}
 	}
 

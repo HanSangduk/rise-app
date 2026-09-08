@@ -52,4 +52,45 @@ void main() {
       expect(MeResponseDto.fromJson(base({'name': '  '})).name, '  ');
     });
   });
+
+  // 계약 v2.34 — join_request에 center_id가 실린다. 구서버(v2.27)는 이 키를 모른다.
+  group('JoinRequestStatusDto.fromJson — center_id (계약 v2.34)', () {
+    test('center_id가 오면 그대로', () {
+      final dto = JoinRequestStatusDto.fromJson({
+        'status': 'pending',
+        'center_id': 'gangnam-2',
+        'created_at': '2026-09-08T05:14:00Z',
+      });
+      expect(dto.centerId, 'gangnam-2');
+      expect(dto.status, 'pending');
+    });
+
+    test('center_id 키 부재(구서버) → \'\' — 파싱이 터지면 대기실 자체가 못 뜬다', () {
+      final dto = JoinRequestStatusDto.fromJson({
+        'status': 'pending',
+        'created_at': '2026-09-08T05:14:00Z',
+      });
+      expect(dto.centerId, '');
+    });
+
+    test('미지 키는 무시한다 — 심사 중 빌드가 서버 필드 추가에 깨지지 않는 근거(plan C 7-a)', () {
+      final dto = JoinRequestStatusDto.fromJson({
+        'status': 'pending',
+        'created_at': '2026-09-08T05:14:00Z',
+        'future_field': {'nested': true},
+      });
+      expect(dto.status, 'pending');
+    });
+
+    test('MeResponseDto 안에서도 같은 규약', () {
+      final me = MeResponseDto.fromJson({
+        'uid': 'u1',
+        'role': 'member',
+        'center_id': 'rise',
+        'join_request': {'status': 'pending', 'center_id': 'gangnam-2', 'created_at': '2026-09-08T05:14:00Z'},
+      });
+      expect(me.centerId, 'rise');
+      expect(me.joinRequest?.centerId, 'gangnam-2');
+    });
+  });
 }

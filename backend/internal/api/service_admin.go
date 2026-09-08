@@ -127,10 +127,50 @@ func (s *Service) createFirstOwner(ctx context.Context, centerID string, req dom
 	return st, nil
 }
 
-// ListCenters — GET /v1/admin/centers(superadmin 전용). 신원이 등록된 센터만(유령 문서 제외).
+// ListCenters — GET /v1/admin/centers(superadmin 전용). **기본 센터 ∪ 신원 등록 센터**(v2.35).
+//
+// v2.16~v2.34는 스토어의 ListCenters(상호 등록 문서만)를 그대로 돌려줬다 — 정책 지연 시딩·
+// 헬스체크가 만든 유령 문서를 거르려는 선택이었는데, **1호 고객(기본 센터)이 정확히 그 상태**라
+// 관리 평면 첫 화면이 "등록된 센터가 없습니다"였다(2026-09-08 람 실측 — "라이즈 센터 있잖아").
+// 화면 각주로 설명해 두는 것으로 넘겼던 결정(P65)이 틀렸다: 운영 중인 센터가 안 보이는 목록은
+// 유령을 거른 게 아니라 진실을 거른 것이다.
+//
+// 그래서 `joinCenterIDs`(v2.33 회원용 목록)와 같은 집합을 쓴다. 기본 센터는 config가 "운영
+// 센터"라고 선언한 값이라 문서 상태와 무관하게 실재한다 — 상호가 비었으면 **빈 채로** 내보내고
+// 화면이 "상호 미등록"으로 그린다(JoinCenters와 같은 규약). 유령 배제는 그대로다: 기본 센터가
+// 아닌 문서는 여전히 상호가 있어야 오른다(CreateCenter가 name을 필수로 검증하므로 관리 평면으로
+// 만든 센터는 모두 오른다).
+//
+// 정렬: 기본 센터가 맨 앞, 나머지는 ID 오름차순(스토어 규약). GetCenter는 미등록 센터에
+// ErrNotFound가 아니라 ID만 채운 빈 값을 주므로(스토어 규약) 최초 상태와 등록 후가 같은 코드를 탄다.
 func (s *Service) ListCenters(ctx context.Context, p Principal) ([]domain.Center, error) {
 	if !p.IsSuperadmin() {
 		return nil, ErrForbidden
 	}
-	return s.store.ListCenters(ctx)
+	registered, err := s.store.ListCenters(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.Center, 0, len(registered)+1)
+	def := s.cfg.DefaultCenterID
+	if def != "" {
+		c, err := s.store.GetCenter(ctx, def)
+		if err != nil {
+			return nil, err
+		}
+		entry := domain.Center{ID: def}
+		if c != nil {
+			entry = *c
+		}
+		entry.ID = def // 문서 키가 진실(GetCenter·UpdateCenterIdentity와 같은 이유)
+		entry.Normalize()
+		out = append(out, entry)
+	}
+	for _, c := range registered {
+		if c.ID == def {
+			continue // 기본 센터가 상호를 등록한 뒤에도 한 번만 오른다
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }

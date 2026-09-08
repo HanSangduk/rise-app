@@ -51,6 +51,15 @@ export async function loadBodyPhotoUrl(storagePath: string): Promise<string> {
   }
 }
 
+/** 삭제 성공 직후(v2.14) — 한 장만 비운다. 복원되면 라이트박스가 같은 경로를 다시 받는다(파일은
+ *  유예 동안 그대로라 stale일 수 없다). 없는 키는 조용히 무시. */
+export function evictBodyPhotoBlob(storagePath: string) {
+  const url = cache.get(storagePath);
+  if (!url) return;
+  URL.revokeObjectURL(url);
+  cache.delete(storagePath);
+}
+
 /** 로그아웃·회원 전환 시. 남의 사진 blob이 남아 있으면 안 된다. */
 export function clearBodyPhotoBlobs() {
   for (const url of cache.values()) URL.revokeObjectURL(url);

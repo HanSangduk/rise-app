@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:rise_member/core/widgets/rise_sheet.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rise_member/core/config/legal_links.dart';
 import 'package:rise_member/core/policy/center_policy.dart';
@@ -47,20 +48,24 @@ Future<void> showContractSignSheet(
   required ContractItem contract,
   void Function(ContractItem contract)? onViewSigned,
 }) {
-  return showModalBottomSheet<void>(
-    context: context,
-    // 루트 Navigator에 띄운다 — 기본값(false)이면 셸 내부 Navigator에 올라가
-    // **하단 탭바가 시트와 스크림 위에 남는다**(실기기 점검에서 발견, P09).
-    // 모달이 뜬 채로 다른 탭을 누를 수 있어 확정 전 화면을 벗어나게 된다.
-    useRootNavigator: true,
-    isScrollControlled: true,
+  final submitting = ValueNotifier(false);
+  return showRiseSheet<void>(
+    context,
     // P44 결정 5 "enableDrag 끔" — 2단 서명 패드 위에서 시작한 세로 획이 시트
     // 드래그-닫기와 제스처 아레나에서 경합해 시트가 내려가 버리는 문제의 차단
     // (signature_pad JS 라이브러리 계열의 알려진 함정, P44 리서치). 라우트
     // 파라미터는 생성 시점에 고정이라 단계별 토글은 불가능하다 — 시트 전체에서
     // 꺼서 상태 전환에 안전하게 만든다. 스크림 탭·뒤로가기 닫힘은 그대로다.
     enableDrag: false,
-    builder: (_) => _ContractSignSheet(contract: contract, onViewSigned: onViewSigned),
+    // 제출 중 잠금 신호(P56 M1) — 드래그는 이미 꺼져 있지만 스크림 탭·시스템 백은 열려
+    // 있다. 서명 PNG를 실은 요청이 날아가는 동안 닫히면 "서명됐나?"를 알 길이 없고,
+    // 다시 열어 서명하면 서버 sent→signed 가드의 400을 본다(rise_sheet.dart 헤더).
+    submitting: submitting,
+    builder: (_) => _ContractSignSheet(
+      contract: contract,
+      onViewSigned: onViewSigned,
+      submitting: submitting,
+    ),
   );
 }
 
@@ -68,9 +73,16 @@ Future<void> showContractSignSheet(
 enum _SignStage { review, sign, done }
 
 class _ContractSignSheet extends ConsumerStatefulWidget {
-  const _ContractSignSheet({required this.contract, this.onViewSigned});
+  const _ContractSignSheet({
+    required this.contract,
+    required this.submitting,
+    this.onViewSigned,
+  });
   final ContractItem contract;
   final void Function(ContractItem contract)? onViewSigned;
+
+  /// 제출 중 신호 — 래퍼의 잠금과 같은 객체.
+  final ValueNotifier<bool> submitting;
 
   @override
   ConsumerState<_ContractSignSheet> createState() => _ContractSignSheetState();
@@ -78,7 +90,9 @@ class _ContractSignSheet extends ConsumerStatefulWidget {
 
 class _ContractSignSheetState extends ConsumerState<_ContractSignSheet> {
   bool _agreed = false;
-  bool _submitting = false;
+
+  /// 저장소는 [widget.submitting] 하나다(rise_sheet.dart `submitting` 절).
+  bool get _submitting => widget.submitting.value;
   String? _error;
 
   _SignStage _stage = _SignStage.review;
@@ -149,6 +163,7 @@ class _ContractSignSheetState extends ConsumerState<_ContractSignSheet> {
     _docScroll.dispose();
     _pad.removeListener(_onPadChanged);
     _pad.dispose();
+    widget.submitting.dispose();
     super.dispose();
   }
 
@@ -205,9 +220,16 @@ class _ContractSignSheetState extends ConsumerState<_ContractSignSheet> {
   /// 바뀌었다(P44 결정 5). 제출은 2단의 "동의하고 서명합니다"가 한다.
   List<Widget> _reviewChildren(BuildContext context) {
     final c = widget.contract;
-    // 조회 실패해도 fallback(24h/10%)으로 떨어질 뿐 화면이 죽지 않는다.
+    // 조회 실패해도 화면은 죽지 않는다 — 다만 폴백(24h/10%)을 **사실처럼 찍지 않는다**
+    // (P56 H3). 이 박스 바로 아래서 "위 계약 내용을 확인했으며 동의합니다"를 받는다:
+    // 센터 실제 마감이 48시간인데 "24시간 전까지 무료"에 동의한 회원은 30시간 전 취소로
+    // 차감되고, 그 문구를 근거로 다툰다. `isFallback`의 dartdoc이 적은 그 사고다.
     final policy = ref.watch(centerPolicyProvider).value ?? CenterPolicy.fallback;
+    // 위약금율은 계약 스냅샷(v1.5) 우선, 없으면(레거시) 현재 정책 — 서버 refundBasis와
+    // 같은 순서. 스냅샷도 없고 정책도 폴백이면 **모르는 것**이라 숫자를 지어내지 않는다.
+    final rateKnown = c.penaltyRate != null || !policy.isFallback;
     final rate = c.penaltyRate ?? policy.penaltyRate;
+    final rateLabel = rateKnown ? _penaltyLabel(rate) : '확인하지 못했어요';
     return [
       const Text('계약 서명', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
       const SizedBox(height: 4),
@@ -241,7 +263,7 @@ class _ContractSignSheetState extends ConsumerState<_ContractSignSheet> {
             // 서버 refundBasis가 정확히 그 순서로 고른다. 여기서 다른 값을 그리면
             // "계약서 30% / 실제 공제 10%"로 갈렸던 사고(policy.go Validate 주석)의
             // 재현이 된다.
-            _SummaryRow('중도 해지 위약금', _penaltyLabel(rate)),
+            _SummaryRow('중도 해지 위약금', rateLabel),
             // P44 마감 리뷰: KST 통일 — 상세 시트·문서 체결일과 같은 시간축.
             _SummaryRow('발송일', c.sentAt == null ? '-' : DateFmt.isoDate(DateFmt.toKst(c.sentAt!))),
           ],
@@ -274,8 +296,9 @@ class _ContractSignSheetState extends ConsumerState<_ContractSignSheet> {
               // 지급한 계약대금에서"). 같은 고시가 두 자리에 다른 단어를 쓴다.
               '환불액 = 지금까지 낸 금액 − 사용한 회차 금액 − 위약금\n'
               '· 회차 단가 = 계약가 ${MoneyFormat.won(c.paidAmount)} ÷ 총 회차\n'
-              '· 위약금 = 계약가의 ${_penaltyLabel(rate)} (낸 금액이 아니라 계약가 기준이에요)\n'
-              '· 예약은 수업 ${policy.cancelCutoffHours}시간 전까지 무료로 취소할 수 있어요',
+              '${rateKnown ? '· 위약금 = 계약가의 ${_penaltyLabel(rate)} (낸 금액이 아니라 계약가 기준이에요)' : '· 위약금율은 센터 정책을 확인하지 못했어요 — 계약서 본문의 기준을 따라요'}\n'
+              // 모르면 시간을 말하지 않는다 — 폴백 24시간은 이 센터의 기준이 아니라 앱의 기본값이다.
+              '${policy.isFallback ? '· 예약 취소 기준(무료 취소 마감)은 센터 정책을 확인하지 못했어요 — 계약서 본문의 기준을 따라요' : '· 예약은 수업 ${policy.cancelCutoffHours}시간 전까지 무료로 취소할 수 있어요'}',
               style: const TextStyle(fontSize: 10.5, color: AppColors.muted, height: 1.5),
             ),
           ],
@@ -290,7 +313,7 @@ class _ContractSignSheetState extends ConsumerState<_ContractSignSheet> {
         controlAffinity: ListTileControlAffinity.leading,
         dense: true,
         value: _agreed,
-        activeColor: AppColors.red,
+        activeColor: AppColors.brand,
         title: const Text(
           '위 계약 내용과 이용약관을 확인했으며 동의합니다',
           style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
@@ -305,12 +328,12 @@ class _ContractSignSheetState extends ConsumerState<_ContractSignSheet> {
         behavior: HitTestBehavior.opaque,
         onTap: _openTerms,
         child: const Padding(
-          padding: EdgeInsets.only(left: 4, bottom: 8),
+          padding: EdgeInsets.only(left: 4, top: 12, bottom: 12),
           child: Text(
             '이용약관 전문 보기',
             style: TextStyle(
               fontSize: 11,
-              color: AppColors.red,
+              color: AppColors.brand,
               fontWeight: FontWeight.w700,
               decoration: TextDecoration.underline,
             ),
@@ -354,7 +377,7 @@ class _ContractSignSheetState extends ConsumerState<_ContractSignSheet> {
                 '다시 보기',
                 style: TextStyle(
                   fontSize: 11.5,
-                  color: AppColors.red,
+                  color: AppColors.brand,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -522,7 +545,7 @@ class _ContractSignSheetState extends ConsumerState<_ContractSignSheet> {
     // 서버 sent→signed 가드가 2번째를 400으로 막긴 하지만, 회원에게 에러를 보일 이유가 없다.
     if (_submitting) return;
     setState(() {
-      _submitting = true;
+      widget.submitting.value = true;
       _error = null;
     });
     // 서명 이미지 내보내기(P44 결정 2) — 실패해도 서명 자체는 막지 않는다:
@@ -550,7 +573,7 @@ class _ContractSignSheetState extends ConsumerState<_ContractSignSheet> {
         // 것(체결 사실·자기 서명·재열람 경로)을 그 자리에서 보여준다. 종전의
         // "서명 완료" 스낵바는 이 단계가 대체한다.
         setState(() {
-          _submitting = false;
+          widget.submitting.value = false;
           _stage = _SignStage.done;
         });
       case Err(:final failure):
@@ -561,7 +584,7 @@ class _ContractSignSheetState extends ConsumerState<_ContractSignSheet> {
           ref.read(myViewModelProvider.notifier).refresh();
         }
         setState(() {
-          _submitting = false;
+          widget.submitting.value = false;
           _error = failure.message;
         });
     }

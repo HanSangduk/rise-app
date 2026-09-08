@@ -80,8 +80,16 @@ class _MyBookingsListState extends State<MyBookingsList> {
               // 컷오프 이후 취소도 **가능하다** — 무료가 아닐 뿐이다. 예전 문구는
               // "N시간 전까지 무료"에서 끊겨, 버튼이 사라진 이유가 "마감"인지
               // "차감"인지 말하지 않았다(그리고 서버는 마감한 적이 없다).
-              '고정 = 매주 반복 예약(자동 확정). 시간당 최대 ${widget.policy.slotCapacity}팀 · '
-              '취소는 ${widget.policy.cancelCutoffHours}시간 전까지 무료 · 이후엔 세션 1회가 차감돼요.',
+              //
+              // **정책을 못 받았으면 숫자를 말하지 않는다**(P56 H1). 폴백 24시간·3팀은
+              // 이 센터의 기준이 아니라 앱의 기본값이다 — 사실처럼 찍으면 센터 실제
+              // 마감이 48시간일 때 그 문구를 믿고 30시간 전에 취소한 회원이 차감된다.
+              // "차감된다"는 사실은 폴백이어도 그대로 말한다(시각 판정이 아니라 대가다).
+              widget.policy.isFallback
+                  ? '고정 = 매주 반복 예약(자동 확정). 센터의 취소 정책을 불러오지 못해 무료 취소 마감을 '
+                      '확인할 수 없어요 — 마감이 지난 뒤 취소하면 세션 1회가 차감돼요.'
+                  : '고정 = 매주 반복 예약(자동 확정). 시간당 최대 ${widget.policy.slotCapacity}팀 · '
+                      '취소는 ${widget.policy.cancelCutoffHours}시간 전까지 무료 · 이후엔 세션 1회가 차감돼요.',
               style: AppTypography.note,
             ),
           ),
@@ -127,9 +135,9 @@ class _BookingRow extends StatelessWidget {
           ),
           if (booking.isRecurring) ...[
             const SizedBox(width: 5),
-            const RiseIcon(RiseIcons.refresh, size: 11, color: AppColors.red),
+            const RiseIcon(RiseIcons.refresh, size: 11, color: AppColors.brand),
             const SizedBox(width: 2),
-            const Text('고정', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.red)),
+            const Text('고정', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.brand)),
           ],
         ],
       ),

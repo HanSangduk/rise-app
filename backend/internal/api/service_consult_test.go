@@ -169,3 +169,52 @@ func TestDoneConsultRequest(t *testing.T) {
 		}
 	})
 }
+
+// ---- A5(v2.28): 처리 완료 시 note를 비운다 ----
+
+// **뮤테이션 표적**: DoneConsultRequest의 `cr.Note = ""`를 지우면 여기서 죽는다.
+func TestDoneConsultRequestClearsNote(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	mem := seedConsultMember(t, s, "김민지", "t1")
+	cr, err := s.CreateConsultRequest(ctx, memberP(mem.ID),
+		ConsultRequestBody{Kind: store.ConsultKindConsult, Note: "무릎이 아파서 상담받고 싶어요"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 처리 전엔 데스크가 읽어야 한다 — 처리 목적이 진행 중이다.
+	if cr.Note == "" {
+		t.Fatal("처리 전 note가 비어 있다")
+	}
+
+	done, err := s.DoneConsultRequest(ctx, ownerP(), cr.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done.Note != "" {
+		t.Errorf("done 응답 note=%q — 회원이 쓴 자유 서술(건강 정보가 실제로 들어온다)이 목적을 잃고 남았다", done.Note)
+	}
+	// 저장된 문서를 다시 읽어 대조한다(응답만 비우고 저장은 안 하는 실수를 잡는다).
+	saved, err := s.store.GetConsultRequest(ctx, testCenter, cr.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Note != "" {
+		t.Errorf("저장된 문서 note=%q — 응답만 비웠다", saved.Note)
+	}
+	// 행은 남는다(멱등 done→done + "요청이 있었다"는 사실) — P53이 5년 보존 대상이 아니라고
+	// 판정한 큐이므로 내용은 비우고 탈퇴 시 스윕이 행째 지운다.
+	if saved.Status != store.ConsultDone || saved.MemberID != mem.ID || saved.Kind != store.ConsultKindConsult || saved.CreatedAt.IsZero() {
+		t.Errorf("남은 문서 = %+v, want {member_id, kind, status=done, created_at} 온전", saved)
+	}
+	// 목록(스태프)에서도 note가 없다 — 응답 구조체가 store.ConsultRequest를 임베드하므로 저장값이 곧 와이어다.
+	list, err := s.ListConsultRequests(ctx, ownerP())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range list {
+		if v.ID == cr.ID && v.Note != "" {
+			t.Errorf("목록에 note=%q가 남았다", v.Note)
+		}
+	}
+}

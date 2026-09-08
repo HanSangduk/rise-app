@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 )
 
@@ -13,6 +14,9 @@ type Handlers struct {
 	// health — /health 의존성 체크 결과 캐시(health.go). 뮤텍스를 품으므로 Handlers는 항상
 	// 포인터로 다룬다(NewHandlers가 이미 그렇게 준다).
 	health healthState
+	// accessOut — 접속기록(accesslog.go) 출력. nil이면 os.Stdout. 테스트가 WithAccessLogWriter로
+	// 버퍼를 꽂는다 — NewRouter 시그니처를 늘리지 않으려고 여기 싣는다.
+	accessOut io.Writer
 }
 
 func NewHandlers(svc *Service) *Handlers { return &Handlers{svc: svc} }
@@ -108,7 +112,30 @@ func (h *Handlers) JoinApprove(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, err)
 		return
 	}
+	setAccessSubject(r.Context(), mem.ID) // 접속기록 정보주체(v2.30) — 승인으로 생긴 회원
 	writeJSON(w, http.StatusOK, mem)
+}
+
+// JoinReject — POST /v1/join/reject {request_id}(owner 전용, v2.27). 대기 큐에서 내린다.
+//
+// 승인과 **같은 모양**(POST + {request_id})인 것이 의도다: 어드민의 한 행에 붙는 두 버튼이라
+// 호출 형태가 다르면 그 자리에서 갈라진다. 응답은 갱신된 요청 문서(name·phone이 빈 값) —
+// 어드민이 재조회 없이 그 행을 지우거나 상태를 바꿔 그릴 수 있다.
+func (h *Handlers) JoinReject(w http.ResponseWriter, r *http.Request) {
+	p, _ := principalFrom(r.Context())
+	var req struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	jr, err := h.svc.JoinReject(r.Context(), p, req.RequestID)
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, jr)
 }
 
 // JoinRequests — GET /v1/join/requests(어드민 가정 승인: 가입 요청 목록, v1.1 정합 패치).
@@ -133,8 +160,9 @@ func (h *Handlers) Center(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
-// UpdateCenter — PUT /v1/center {policy?, business?}(owner 전용). 둘 다 raw로 넘겨 각 서비스가
-// 자기 시맨틱으로 처리한다: policy는 머지(누락 필드 초기화 방지, v1.4), business는 통 교체(v2.13).
+// UpdateCenter — PUT /v1/center {policy?, business?, center?}(owner 전용). 셋 다 raw로 넘겨 각
+// 서비스가 자기 시맨틱으로 처리한다: policy는 머지(누락 필드 초기화 방지, v1.4), business는
+// 통 교체(v2.13), center는 머지(v2.27 — 세 칸짜리 patch, service.go centerIdentityPatch 주석).
 //
 // **보낸 덩어리만 처리한다.** 이 규칙이 없으면 정책만 저장하는 기존 어드민 호출이 사업자 정보를
 // 빈 값으로 밀어버린다 — v2.13 배포 순간 법정 문서 5장이 한꺼번에 초안으로 되돌아간다.
@@ -151,13 +179,15 @@ func (h *Handlers) UpdateCenter(w http.ResponseWriter, r *http.Request) {
 		// Business — v2.13 신설. decodeJSON이 DisallowUnknownFields라 **서버가 먼저 이 필드를
 		// 알아야** 어드민이 보낼 수 있다(계약 v2.13 "배포 순서" 절 — 서버 먼저, 어드민 나중).
 		Business json.RawMessage `json:"business"`
+		// Center — v2.27 신설(상호·전화·주소). 같은 배포 순서 규약: 서버 먼저, 어드민 나중.
+		Center json.RawMessage `json:"center"`
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeErr(w, r, err)
 		return
 	}
-	if len(req.Policy) == 0 && len(req.Business) == 0 {
-		writeErr(w, r, errors.Join(errBadRequest, errors.New("policy 또는 business 객체가 필요해요")))
+	if len(req.Policy) == 0 && len(req.Business) == 0 && len(req.Center) == 0 {
+		writeErr(w, r, errors.Join(errBadRequest, errors.New("policy·business·center 중 하나가 필요해요")))
 		return
 	}
 	if len(req.Policy) > 0 {
@@ -168,6 +198,16 @@ func (h *Handlers) UpdateCenter(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.Business) > 0 {
 		if _, err := h.svc.UpdateCenterBusiness(r.Context(), p, req.Business); err != nil {
+			writeErr(w, r, err)
+			return
+		}
+	}
+	// center를 **마지막에** 처리한다. 셋 중 유일하게 GET /v1/center 응답의 최상위 필드(name)를
+	// 바꾸는 덩어리라, 아래의 재조회가 그 결과를 반드시 포함하게 하려는 것이다. 원자성이
+	// 없다는 성질은 policy·business와 같다(위 문단) — 여기서도 "절반만 저장됨"이 데이터를
+	// 모순되게 만들지 않는다(세 절 사이에 지켜야 할 불변식이 없다).
+	if len(req.Center) > 0 {
+		if _, err := h.svc.UpdateCenterIdentity(r.Context(), p, req.Center); err != nil {
 			writeErr(w, r, err)
 			return
 		}
@@ -185,7 +225,8 @@ func (h *Handlers) UpdateCenter(w http.ResponseWriter, r *http.Request) {
 // PublicBusiness — GET /v1/public/business(**무인증**, v2.13). 법정 고지 HTML 5장이 익명으로
 // 읽는 유일한 엔드포인트다. 응답은 사업자 정보 12칸 + complete뿐 — 정책·센터 식별자는 없다.
 func (h *Handlers) PublicBusiness(w http.ResponseWriter, r *http.Request) {
-	res, err := h.svc.PublicBusiness(r.Context())
+	// ?center= — 법정 문서 HTML이 자기 URL의 센터를 그대로 넘긴다(계약 v2.33). 없으면 기본 센터.
+	res, err := h.svc.PublicBusiness(r.Context(), queryParam(r, "center"))
 	if err != nil {
 		writeErr(w, r, err)
 		return
@@ -193,6 +234,19 @@ func (h *Handlers) PublicBusiness(w http.ResponseWriter, r *http.Request) {
 	// 법정 문서는 Hosting CDN 뒤의 정적 HTML이고 이 응답만 동적이다. 무인증 경로라 호출량을
 	// 통제할 다른 수단이 없어 캐시로 막는다 — 안 걸면 문서 조회가 그대로 Firestore 읽기가 된다.
 	// 수정 반영이 최대 5분 늦지만, 연 단위로 바뀌는 값이라 그 지연이 비용보다 싸다.
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	writeJSON(w, http.StatusOK, res)
+}
+
+// PublicCenter — GET /v1/public/center(**무인증**, v2.29). 회원 앱 대기실이 읽는 센터 상호·전화·주소.
+// 응답 3칸·폴백 규칙은 service.PublicCenter 주석. 캐시 헤더는 PublicBusiness와 같은 이유로 같다 —
+// 무인증 경로의 Firestore 읽기 증폭을 캐시로 막고, 5분 지연은 연 단위로 바뀌는 값에 싸다.
+func (h *Handlers) PublicCenter(w http.ResponseWriter, r *http.Request) {
+	res, err := h.svc.PublicCenter(r.Context(), queryParam(r, "center"))
+	if err != nil {
+		writeErr(w, r, err)
+		return
+	}
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	writeJSON(w, http.StatusOK, res)
 }

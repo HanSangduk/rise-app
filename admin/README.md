@@ -70,6 +70,23 @@ Cloud Run(`rize-api`)으로 리라이트한다 — 브라우저 입장에선 전
 설정 탭은 없고 패널마다 권한 오류"인 반쪽 화면이 됩니다. 그런 계정은 `NoAccess` 화면으로 끊고
 다음 행동(회원 앱으로 로그인 / 대표에게 초대 요청)을 안내합니다.
 
+**역할별 탭(P58):** 매출·설정은 대표 전용(`ownerOnly`), **내 프로필·휴무**는 트레이너 전용
+(`trainerOnly`)입니다. 서버가 트레이너 본인에게 허용하는 쓰기는 프로필(PUT `/v1/staff/{uid}/profile`)과
+휴무(POST `…/offdays`) 둘뿐이라 설정 탭 전체를 여는 대신 그 두 동사만 빌려 쓰는 탭을 뒀습니다
+(`features/MyProfile.tsx` — 모달은 `Settings.tsx`의 것을 export해 공유). 사진 업로드는 서버가
+owner 전용이라 트레이너 창에는 컨트롤을 그리지 않고 이유를 문장으로 말합니다.
+
+**404 판정(P58):** "이 배포에 그 주소가 없다"(미배포)는 `lib/api.ts`의 `isRouteNotFound()` 한 곳이
+정합니다 — 서버 라우터 404가 싣는 `code:"route_not_found"`(계약 v2.28)만 미배포이고, 그 외 404는
+리소스 부재입니다. status만 보고 미배포로 접던 종전 규약은 "이미 처리된 가입 요청"을 미배포로
+오독해 대표에게 잘못된 다음 행동을 지시했습니다(P56 B6). 같은 방식으로 파기 경계 미구성 503은
+`code:"media_not_configured"`(`isMediaNotConfigured()`)로만 판정합니다.
+
+**체형사진 목록의 두 모양(v2.28):** `GET /v1/body-photos?member=&include_deleted=true`는 동의가 유효하면
+`BodyPhoto[]`, 스태프가 스코프 안에서 동의 때문에 막힌 회원이면 403 대신 `BodyPhotoMeta[]`(날짜·포즈만,
+`storage_path` 없음)를 줍니다. 판별은 `lib/types.ts isFullBodyPhoto`(storage_path 유무). 어드민은 늘
+스태프라 `include_deleted`를 항상 켜고, 한 응답을 `deleted_at`으로 타임라인/휴지통으로 가릅니다.
+
 ### 비율 표시 규약 (P09 — 계약 v2.1)
 
 비율은 **3상태**로 갈라 쓴다(`lib/format.ts`의 `ratioState` 한 곳에만 정책이 있다):
@@ -129,9 +146,11 @@ src/
     Homework.tsx   Home Work 배정(scope·부상 자동제외·항목 에디터) · 배정 현황
     BodyPhotos.tsx 회원 선택 · 체형사진 타임라인(포즈별) · 인바디 기록 입력/조회
     CheckinQr.tsx  데스크 체크인 QR(P11 → P49 서버 발급, owner 전용) — Settings 안의 카드로 마운트
+    JoinRequests.tsx 앱 가입 요청 큐(owner 전용, P69) — Members 최상단에 마운트. 승인·거절 확인 창,
+                   회원 목록 대조(같은 번호·같은 이름·탈퇴자 힌트), 승인 직후 새 회원 자동 선택
     Settings.tsx   (owner 전용) 직원 생애주기(초대·정정·이관·퇴사·재입사·휴무·프로필) ·
-                   운영 정책 편집 폼(PUT /v1/center, 변경분만) · 가입 요청 승인 ·
-                   센터·앱 연결 · 데스크 체크인 QR · 모바일 사용 안내
+                   운영 정책 편집 폼(PUT /v1/center, 변경분만) · 센터·앱 연결(가입 요청 큐로 가는
+                   링크 한 줄) · 데스크 체크인 QR · 모바일 사용 안내
   App.tsx          인증 게이트 → 사이드바(반응형: <880px 상단 가로 네비) → 역할 기반 메뉴
 ```
 
@@ -190,7 +209,7 @@ src/
 1. **`GET /v1/members` 응답에 `passes[]`(회원권 목록)가 포함된다고 가정.** 계약엔 회원권을
    목록 조회하는 단독 엔드포인트가 없습니다(`POST /v1/passes`는 발급만). 회원 상세·예약 생성
    모달(패스 선택)에 회원권 데이터가 필수라 이렇게 가정했습니다. → `MemberWithPasses` 타입.
-2. **`GET /v1/join/requests`(가입 요청 목록) 가정.** 설정 화면의 "가입 요청 승인" 리스트를
+2. **`GET /v1/join/requests`(가입 요청 목록) 가정.** 회원 관리 상단의 "앱 가입 요청" 큐를
    보여주려면 대기 목록 조회가 필요한데, 계약엔 `POST /v1/join/request`(요청)·`POST
    /v1/join/approve`(승인)만 있습니다.
 3. **`GET /v1/hw-checks?hw_id=` 가정.** Home Work "현황"의 완료율 표시에 필요한데, 계약엔

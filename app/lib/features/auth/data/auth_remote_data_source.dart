@@ -28,11 +28,28 @@ class AuthRemoteDataSource {
 
   /// POST /v1/join/request {center_id, name, phone} — "우리 센터가 안 보여요" 경로.
   /// center_id를 비우면 서버가 기본 센터로 폴백(백엔드 JoinRequestBody).
-  Future<void> requestJoin({required String name, required String phone}) {
+  /// POST /v1/join/request — 미등록 번호의 가입 요청.
+  ///
+  /// [centerId]는 회원이 목록에서 고른 센터다(계약 v2.33). **빈 값이면 서버가 기본 센터를 쓴다** —
+  /// 고를 센터가 1곳뿐일 때(신규 앱이 선택 화면을 띄우지 않는 경우) 그대로 종전 동작이다.
+  /// 서버는 자기가 만든 목록에 없는 값을 400으로 막으므로, 여기서 임의 문자열을 보낼 수 없다.
+  Future<void> requestJoin({
+    required String name,
+    required String phone,
+    String centerId = '',
+  }) {
     return _dio.post<void>('/v1/join/request', data: {
-      'center_id': '',
+      'center_id': centerId,
       'name': name,
       'phone': phone,
     });
+  }
+
+  /// GET /v1/join/centers — 가입 요청을 보낼 수 있는 센터 목록(계약 v2.33).
+  Future<List<CenterDirectoryDto>> fetchJoinCenters() async {
+    final res = await _dio.get<List<dynamic>>('/v1/join/centers');
+    return (res.data ?? const [])
+        .map((e) => CenterDirectoryDto.fromJson(e as Map<String, dynamic>))
+        .toList(growable: false);
   }
 }

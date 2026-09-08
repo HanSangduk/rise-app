@@ -3,7 +3,7 @@ import 'package:rise_member/core/theme/app_colors.dart';
 import 'package:rise_member/core/theme/app_radius.dart';
 import 'package:rise_member/core/theme/app_typography.dart';
 
-enum RiseBadgeVariant { ok, warn, danger, red, muted, blue }
+enum RiseBadgeVariant { ok, warn, danger, brand, muted, blue }
 
 /// 목업 `.badge` — 완료/대기/만석 등 짧은 상태 표시.
 class RiseBadge extends StatelessWidget {
@@ -16,7 +16,7 @@ class RiseBadge extends StatelessWidget {
         RiseBadgeVariant.ok => (AppColors.badgeOkBg, AppColors.badgeOkFg),
         RiseBadgeVariant.warn => (AppColors.badgeWarnBg, AppColors.badgeWarnFg),
         RiseBadgeVariant.danger => (AppColors.badgeDanBg, AppColors.badgeDanFg),
-        RiseBadgeVariant.red => (AppColors.redLight, AppColors.red),
+        RiseBadgeVariant.brand => (AppColors.brandLight, AppColors.brand),
         RiseBadgeVariant.muted => (AppColors.badgeMutBg, AppColors.badgeMutFg),
         RiseBadgeVariant.blue => (AppColors.badgeBlueBg, AppColors.badgeBlueFg),
       };

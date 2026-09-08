@@ -27,7 +27,8 @@ class RecordsViewModel extends _$RecordsViewModel {
   Future<RecordsData> build() async {
     final memberId = ref.watch(sessionProvider)?.memberId;
     if (memberId == null) {
-      throw const AuthFailure('로그인이 필요해요');
+      // 셸이 떠 있는 채 세션이 비었다 — 리스너가 이동 중이라 문구가 아닌 타입만 낸다(P64).
+      throw const SessionGoneFailure();
     }
     final repo = ref.watch(recordsRepositoryProvider);
     return _unwrap(await repo.load(memberId));
@@ -56,7 +57,7 @@ class RecordsViewModel extends _$RecordsViewModel {
   /// 않는다 — 화면이 낡았다는 근거가 없다.
   Future<Result<void>> createInbody(InbodyDraft draft) async {
     final memberId = ref.read(sessionProvider)?.memberId;
-    if (memberId == null) return const Err(AuthFailure('로그인이 필요해요'));
+    if (memberId == null) return const Err(SessionGoneFailure());
     final result = await ref.read(recordsRepositoryProvider).createInbody(
           memberId: memberId,
           draft: draft,

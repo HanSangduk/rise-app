@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +7,7 @@ import 'package:rise_member/core/policy/center_policy.dart';
 import 'package:rise_member/core/policy/center_policy_provider.dart';
 import 'package:rise_member/core/result/result.dart';
 import 'package:rise_member/core/session/app_session.dart';
+import 'package:rise_member/core/result/failure.dart';
 import 'package:rise_member/core/session/session_provider.dart';
 import 'package:rise_member/core/theme/app_theme.dart';
 import 'package:rise_member/core/utils/date_format.dart';
@@ -25,6 +28,21 @@ import 'package:rise_member/features/my/presentation/widgets/pass_list.dart';
 //  ② 후보 패스 필터 — `isActive || isScheduled` + "비면 원본 폴백"이라 서버가
 //     active만 받는 자리(`api.HoldPass`)에 scheduled·refunded 패스를 올렸다.
 //  ③ 재개·계약 서명 — `ResumePass`는 active만, `SignContract`는 환불된 거래를 거부한다.
+/// 서버가 준 정책 — 숫자는 폴백(2회/30일)과 같지만 `isFallback`이 false다.
+///
+/// 이 파일의 기본값이 `CenterPolicy.fallback`이었는데, P56 H4 이후 폴백은 **상한으로 막지
+/// 않는다**(정책을 모르면 서버에 맡긴다). 폴백을 기본으로 두면 이 파일 전체가 "정책을 못
+/// 받은 상태"를 재는 셈이라, 상한 판정 테스트는 서버 값으로 돌린다. 폴백 동작은 ④ 그룹.
+const _serverPolicy = CenterPolicy(
+  slotCapacity: 3,
+  cancelCutoffHours: 24,
+  graceOnce: true,
+  penaltyRate: 0.10,
+  expiringDays: 7,
+  maxHoldsPerPass: 2,
+  maxHoldTotalDays: 30,
+);
+
 void main() {
   late _FakeMyRepository repo;
   // 센터(KST) 오늘 — 시트의 판정과 데이트피커가 쓰는 것과 같은 값.
@@ -62,7 +80,7 @@ void main() {
   Future<void> pump(
     WidgetTester tester,
     Widget child, {
-    CenterPolicy policy = CenterPolicy.fallback,
+    CenterPolicy policy = _serverPolicy,
   }) async {
     final container = ProviderContainer.test(
       overrides: [
@@ -86,7 +104,7 @@ void main() {
     WidgetTester tester, {
     required List<PassDetail> passes,
     String initialPassId = 'p1',
-    CenterPolicy policy = CenterPolicy.fallback,
+    CenterPolicy policy = _serverPolicy,
   }) async {
     await pump(
       tester,
@@ -144,7 +162,7 @@ void main() {
         buildPass(holds: [pastHold(100)]),
       ]);
 
-      // 정책 실값(fallback 2회/30일) − 이 패스가 쓴 양(1회·3일) = 잔여가 헤드라인,
+      // 정책 실값(서버 2회/30일) − 이 패스가 쓴 양(1회·3일) = 잔여가 헤드라인,
       // 상한·사용량은 근거 줄로.
       expect(find.text('남은 일시정지 27일 · 1회'), findsOneWidget);
       expect(find.text('최대 2회/30일 중 1회 · 3일 사용'), findsOneWidget);
@@ -195,6 +213,107 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(repo.holdCalls, hasLength(1));
+    });
+  });
+
+  group('④ 정책을 못 받았으면(폴백) 상한으로 막지 않는다 — 서버가 판정한다 (P56 H4)', () {
+    // `centerPolicyProvider`는 조회 실패 시 예외가 아니라 폴백(2회/30일)을 **데이터로**
+    // 준다. 그 숫자로 판정하면 센터 실제 정책이 5회/90일인데 홀딩 2건을 쓴 회원의 버튼을
+    // "이미 2회를 썼어요"로 잠근다 — hold_rules 헤더가 금지한 "서버가 통과시킬 신청을 앱이
+    // 막는" 동작이다. 뮤테이션: 시트의 `capsUnknown: policy.isFallback`을 지우면 죽는다.
+    final twoUsed = buildPass(holds: [pastHold(100), pastHold(50)]);
+
+    testWidgets('폴백 상한(2회)에 걸리는 신청도 버튼이 살아 있고 서버로 나간다', (tester) async {
+      await openSheet(tester, passes: [twoUsed], policy: CenterPolicy.fallback);
+      await pickToday(tester, '시작일');
+      await pickToday(tester, '종료일');
+
+      expect(find.textContaining('최대 2회'), findsNothing, reason: '폴백 상한을 사실처럼 말했다');
+      expect(find.textContaining('이미 2회를 썼어요'), findsNothing);
+      expect(tester.widget<RiseButton>(find.byType(RiseButton)).onPressed, isNotNull);
+
+      await tester.tap(find.text('신청하기'));
+      await tester.pumpAndSettle();
+      expect(repo.holdCalls, hasLength(1), reason: '서버가 판정할 신청을 앱이 막았다');
+    });
+
+    testWidgets('잔여 요약은 "확인하지 못했어요" + 이 회원권의 사실만', (tester) async {
+      await openSheet(tester, passes: [twoUsed], policy: CenterPolicy.fallback);
+
+      expect(find.text('남은 일시정지를 확인하지 못했어요'), findsOneWidget);
+      expect(find.textContaining('지금까지 2회 · 6일 쉬었어요'), findsOneWidget);
+      expect(find.textContaining('제한 없음'), findsNothing, reason: '무제한은 서버가 준 사실일 때만');
+      expect(find.textContaining('30일'), findsNothing);
+    });
+
+    testWidgets('서버가 거부하면 그 문구가 시트 안에 뜬다 — 판정을 넘긴 대가는 정직한 에러다', (tester) async {
+      repo.holdResult = const Err(RejectedFailure('일시정지 가능 횟수/일수를 초과했어요(센터 정책)'));
+      await openSheet(tester, passes: [twoUsed], policy: CenterPolicy.fallback);
+      await pickToday(tester, '시작일');
+      await pickToday(tester, '종료일');
+      await tester.tap(find.text('신청하기'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('일시정지 가능 횟수/일수를 초과했어요(센터 정책)'), findsOneWidget);
+      expect(find.text('신청하기'), findsOneWidget, reason: '실패 뒤 다시 시도할 수 있어야 한다');
+    });
+
+    testWidgets('정책과 무관한 검사(겹침)는 폴백이어도 그대로 막는다 — 과잉 해제가 아니다', (tester) async {
+      final overlapping = buildPass(holds: [
+        PassHold(from: today.subtract(const Duration(days: 1)), to: today.add(const Duration(days: 3))),
+      ]);
+      await openSheet(tester, passes: [overlapping], policy: CenterPolicy.fallback);
+      await pickToday(tester, '시작일');
+      await pickToday(tester, '종료일');
+
+      expect(find.textContaining('이미 일시정지가 있어요'), findsOneWidget);
+      expect(tester.widget<RiseButton>(find.byType(RiseButton)).onPressed, isNull);
+    });
+
+    testWidgets('마이 탭 진입 행은 폴백이면 상한 라벨을 뺀다 (P56 H1)', (tester) async {
+      await pump(tester, PassList(passes: [buildPass()], onHoldTap: () {}), policy: CenterPolicy.fallback);
+      expect(find.text('일시정지 신청 (여행·부상 시)'), findsOneWidget);
+      expect(find.textContaining('최대 2회/30일'), findsNothing);
+
+      await pump(tester, PassList(passes: [buildPass()], onHoldTap: () {}));
+      expect(find.text('일시정지 신청 (여행·부상 시 · 최대 2회/30일)'), findsOneWidget);
+    });
+  });
+
+  group('⑤ 제출 중에는 시트가 닫히지 않는다 (P56 M1)', () {
+    // 요청이 날아가는 동안 시트를 쓸어 내리면 State가 dispose되고 응답은 `!mounted`에
+    // 삼켜진다 — 날짜·사유를 다 채운 신청의 실패가 아무 말 없이 사라진다. 뮤테이션:
+    // `showHoldRequestSheet`의 `submitting:` 인자를 빼면 아래가 죽는다.
+    Future<void> startSubmitting(WidgetTester tester) async {
+      repo.holdGate = Completer<Result<void>>();
+      await openSheet(tester, passes: [buildPass()]);
+      await pickToday(tester, '시작일');
+      await pickToday(tester, '종료일');
+      await tester.tap(find.text('신청하기'));
+      await tester.pump();
+      expect(find.text('신청 중…'), findsOneWidget);
+    }
+
+    testWidgets('아래로 쓸어도·스크림을 탭해도 시트가 남고, 실패가 시트 안에 뜬다', (tester) async {
+      await startSubmitting(tester);
+
+      await tester.fling(find.text('일시정지 신청'), const Offset(0, 400), 1500);
+      await tester.pumpAndSettle();
+      expect(find.text('신청 중…'), findsOneWidget, reason: '제출 중 쓸기로 시트가 닫혔다');
+
+      await tester.tapAt(const Offset(20, 20)); // 스크림
+      await tester.pumpAndSettle();
+      expect(find.text('신청 중…'), findsOneWidget, reason: '제출 중 스크림 탭으로 시트가 닫혔다');
+
+      repo.holdGate!.complete(const Err(NetworkFailure()));
+      await tester.pumpAndSettle();
+      expect(find.text('연결이 불안정해요'), findsOneWidget, reason: '실패가 회원에게 닿지 않았다');
+      expect(find.text('신청하기'), findsOneWidget);
+
+      // 잠금은 제출 동안만이다 — 실패 뒤엔 종전처럼 닫을 수 있어야 한다(영구 잠금 방지).
+      await tester.fling(find.text('일시정지 신청'), const Offset(0, 400), 1500);
+      await tester.pumpAndSettle();
+      expect(find.text('일시정지 신청'), findsNothing, reason: '실패 뒤에도 시트가 잠겨 있다');
     });
   });
 
@@ -359,6 +478,12 @@ class _FakeMyRepository implements MyRepository {
   final List<({String passId, DateTime from, DateTime to})> holdCalls = [];
   final List<String> signTaps = [];
 
+  /// 신청 응답 — 기본 성공. 서버 거부 경로는 Err을 심는다.
+  Result<void> holdResult = const Ok(null);
+
+  /// 심어 두면 신청이 이 completer가 끝날 때까지 **매달린다**(제출 중 상태 재현).
+  Completer<Result<void>>? holdGate;
+
   @override
   Future<Result<MySummary>> load(String memberId) async => const Ok(
         MySummary(passes: [], ledgerByPass: {}, contracts: [], consent: ConsentState(general: true, sensitive: true)),
@@ -372,7 +497,8 @@ class _FakeMyRepository implements MyRepository {
     String? reason,
   }) async {
     holdCalls.add((passId: passId, from: from, to: to));
-    return const Ok(null);
+    if (holdGate case final gate?) return gate.future;
+    return holdResult;
   }
 
   @override

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rise_member/core/widgets/rise_sheet.dart';
 import 'package:rise_member/core/api/dto/staff_dto.dart';
 import 'package:rise_member/core/theme/app_colors.dart';
 import 'package:rise_member/core/theme/app_typography.dart';
@@ -26,13 +27,8 @@ Future<void> showTrainerProfileSheet(
   required StaffDto staff,
   bool profileUnavailable = false,
 }) {
-  return showModalBottomSheet<void>(
-    context: context,
-    // 루트 Navigator에 띄운다 — 기본값(false)이면 셸 내부 Navigator에 올라가
-    // **하단 탭바가 시트와 스크림 위에 남는다**(실기기 점검에서 발견, P09).
-    // 모달이 뜬 채로 다른 탭을 누를 수 있어 확정 전 화면을 벗어나게 된다.
-    useRootNavigator: true,
-    isScrollControlled: true,
+  return showRiseSheet<void>(
+    context,
     builder: (_) => _TrainerProfileSheet(staff: staff, profileUnavailable: profileUnavailable),
   );
 }

@@ -103,6 +103,73 @@ final class SignedInPhoneProvider
 
 String _$signedInPhoneHash() => r'6cb8e510f5d1a44a9a5418861a943889fecb1fa0';
 
+/// 가입 요청을 보낼 수 있는 센터 목록(계약 v2.33).
+///
+/// **고를 것이 2곳 이상일 때만 화면이 선택을 묻는다**(`hasChoice`). 센터가 하나뿐인데 선택
+/// 화면을 띄우면 회원에게 "고를 수 있다"는 거짓 인상을 주고 탭만 하나 늘린다.
+///
+/// 실패는 **빈 목록으로 접는다** — 이 조회가 실패했다고 가입 요청 자체를 막으면 안 된다.
+/// 센터 없이 보낸 요청은 서버가 기본 센터로 폴백하므로(v2.33) 종전 동작이 그대로 남는다.
+/// autoDispose: 대기실을 떠나면 필요 없다.
+
+@ProviderFor(joinCenters)
+const joinCentersProvider = JoinCentersProvider._();
+
+/// 가입 요청을 보낼 수 있는 센터 목록(계약 v2.33).
+///
+/// **고를 것이 2곳 이상일 때만 화면이 선택을 묻는다**(`hasChoice`). 센터가 하나뿐인데 선택
+/// 화면을 띄우면 회원에게 "고를 수 있다"는 거짓 인상을 주고 탭만 하나 늘린다.
+///
+/// 실패는 **빈 목록으로 접는다** — 이 조회가 실패했다고 가입 요청 자체를 막으면 안 된다.
+/// 센터 없이 보낸 요청은 서버가 기본 센터로 폴백하므로(v2.33) 종전 동작이 그대로 남는다.
+/// autoDispose: 대기실을 떠나면 필요 없다.
+
+final class JoinCentersProvider
+    extends
+        $FunctionalProvider<
+          AsyncValue<List<CenterDirectory>>,
+          List<CenterDirectory>,
+          FutureOr<List<CenterDirectory>>
+        >
+    with
+        $FutureModifier<List<CenterDirectory>>,
+        $FutureProvider<List<CenterDirectory>> {
+  /// 가입 요청을 보낼 수 있는 센터 목록(계약 v2.33).
+  ///
+  /// **고를 것이 2곳 이상일 때만 화면이 선택을 묻는다**(`hasChoice`). 센터가 하나뿐인데 선택
+  /// 화면을 띄우면 회원에게 "고를 수 있다"는 거짓 인상을 주고 탭만 하나 늘린다.
+  ///
+  /// 실패는 **빈 목록으로 접는다** — 이 조회가 실패했다고 가입 요청 자체를 막으면 안 된다.
+  /// 센터 없이 보낸 요청은 서버가 기본 센터로 폴백하므로(v2.33) 종전 동작이 그대로 남는다.
+  /// autoDispose: 대기실을 떠나면 필요 없다.
+  const JoinCentersProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'joinCentersProvider',
+        isAutoDispose: true,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
+
+  @override
+  String debugGetCreateSourceHash() => _$joinCentersHash();
+
+  @$internal
+  @override
+  $FutureProviderElement<List<CenterDirectory>> $createElement(
+    $ProviderPointer pointer,
+  ) => $FutureProviderElement(pointer);
+
+  @override
+  FutureOr<List<CenterDirectory>> create(Ref ref) {
+    return joinCenters(ref);
+  }
+}
+
+String _$joinCentersHash() => r'ed13296670202bd055f85ee6b1f58a0520f4a183';
+
 /// 가입 요청("승인 대기 중")의 로컬 영속 — 앱 재실행 복원(session_restore)과
 /// 뷰모델이 공유한다.
 
@@ -211,7 +278,7 @@ final class AuthViewModelProvider
   }
 }
 
-String _$authViewModelHash() => r'50d2625b9ce4e729238079192dfa010c53cfce69';
+String _$authViewModelHash() => r'b0c1a8aa8189a5a09c35433723fc5a64f18e6a0d';
 
 /// 전화번호 → 인증번호 → 센터 자동매칭 → 이름확인(P48) 전체 흐름을 관리.
 /// 화면 3개(phone/code/center_confirm)가 이 하나의 Notifier를 공유한다.

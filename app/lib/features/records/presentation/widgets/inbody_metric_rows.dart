@@ -30,7 +30,7 @@ class InbodyMetricRows extends StatelessWidget {
   /// 차트에 선이 있는 두 지표만 라벨을 칠한다 — 색이 곧 범례다(목업 `■` 표기).
   /// 나머지 4개는 선이 없으므로 칠하면 없는 범례를 가리킨다.
   static const _labelColor = {
-    InbodyMetric.smm: AppColors.red,
+    InbodyMetric.smm: AppColors.brand,
     InbodyMetric.pbf: AppColors.warn,
   };
 

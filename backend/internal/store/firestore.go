@@ -31,6 +31,10 @@ import (
 //	users/{uid}            UserIndex(인증 인덱스, 센터 무관 — 설계03 §6 users/{uid} 대응)
 //	join_requests/{id}     JoinRequest(승인 전엔 특정 센터에 귀속되지 않아 최상위)
 //
+// **최상위 컬렉션은 탈퇴 파기의 사각지대다**(P53): PurgeMemberPersonalData는 center(...) 아래만
+// 훑으므로 join_requests에 닿지 못했고, 이름·전화번호가 그대로 살아남았다. 최상위에 회원의
+// 무언가를 새로 두려면 파기 경로를 함께 만들어라(DeleteJoinRequestsByUID가 그 선례다).
+//
 // 주의: 일부 쿼리는 복합 인덱스가 필요하다(예: ledger의 member_id+pass_id 동시 필터).
 // 최초 실행 시 Firestore가 콘솔 링크로 인덱스 생성을 안내한다(wodshot 자문자답 선례와 동일).
 type Firestore struct {
@@ -211,6 +215,67 @@ func (f *Firestore) ListJoinRequests(ctx context.Context, centerID string) ([]Jo
 	return out, nil
 }
 
+// ListJoinRequestsByUID — 신청자 본인의 요청(센터 무관, v2.34). 계약·근거는 Store 인터페이스 주석.
+// `uid ==` 단일 필드 쿼리(DeleteJoinRequestsByUID와 같은 쿼리)라 복합 인덱스가 필요 없다 —
+// 정렬은 메모리에서 한다(ListJoinRequests와 같은 규약).
+func (f *Firestore) ListJoinRequestsByUID(ctx context.Context, uid string) ([]JoinRequest, error) {
+	out := []JoinRequest{}
+	if uid == "" {
+		return out, nil // `uid == ""`는 uid가 빈 레거시 문서에 실제로 매칭된다 — 남의 대기 상태가 된다
+	}
+	iter := f.c.Collection("join_requests").Where("uid", "==", uid).Documents(ctx)
+	defer iter.Stop()
+	for {
+		snap, err := iter.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		jr, err := fromDoc[JoinRequest](snap.Data())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *jr)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) }) // 최신 먼저
+	return out, nil
+}
+
+// DeleteJoinRequestsByUID — 회원탈퇴의 가입 요청 파기(P53). 계약·근거는 Store 인터페이스 주석.
+//
+// **센터로 좁히지 않는다** — uid 단일 필드 필터라 복합 인덱스도 필요 없다. 삭제는
+// deleteWhereMember와 같은 방식(순회를 끝낸 뒤 지운다 — iterator를 돌면서 같은 컬렉션을
+// 수정하지 않는다). 부분 실패는 지운 만큼의 건수와 함께 올라가고, 재시도가 남은 것을
+// 마저 지운다(각 삭제는 이미 없는 문서에도 성공이라 멱등).
+func (f *Firestore) DeleteJoinRequestsByUID(ctx context.Context, uid string) (int, error) {
+	if uid == "" {
+		// 빈 uid로 훑으면 uid 필드가 빈 문서(레거시·시딩 잔여)를 싹 지운다 — 탈퇴자의 것이
+		// 아닌 문서를 지우는 유일한 경로라 여기서 끊는다. 지울 대상이 없는 것은 에러가 아니다.
+		return 0, nil
+	}
+	iter := f.c.Collection("join_requests").Where("uid", "==", uid).Documents(ctx)
+	defer iter.Stop()
+	refs := []*firestore.DocumentRef{}
+	for {
+		snap, err := iter.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return 0, err
+		}
+		refs = append(refs, snap.Ref)
+	}
+	for i, ref := range refs {
+		if _, err := ref.Delete(ctx); err != nil {
+			return i, err
+		}
+	}
+	return len(refs), nil
+}
+
 // ---- 재등록/상담 요청(계약 v2.20, P42) — 센터 스코프 컬렉션 ----
 
 func (f *Firestore) CreateConsultRequest(ctx context.Context, centerID string, cr *ConsultRequest) (string, error) {
@@ -377,6 +442,10 @@ func (f *Firestore) PurgeMemberPersonalData(ctx context.Context, centerID string
 		{"hwChecks", &c.HwChecks},
 		{"checkins", &c.Checkins},
 		{"recurring", &c.Recurrings},
+		// consult_requests(P53): 회원이 남긴 자유 서술 메모를 품는다. 여기 없던 동안
+		// 탈퇴는 성공을 보고하면서 그 메모만 남겼다 — 최상위 join_requests와 함께
+		// 이번 결함의 절반이다(다른 절반은 DeleteJoinRequestsByUID가 맡는다).
+		{"consult_requests", &c.ConsultRequests},
 	} {
 		n, err := f.deleteWhereMember(ctx, center.Collection(target.coll), memberID)
 		if err != nil {

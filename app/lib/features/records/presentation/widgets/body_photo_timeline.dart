@@ -177,7 +177,7 @@ class _BodyPhotoTimelineCardState extends State<BodyPhotoTimelineCard> {
         children: [
           RiseCardHeader(
             title: '체형 분석 타임라인',
-            trailing: RiseBadge(poseLabel, variant: RiseBadgeVariant.red),
+            trailing: RiseBadge(poseLabel, variant: RiseBadgeVariant.brand),
           ),
           // 포즈 칩 — 조회에 실패했을 땐 띄우지 않는다. 전부 "0장"으로 보여서
           // 사진이 없는 것처럼 읽히고, 눌러 봐야 같은 실패 문구만 반복된다.
@@ -213,11 +213,17 @@ class _BodyPhotoTimelineCardState extends State<BodyPhotoTimelineCard> {
               child: Text(
                 // **"촬영 탭"은 없다.** `app_shell.dart`가 명시한다 — *"촬영은 탭이
                 // 아니다(P21)"*. 탭은 4개(홈·예약·기록·마이)이고 촬영은 그 사이의
-                // 빨간 원 버튼이라 **선택 상태를 갖지 않는다.** 없는 탭을 찾아
+                // 원형 버튼이라 **선택 상태를 갖지 않는다.** 없는 탭을 찾아
                 // 하단바를 훑게 만드는 안내는 안 하느니만 못하다.
+                //
+                // **색으로 가리키지 않는다**(P56 M4). 종전 문구는 "빨간 버튼"이었는데
+                // P54가 브랜드를 네이비로 되돌려 그 버튼은 `AppColors.brand`다 — 첫 사용
+                // 순간의 유일한 길안내가 없는 색을 가리키고 있었다. 버튼 아래 라벨
+                // "촬영"(app_shell `_CameraNavItem`)으로 가리키면 색이 또 바뀌어도 참이다.
+                // (촬영 화면의 "빨간 선"은 참이다 — 크로스헤어 `camCrosshair`는 그대로.)
                 widget.album.isEmpty
-                    ? '아직 촬영한 사진이 없어요 — 아래 가운데 빨간 버튼으로 첫 사진을 남겨보세요'
-                    : '${PoseSpec.labelFor(_pose, sequence: widget.poses)} 사진은 아직 없어요 — 위에서 다른 포즈를 고르거나 아래 가운데 빨간 버튼으로 남겨보세요',
+                    ? '아직 촬영한 사진이 없어요 — 아래 가운데 촬영 버튼으로 첫 사진을 남겨보세요'
+                    : '${PoseSpec.labelFor(_pose, sequence: widget.poses)} 사진은 아직 없어요 — 위에서 다른 포즈를 고르거나 아래 가운데 촬영 버튼으로 남겨보세요',
                 style: const TextStyle(
                   fontSize: 11.5,
                   color: AppColors.muted,
@@ -427,11 +433,11 @@ class _DateScrubber extends StatelessWidget {
         SliderTheme(
           data: SliderTheme.of(context).copyWith(
             trackHeight: 4,
-            activeTrackColor: AppColors.red,
+            activeTrackColor: AppColors.brand,
             inactiveTrackColor: AppColors.trackBg,
-            thumbColor: AppColors.red,
-            overlayColor: AppColors.redLight,
-            activeTickMarkColor: AppColors.redBorder,
+            thumbColor: AppColors.brand,
+            overlayColor: AppColors.brandLight,
+            activeTickMarkColor: AppColors.brandBorder,
             inactiveTickMarkColor: AppColors.line,
             thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 10),
             overlayShape: const RoundSliderOverlayShape(overlayRadius: 22),
@@ -729,9 +735,9 @@ class _PhotoTileState extends ConsumerState<_PhotoTile> {
               // **띠는 몸의 변화로 오해될 수 없다** — 이게 `contain`을 고르는 진짜
               // 이유다. `cover`는 비율이 다른 두 사진을 서로 다르게 잘라내서
               // 그 자체로 없는 차이를 만든다.
-              color: widget.highlighted ? AppColors.redLight : AppColors.chipBg,
+              color: widget.highlighted ? AppColors.brandLight : AppColors.chipBg,
               border: widget.highlighted
-                  ? Border.all(color: AppColors.redBorder)
+                  ? Border.all(color: AppColors.brandBorder)
                   : null,
               borderRadius: BorderRadius.circular(AppRadius.chip),
             ),
@@ -785,13 +791,15 @@ class _PhotoTileState extends ConsumerState<_PhotoTile> {
               const SizedBox(height: 4),
               InkWell(
                 onTap: _load,
+                // 사진 로드 실패에서 빠져나가는 유일한 경로다 — 히트 영역을
+                // 투명 패딩으로만 넓힌다(시각 크기 무변화, P54).
                 child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 13),
                   child: Text(
                     '다시 시도',
                     style: TextStyle(
                       fontSize: 10.5,
-                      color: AppColors.red,
+                      color: AppColors.brand,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -856,7 +864,7 @@ class _PhotoTileState extends ConsumerState<_PhotoTile> {
               child: _pill(
                 widget.role!,
                 background: widget.highlighted
-                    ? AppColors.red
+                    ? AppColors.brand
                     : Colors.black.withValues(alpha: 0.55),
               ),
             ),
@@ -924,7 +932,7 @@ class _PhotoTileState extends ConsumerState<_PhotoTile> {
         label,
         style: TextStyle(
           fontSize: 10.5,
-          color: widget.highlighted ? AppColors.red : AppColors.muted,
+          color: widget.highlighted ? AppColors.brand : AppColors.muted,
         ),
       ),
     ],

@@ -56,7 +56,7 @@ void main() {
       note: '사진은 촬영 즉시 나와 담당 코치, 센터 대표만 볼 수 있게 저장돼요.',
     ));
 
-    expect(find.textContaining('설정 > 권한 > 카메라'), findsOneWidget);
+    expect(find.textContaining('설정 앱에서 이 앱의 카메라 권한을'), findsOneWidget);
     expect(find.textContaining('저장돼요'), findsNothing);
   });
 }

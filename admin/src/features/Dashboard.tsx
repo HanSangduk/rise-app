@@ -43,18 +43,27 @@ import {
   staffLabel,
   todayStr,
 } from "@/lib/format";
-import { isPassBookable, type BookingKind, type MemberWithPasses, type Stats } from "@/lib/types";
+import {
+  isJoinPending,
+  isPassBookable,
+  type BookingKind,
+  type MemberWithPasses,
+  type Stats,
+} from "@/lib/types";
 
 const KIND_LABEL: Record<BookingKind, string> = { pt: "1:1", group: "그룹", ot: "체험(OT)" };
 
 export function Dashboard({
   onOpenMember,
   onOpenMembers,
+  onOpenJoinRequest,
   onOpenSettings,
 }: {
   onOpenMember?: (memberId: string) => void;
-  /** 회원 관리 탭으로 이동(포커스 없음) — 빈 센터 온보딩 "첫 회원 등록". */
+  /** 회원 관리 탭으로 이동(포커스 없음) — 빈 센터 온보딩 "첫 회원 등록" · 가입 요청 대기 줄. */
   onOpenMembers?: () => void;
+  /** 회원 관리 탭 + 상단 가입 요청 큐에서 그 요청 행 강조(P69) — 대표에게만 전달된다. */
+  onOpenJoinRequest?: (requestId: string) => void;
   /** 설정·직원 탭으로 이동 — 대표에게만 전달된다(트레이너에겐 undefined = 링크 없음). */
   onOpenSettings?: () => void;
 }) {
@@ -84,7 +93,8 @@ export function Dashboard({
   // 트레이너에겐 null로 조회 자체를 끈다(undefined = 전체 조회, null = 비활성 — usePayments 규약).
   const allPaymentsQ = usePayments(isOwner ? undefined : null);
   // 대기 중인 가입 요청 — 회원 앱은 "센터에서 승인하면 연결돼요"라고 약속해놓고, 대표 쪽엔
-  // 설정 탭을 직접 열어야 보이는 배지뿐이었다(두 화면의 약속이 어긋남). 해야 할 일로 끌어올린다.
+  // 큐를 직접 열어야 보이는 배지뿐이었다(두 화면의 약속이 어긋남). 해야 할 일로 끌어올린다.
+  // 큐 자체는 회원 관리 탭 최상단에 있다(P69, JoinRequests.tsx) — 이 줄은 거기로 가는 문이다.
   // owner 전용 API라 트레이너에겐 조회 자체를 끈다(403 → "조회 실패" 노출 방지).
   const joinReqQ = useJoinRequests(isOwner);
   // 재등록 요청(계약 v2.20, P42) — 앱 CTA가 "센터에서 연락드릴 거예요"라고 약속한다.
@@ -169,8 +179,18 @@ export function Dashboard({
     return (pendingContractsQ.data ?? []).filter((c) => !refundedPassIds.has(c.pass_id));
   }, [pendingContractsQ.data, membersQ.data]);
   const pendingContractsCount = pendingContracts.length;
-  // GET /v1/join/requests는 승인 대기분만 반환한다(승인 시 목록에서 사라짐) — 길이가 곧 대기 건수.
-  const pendingJoinCount = joinReqQ.data?.length ?? 0;
+  // 승인 대기 건수 — **응답 길이가 아니라 상태로 센다**(P55).
+  //
+  // 종전 주석은 "GET /v1/join/requests는 승인 대기분만 반환한다(승인 시 목록에서 사라짐)"였는데
+  // 그게 사실이 아니었다: 서버 store.ListJoinRequests에 상태 조건이 없어 승인·거절된 요청까지
+  // 그대로 내려온다. 그래서 이 숫자는 처리해도 줄지 않았고, 대표는 "승인" 링크를 눌러
+  // 이미 처리한 사람만 있는 큐를 다시 봤다. 서버가 pending만 주게 되면(P55 백엔드) 이 판정은
+  // 아무것도 거르지 않는 no-op가 되고, 그 전까지는 회원 관리의 큐·네비 배지와 **같은 수**를 말한다.
+  // 정렬도 큐와 같다(먼저 온 순) — 여기 실린 이름 셋이 큐의 첫 세 줄이다.
+  const pendingJoins = (joinReqQ.data ?? [])
+    .filter(isJoinPending)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  const pendingJoinCount = pendingJoins.length;
   // 재등록 요청은 done 이력도 응답에 남는다 — 할 일은 pending만.
   const pendingConsults = (consultQ.data ?? []).filter((r) => r.status === "pending");
   // 빈 센터 온보딩 판정 — data가 실제로 도착해 "0명"임을 확인했을 때만 참이다. isLoading으로
@@ -401,15 +421,28 @@ export function Dashboard({
               <div className="space-y-2 text-xs leading-relaxed">
                 {/* 앱 회원이 "센터에서 승인하면 연결돼요" 안내를 받고 기다리는 중 — 가장 먼저 놓는다. */}
                 {isOwner && pendingJoinCount > 0 && (
+                  // 재등록 요청 줄과 같은 형식(P69) — 이름 3개까지, 번호는 싣지 않는다(같은 owner
+                  // 게이트라 노출 범위는 큐와 같지만 대시보드는 훑어보는 화면이다). 이름 클릭은 큐의
+                  // 그 행으로, 꼬리 링크는 회원 관리 탭으로.
                   <div className="text-brand">
                     가입 요청 대기 <b>{pendingJoinCount}건</b> —{" "}
-                    <NameLink name="설정 탭에서 승인" onClick={onOpenSettings} />
+                    {pendingJoins.slice(0, 3).map((r, i) => (
+                      <span key={r.id}>
+                        {i > 0 && " · "}
+                        <NameLink
+                          name={r.name}
+                          onClick={onOpenJoinRequest && (() => onOpenJoinRequest(r.id))}
+                        />
+                      </span>
+                    ))}
+                    {pendingJoinCount > 3 && <span className="text-muted"> 외 {pendingJoinCount - 3}명</span>}{" "}
+                    → <NameLink name="회원 관리에서 처리" onClick={onOpenMembers} />
                   </div>
                 )}
                 {/* 가입 요청 조회 실패를 "대기 없음"으로 위장하지 않는다 — 앱에서 기다리는 회원이 있다.
-                    종전엔 "설정 탭에서 직접 확인해주세요"라고 보냈는데, 설정 탭의 가입 요청 목록은
-                    **같은 조회**를 쓴다(useJoinRequests) — 가서 봐도 똑같이 실패한다. 갈 데가 없는
-                    안내 대신 이 화면에서 할 수 있는 한 가지(위 새로고침)만 말한다. */}
+                    종전엔 "직접 확인해주세요"라고 다른 탭으로 보냈는데, 회원 관리 상단의 가입 요청
+                    큐는 **같은 조회**를 쓴다(useJoinRequests) — 가서 봐도 똑같이 실패한다. 갈 데가
+                    없는 안내 대신 이 화면에서 할 수 있는 한 가지(위 새로고침)만 말한다. */}
                 {isOwner && joinReqQ.isError && (
                   <div className="text-muted">
                     가입 요청을 불러오지 못했어요 — 기다리는 회원이 있는지 지금은 알 수 없어요.
@@ -730,8 +763,8 @@ export function Dashboard({
 }
 
 // "해야 할 일"의 인라인 링크 — 회원 이름은 회원 관리 탭의 해당 회원 상세로(v1.4 UX 여정 마감),
-// 가입 요청은 설정 탭으로 보낸다. 콜백이 없으면(임베드·권한 없음) 일반 텍스트로 렌더링해
-// 데드 버튼을 만들지 않는다.
+// 가입 요청 신청자 이름은 회원 관리 상단 큐의 그 행으로(P69). 콜백이 없으면(임베드·권한 없음)
+// 일반 텍스트로 렌더링해 데드 버튼을 만들지 않는다.
 function NameLink({ name, onClick }: { name: string; onClick?: () => void }) {
   if (!onClick) return <>{name}</>;
   return (

@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:rise_member/core/config/app_config.dart';
+import 'package:rise_member/features/auth/presentation/center_contact_provider.dart';
 import 'package:rise_member/core/policy/center_policy.dart';
 import 'package:rise_member/core/policy/center_policy_provider.dart';
 import 'package:rise_member/core/result/failure.dart';
 import 'package:rise_member/core/result/result.dart';
+import 'package:rise_member/core/session/session_gone_view.dart';
 import 'package:rise_member/core/session/session_provider.dart';
 import 'package:rise_member/core/api/staff_directory.dart';
 import 'package:rise_member/core/theme/app_colors.dart';
@@ -63,9 +64,7 @@ class HomeScreen extends ConsumerWidget {
     // 있어서, 칩 전환 실패에도 하지도 않은 체크 얘기가 나왔다.
     ref.listen(homeworkToggleErrorProvider, (_, failure) {
       if (failure == null) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        riseSnackBar(failure.message, kind: RiseSnackKind.danger),
-      );
+      showFailureSnackBar(context, failure);
       ref.read(homeworkToggleErrorProvider.notifier).clear();
     });
 
@@ -96,8 +95,12 @@ class HomeScreen extends ConsumerWidget {
                       },
                     )
                   : async.when(
-                    loading: () => const Center(child: CircularProgressIndicator(color: AppColors.red)),
-                    error: (e, _) => e is EmptyPassesFailure
+                    loading: () => const Center(child: CircularProgressIndicator(color: AppColors.brand)),
+                    // 세션 소멸은 에러가 아니라 **전환 중**이다 — 재시도 버튼을 그리지
+                    // 않는다(세션을 만들지 못하는 버튼, P64).
+                    error: (e, _) => e is SessionGoneFailure
+                        ? const SessionGoneView()
+                        : e is EmptyPassesFailure
                         // 회원권 0개는 에러가 아니라 온보딩 성격의 빈 상태(전용 뷰 — 예약 탭과 공용).
                         // 새로고침 때 정책도 재조회 — 실패 폴백/구정책이 세션 내내 고착되지
                         // 않게(center_policy_provider 주석 참조).
@@ -114,7 +117,7 @@ class HomeScreen extends ConsumerWidget {
                             },
                           ),
                     data: (summary) => RefreshIndicator(
-                      color: AppColors.red,
+                      color: AppColors.brand,
                       onRefresh: () async {
                         // 대표가 컷오프를 축소해도 재로그인 없이 pull-to-refresh로 반영
                         // — 안 하면 취소 버튼이 사일런트 데드엔드가 된다(정책 provider 주석).
@@ -142,6 +145,7 @@ class HomeScreen extends ConsumerWidget {
                             checkedInBookingId: checkedInBookingId,
                             cutoffHours: policy.cancelCutoffHours,
                             cutoffUnknown: policy.isFallback,
+                            centerName: ref.watch(centerDisplayNameProvider),
                             onCheckIn: () => _handleCheckIn(context, ref),
                           ),
                           // 담당 코치 — 서버가 이미 내려준 프로필을 홈에서 쓴다
@@ -299,12 +303,15 @@ class HomeScreen extends ConsumerWidget {
 
     final result = await ref.read(homeViewModelProvider.notifier).checkIn(scannedToken: scanned);
     if (!context.mounted) return;
-    final (message, kind) = switch (result) {
+    switch (result) {
       // 체크인은 출석 확인일 뿐 — 세션 차감(원장 -1)은 코치의 완료 처리 시점(P4).
-      Ok() => ('출석 완료! 세션 차감은 수업 완료 처리 후 반영돼요', RiseSnackKind.ok),
-      Err(:final failure) => (failure.message, RiseSnackKind.danger),
-    };
-    ScaffoldMessenger.of(context).showSnackBar(riseSnackBar(message, kind: kind));
+      case Ok():
+        ScaffoldMessenger.of(context).showSnackBar(
+          riseSnackBar('출석 완료! 세션 차감은 수업 완료 처리 후 반영돼요', kind: RiseSnackKind.ok),
+        );
+      case Err(:final failure):
+        showFailureSnackBar(context, failure);
+    }
   }
 }
 
@@ -334,7 +341,7 @@ String? _passAlert(PassOption pass, CenterPolicy policy) {
 /// "잔여 부족" 목록 기준(3회 미만)과 맞췄다. 정책 필드가 생기면 그쪽으로 옮긴다.
 const _lowRemainingThreshold = 3;
 
-class _HomeHeader extends StatelessWidget {
+class _HomeHeader extends ConsumerWidget {
   const _HomeHeader({required this.memberName, required this.summary});
   final String? memberName;
   final HomeSummary? summary;
@@ -358,11 +365,12 @@ class _HomeHeader extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final summary = this.summary;
     // 이름은 정규화 후 판정 — 공백뿐인 이름("  ")도 미해석과 같게 센터명으로 떨어진다.
+    // 센터명은 서버 값(어드민 "센터 신원")이 우선, 없을 때만 임시 상수(P56 L10).
     final name = CoachLabel.nameOrNull(memberName);
-    final who = name == null ? AppConfig.centerFullName : '$name 님';
+    final who = name == null ? ref.watch(centerDisplayNameProvider) : '$name 님';
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
       decoration: const BoxDecoration(
@@ -387,7 +395,7 @@ class _HomeHeader extends StatelessWidget {
                   child: Row(
                     children: [
                       Text('라이즈 ', style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w900)),
-                      Text('컨디셔닝', style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w900, color: AppColors.red)),
+                      Text('컨디셔닝', style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w900, color: AppColors.brand)),
                       // 여기 있던 아래 화살표(chevronDown)를 뺐다. **펼칠 게 없는데
                       // 드롭다운처럼 생겼다** — 이 앱은 센터가 하나고 전환 기능이
                       // 없으며, 아이콘은 `const FittedBox` 안이라 탭 핸들러조차
@@ -419,7 +427,7 @@ class _HomeHeader extends StatelessWidget {
                   summary.selectedPass.product,
                   '잔여 ${summary.selectedPass.remaining}',
                 ]),
-                variant: RiseBadgeVariant.red,
+                variant: RiseBadgeVariant.brand,
               ),
             ),
         ],

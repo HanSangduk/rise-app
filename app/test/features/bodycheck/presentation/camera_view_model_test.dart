@@ -397,6 +397,69 @@ void main() {
       expect(state.error, isA<RejectedFailure>());
     });
   });
+
+  group('세션 소멸 — 조용한 return 금지, 사진은 잃지 않고 이유는 말한다(P64)', () {
+    // 셸이 떠 있는 채 세션이 비는 순간(401·로그아웃·탈퇴·재검증 미연결)에 회원이 탭한
+    // [이 사진으로 저장]은 종전엔 아무 피드백 없이 끝났다. 바이트는 그대로 두고
+    // 타입 있는 실패만 세운다 — 화면은 이 타입을 전환 중으로 그린다.
+
+    test('검토 중 세션이 비면 confirmReview는 review 바이트를 보존한 채 SessionGoneFailure를 세운다',
+        () async {
+      final container = make(captured: bytes);
+      final vm = container.read(cameraViewModelProvider.notifier);
+      await vm.capture();
+      final held = container.read(cameraViewModelProvider).review;
+      expect(held, isNotNull);
+
+      container.read(sessionProvider.notifier).clear(reason: SessionEndReason.unauthorized);
+      await vm.confirmReview();
+
+      final state = container.read(cameraViewModelProvider);
+      expect(state.error, isA<SessionGoneFailure>(), reason: '조용히 끝났다 — 이유가 없다');
+      expect(identical(state.review, held), isTrue, reason: '손에 든 사진을 잃었다');
+      expect(state.submitting, isFalse, reason: '스피너가 영원히 돌면 안 된다');
+      expect(uploader.calls, isEmpty, reason: '세션 없이 Storage로 나갔다');
+      expect(repo.lastStoragePath, isNull, reason: '세션 없이 서버로 나갔다');
+    });
+
+    test('재시도 대기 중 세션이 비면 retryPendingUpload는 pendingRetry를 보존한 채 SessionGoneFailure를 세운다',
+        () async {
+      final container = make(captured: bytes);
+      uploader.failure = const NetworkFailure('업로드 실패');
+      final vm = container.read(cameraViewModelProvider.notifier);
+      await captureAndSaveOn(vm);
+      final held = container.read(cameraViewModelProvider).pendingRetry;
+      expect(held, isNotNull);
+      final callsBefore = uploader.calls.length;
+
+      container.read(sessionProvider.notifier).clear(reason: SessionEndReason.unauthorized);
+      await vm.retryPendingUpload();
+
+      final state = container.read(cameraViewModelProvider);
+      expect(state.error, isA<SessionGoneFailure>());
+      expect(identical(state.pendingRetry, held), isTrue, reason: '재시도할 사진을 잃었다');
+      expect(state.submitting, isFalse);
+      expect(uploader.calls.length, callsBefore, reason: '세션 없이 다시 올렸다');
+    });
+
+    test('세션 없이 셔터를 누르면 찍지 않고 SessionGoneFailure를 세운다', () async {
+      final container = make(captured: bytes);
+      // 뷰모델은 `myProfileProvider`를 watch한다 — 프로필 future가 **이 테스트 도중**
+      // 처음 풀리면 뷰모델이 재빌드되어 방금 세운 error가 기본 상태로 씻긴다(위 두
+      // 테스트는 `capture()`가 프로필을 기다리는 동안 그 재빌드를 지나간다). 프로필을
+      // 먼저 안착시켜 재빌드를 셔터 **앞**으로 보낸다 — 실기기의 순서와 같다(촬영
+      // 화면은 프로필이 캐시된 뒤 열린다).
+      await container.read(myProfileProvider.future);
+      container.read(sessionProvider.notifier).clear(reason: SessionEndReason.unauthorized);
+
+      await container.read(cameraViewModelProvider.notifier).capture();
+
+      final state = container.read(cameraViewModelProvider);
+      expect(state.error, isA<SessionGoneFailure>(), reason: '셔터에 반응이 없다');
+      expect(state.review, isNull, reason: '세션 없이 찍혔다');
+      expect(state.submitting, isFalse);
+    });
+  });
 }
 
 class _UploadCall {

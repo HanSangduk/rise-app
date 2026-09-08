@@ -71,6 +71,12 @@ func runStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 	t.Run("DeleteUserIndexIsIdempotent", func(t *testing.T) {
 		testDeleteUserIndex(t, newStore(t))
 	})
+	t.Run("JoinRequestsDeletedByUID", func(t *testing.T) {
+		testDeleteJoinRequestsByUID(t, newStore(t))
+	})
+	t.Run("JoinRequestsListedByUIDAcrossCenters", func(t *testing.T) {
+		testListJoinRequestsByUID(t, newStore(t))
+	})
 	t.Run("BusinessAndPolicyDoNotClobberEachOther", func(t *testing.T) {
 		testBusinessPolicyCoexist(t, newStore(t))
 	})
@@ -510,6 +516,13 @@ func testPurgeMemberPersonalData(t *testing.T, st Store) {
 			Until: "2026-12-31"}); err != nil {
 			t.Fatalf("CreateRecurring: %v", err)
 		}
+		// 재등록/상담 요청(P53) — 회원이 남긴 자유 서술 메모. v2.11 스윕에 없던 7번째 종류라
+		// 탈퇴가 성공을 보고하면서 이것만 남겼다(이번 결함).
+		if _, err := st.CreateConsultRequest(ctx, center, &ConsultRequest{
+			MemberID: mid, Kind: ConsultKindRenewal, Note: "무릎이 아파서 상담받고 싶어요",
+			Status: ConsultPending}); err != nil {
+			t.Fatalf("CreateConsultRequest: %v", err)
+		}
 	}
 
 	// ---- 보존 대상: 원장 ----
@@ -526,7 +539,12 @@ func testPurgeMemberPersonalData(t *testing.T, st Store) {
 		t.Fatalf("PurgeMemberPersonalData: %v", err)
 	}
 
-	want := PurgeCounts{BodyPhotos: 1, Inbody: 1, WorkoutLogs: 1, HwChecks: 1, Checkins: 1, Recurrings: 1}
+	// JoinRequests가 0인 것은 정상이다 — 최상위 컬렉션이라 이 동사의 사정거리 밖이고,
+	// DeleteJoinRequestsByUID가 따로 맡는다(testDeleteJoinRequestsByUID가 검증).
+	want := PurgeCounts{
+		BodyPhotos: 1, Inbody: 1, WorkoutLogs: 1, HwChecks: 1, Checkins: 1, Recurrings: 1,
+		ConsultRequests: 1,
+	}
 	if counts != want {
 		t.Errorf("PurgeCounts = %+v, want %+v — 0인 항목은 컬렉션 이름 오타를 의심하라", counts, want)
 	}
@@ -553,6 +571,9 @@ func testPurgeMemberPersonalData(t *testing.T, st Store) {
 			t.Errorf("고정 스케줄이 남았다: %+v", r)
 		}
 	}
+	if rows, err := st.ListConsultRequests(ctx, center, memberID); err != nil || len(rows) != 0 {
+		t.Errorf("재등록/상담 요청이 %d건 남았다(err=%v) — 회원이 남긴 메모는 거래 기록이 아니다", len(rows), err)
+	}
 
 	// ---- 이웃 회원은 온전한가 ----
 	if photos, err := st.ListBodyPhotos(ctx, center, otherID); err != nil || len(photos) != 1 {
@@ -566,6 +587,9 @@ func testPurgeMemberPersonalData(t *testing.T, st Store) {
 	}
 	if rows, err := st.ListHwChecksByMember(ctx, center, otherID); err != nil || len(rows) != 1 {
 		t.Errorf("이웃 회원 홈워크 체크 = %d건(err=%v), want 1", len(rows), err)
+	}
+	if rows, err := st.ListConsultRequests(ctx, center, otherID); err != nil || len(rows) != 1 {
+		t.Errorf("이웃 회원 재등록/상담 요청 = %d건(err=%v), want 1 — 필터가 member_id로 좁혀지지 않았다", len(rows), err)
 	}
 
 	// ---- 원장은 그대로다(append-only 불변식 — 지우면 잔여 세션이 붕괴한다) ----
@@ -597,6 +621,148 @@ func testPurgeMemberPersonalData(t *testing.T, st Store) {
 	}
 	if _, err := st.GetMember(ctx, center, "no_such_member_xyz"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("없는 회원 Purge가 유령 문서를 만들었다")
+	}
+}
+
+// 가입 요청 파기(P53) — 탈퇴가 **이름·전화번호 원본**을 실제로 지우는지.
+//
+// 왜 별도 계약인가: join_requests는 최상위 컬렉션이고 member_id가 없다(uid 키). 두 구현이
+// 다른 곳을 보기 가장 쉬운 자리다 — Memory는 맵 하나를 훑고 Firestore는 `uid ==` 쿼리를
+// 날리는데, 그 필드명이 어긋나면 **쿼리는 성공하고 결과만 비어** 조용히 0건 삭제로 지나간다
+// (PurgeMemberPersonalData의 컬렉션 이름 오타와 같은 종류의 함정).
+// ListJoinRequestsByUID(v2.34) — 센터를 가로질러 그 사람의 요청만, 최신 먼저. 빈 uid는 빈 목록.
+// GET /v1/me가 이 동사로 "내 요청은 지금 어떻게 됐나"를 답한다 — 2호점에 보낸 요청이 기본 센터
+// 큐 조회에서 사라지던 결함(P69)의 스토어 쪽 방어선.
+func testListJoinRequestsByUID(t *testing.T, st Store) {
+	ctx := context.Background()
+	center := conformanceCenter(t)
+	otherCenter := center + "-2"
+	uid := "uid_" + docKey(t.Name())
+
+	older := &JoinRequest{CenterID: center, UID: uid, Name: "김민지", Phone: "010-1234-5678", Status: JoinRejected,
+		CreatedAt: time.Now().Add(-time.Hour)}
+	newer := &JoinRequest{CenterID: otherCenter, UID: uid, Name: "김민지", Phone: "010-1234-5678", Status: JoinPending,
+		CreatedAt: time.Now()}
+	for _, jr := range []*JoinRequest{older, newer} {
+		if _, err := st.CreateJoinRequest(ctx, jr); err != nil {
+			t.Fatalf("CreateJoinRequest: %v", err)
+		}
+	}
+	// 이웃 신청자·uid 빈 레거시 문서는 섞이면 안 된다.
+	if _, err := st.CreateJoinRequest(ctx, &JoinRequest{CenterID: center, UID: uid + "_other", Name: "이서준", Phone: "010-9999-0000", Status: JoinPending}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateJoinRequest(ctx, &JoinRequest{CenterID: center, Name: "레거시", Phone: "010-0000-0000", Status: JoinPending}); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := st.ListJoinRequestsByUID(ctx, uid)
+	if err != nil {
+		t.Fatalf("ListJoinRequestsByUID: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("건수 = %d, want 2(센터를 가로질러) — 0이면 uid 필드명을 의심하라: %+v", len(list), list)
+	}
+	if list[0].CenterID != otherCenter || list[0].Status != JoinPending {
+		t.Errorf("첫 항목 = %+v, want 최신(다른 센터·pending) 먼저 — /v1/me는 첫 항목을 현재 상태로 읽는다", list[0])
+	}
+	if list[1].CenterID != center || list[1].Status != JoinRejected {
+		t.Errorf("둘째 항목 = %+v, want 옛 거절 건", list[1])
+	}
+	if got, err := st.ListJoinRequestsByUID(ctx, ""); err != nil || len(got) != 0 {
+		t.Errorf("빈 uid = (%d건, %v), want (0, nil) — uid 빈 레거시 문서를 남의 대기 상태로 돌려주면 안 된다", len(got), err)
+	}
+	if got, err := st.ListJoinRequestsByUID(ctx, uid+"_never"); err != nil || len(got) != 0 {
+		t.Errorf("요청 없는 uid = (%d건, %v), want (0, nil)", len(got), err)
+	}
+}
+
+func testDeleteJoinRequestsByUID(t *testing.T, st Store) {
+	ctx := context.Background()
+	center := conformanceCenter(t)
+	uid := "uid_" + docKey(t.Name())
+	otherUID := uid + "_other"
+
+	// 탈퇴자의 요청 2건(승인 대기 + 이미 거절된 것 — 상태와 무관하게 전부 파기 대상이다:
+	// 거절된 요청도 이름·번호를 그대로 품는다).
+	for _, status := range []string{JoinPending, JoinRejected} {
+		if _, err := st.CreateJoinRequest(ctx, &JoinRequest{
+			CenterID: center, UID: uid, Name: "김민지", Phone: "010-1234-5678", Status: status,
+		}); err != nil {
+			t.Fatalf("CreateJoinRequest(%s): %v", status, err)
+		}
+	}
+	// 지워지면 **안 되는** 이웃 신청자.
+	if _, err := st.CreateJoinRequest(ctx, &JoinRequest{
+		CenterID: center, UID: otherUID, Name: "이서준", Phone: "010-9999-0000", Status: JoinPending,
+	}); err != nil {
+		t.Fatalf("CreateJoinRequest(other): %v", err)
+	}
+	// uid가 **빈** 레거시 문서 — 빈 uid 가드가 없으면 `uid == ""` 쿼리가 이걸 쓸어간다.
+	if _, err := st.CreateJoinRequest(ctx, &JoinRequest{
+		CenterID: center, Name: "레거시", Phone: "010-0000-0000", Status: JoinPending,
+	}); err != nil {
+		t.Fatalf("CreateJoinRequest(legacy): %v", err)
+	}
+
+	n, err := st.DeleteJoinRequestsByUID(ctx, uid)
+	if err != nil {
+		t.Fatalf("DeleteJoinRequestsByUID: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("삭제 건수 = %d, want 2 — 0이면 uid 필드명을 의심하라(쿼리는 성공하고 결과만 빈다)", n)
+	}
+
+	// 건수 보고를 믿지 않고 다시 읽는다.
+	list, err := st.ListJoinRequests(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remaining := 0
+	for _, jr := range list {
+		if jr.UID == uid {
+			t.Errorf("탈퇴자의 가입 요청이 남았다: name=%q phone=%q — 승인 한 번으로 이름·번호가 되살아난다",
+				jr.Name, jr.Phone)
+		}
+		if jr.UID == otherUID {
+			remaining++
+			if jr.Name != "이서준" || jr.Phone != "010-9999-0000" {
+				t.Errorf("이웃 신청자의 요청이 훼손됐다: %+v", jr)
+			}
+		}
+	}
+	if remaining != 1 {
+		t.Errorf("이웃 신청자 요청 = %d건, want 1 — 필터가 uid로 좁혀지지 않았다", remaining)
+	}
+
+	// **멱등**: 탈퇴 재시도가 여기서 막히면 이름·번호가 영구히 남는다(DeleteUserIndex와 같은 규약).
+	if n, err := st.DeleteJoinRequestsByUID(ctx, uid); err != nil || n != 0 {
+		t.Errorf("두 번째 호출 = (%d, %v), want (0, nil) — 재시도가 막히면 안 된다", n, err)
+	}
+	// 요청을 낸 적 없는 uid도 성공(0건).
+	if n, err := st.DeleteJoinRequestsByUID(ctx, uid+"_never"); err != nil || n != 0 {
+		t.Errorf("요청 없는 uid = (%d, %v), want (0, nil)", n, err)
+	}
+	// 빈 uid는 **아무것도 지우지 않는다** — 훑게 두면 uid가 빈 레거시 문서를 싹 쓸어간다
+	// (Firestore의 `uid == ""`는 그 문서들에 실제로 매칭된다 — Memory만 보면 안 보이는 차이다).
+	if n, err := st.DeleteJoinRequestsByUID(ctx, ""); err != nil || n != 0 {
+		t.Errorf("빈 uid = (%d, %v), want (0, nil) — 남의 문서를 지우는 유일한 경로다", n, err)
+	}
+	after, err := st.ListJoinRequests(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != 2 {
+		t.Errorf("빈 uid 호출 후 요청 = %d건, want 2(이웃 + uid 빈 레거시)", len(after))
+	}
+	legacy := 0
+	for _, jr := range after {
+		if jr.UID == "" {
+			legacy++
+		}
+	}
+	if legacy != 1 {
+		t.Errorf("uid가 빈 레거시 문서 = %d건, want 1 — 빈 uid 가드가 남의 문서를 쓸어갔다", legacy)
 	}
 }
 

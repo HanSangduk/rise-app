@@ -7,6 +7,7 @@ import 'package:rise_member/core/api/member_api.dart';
 import 'package:rise_member/core/api/passes_api.dart';
 import 'package:rise_member/core/result/failure.dart';
 import 'package:rise_member/core/result/result.dart';
+import 'package:rise_member/features/auth/presentation/auth_state.dart';
 import 'package:rise_member/features/my/data/my_remote_data_source.dart';
 import 'package:rise_member/features/my/data/my_repository_impl.dart';
 
@@ -57,6 +58,29 @@ void main() {
     expect(summary.retainedPayments, 3);
     expect(summary.cancelledBookings, 1);
     expect(summary.remainingSessions, 7);
+  });
+
+  test('회원 경로 응답의 member_id를 옮기고, join_requests가 없으면 0이다', () async {
+    final summary = (await repo.deleteAccount()).valueOrNull!;
+    expect(summary.memberId, 'm1');
+    expect(summary.joinRequests, 0, reason: '회원 응답 픽스처에 키가 없다 — 구서버 호환으로 0');
+    expect(summary.ranUnlinkedPath, isFalse);
+  });
+
+  test('미연결 응답(v2.27) — member_id 빈 값과 purged.join_requests 건수를 옮긴다 (P63)', () async {
+    // 키 집합은 회원 경로와 같고 숫자만 0인 응답(계약 v2.27 "DELETE /v1/me — 미연결 계정").
+    adapter.body = '''
+{"deleted":true,"member_id":"","withdrawn_at":"2026-09-02T05:20:00Z",
+ "purged":{"body_photos":0,"inbody":0,"workout_logs":0,"hw_checks":0,"checkins":0,
+           "recurrings":0,"consult_requests":0,"join_requests":1},
+ "retained":{"passes":0,"payments":0,"contracts":0,"ledger":0,"bookings":0},
+ "cancelled_bookings":0,"remaining_sessions":0}''';
+
+    final summary = (await repo.deleteAccount()).valueOrNull!;
+    expect(summary.memberId, '');
+    expect(summary.ranUnlinkedPath, isTrue);
+    expect(summary.joinRequests, 1);
+    expect(summary.unlinkedCompletionMessage(JoinRequestTrace.pending), '계정과 보낸 가입 요청을 삭제했어요.');
   });
 
   test('응답이 비어 있어도 성공으로 처리한다(이미 지워진 계정을 실패로 보고하지 않는다)', () async {

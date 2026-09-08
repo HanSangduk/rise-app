@@ -1,6 +1,6 @@
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rise_member/core/theme/app_colors.dart';
 import 'package:rise_member/core/theme/app_radius.dart';
@@ -142,11 +142,11 @@ class _BodyPhotoViewerState extends ConsumerState<_BodyPhotoViewer> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadius.card),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.card)),
+        title: const Text(
+          '이 사진을 삭제할까요?',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
         ),
-        title: const Text('이 사진을 삭제할까요?',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
         content: Text(
           // **"다시 찍을 수 있어요"라고 쓰지 않는다.** 다시 찍을 수 있는 건 오늘의
           // 몸이지 그날의 몸이 아니다. 회원 삭제는 서버가 즉시 완전 파기하고
@@ -162,9 +162,10 @@ class _BodyPhotoViewerState extends ConsumerState<_BodyPhotoViewer> {
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('삭제',
-                style: TextStyle(
-                    color: AppColors.danger, fontWeight: FontWeight.w800)),
+            child: const Text(
+              '삭제',
+              style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.w800),
+            ),
           ),
         ],
       ),
@@ -172,10 +173,9 @@ class _BodyPhotoViewerState extends ConsumerState<_BodyPhotoViewer> {
     if (ok != true || !mounted) return;
 
     setState(() => _deleting = true);
-    final result = await ref.read(bodyCheckRepositoryProvider).deletePhoto(
-          id: widget.entry.id,
-          storagePath: widget.entry.storagePath,
-        );
+    final result = await ref
+        .read(bodyCheckRepositoryProvider)
+        .deletePhoto(id: widget.entry.id, storagePath: widget.entry.storagePath);
     if (!mounted) return;
 
     switch (result) {
@@ -187,59 +187,61 @@ class _BodyPhotoViewerState extends ConsumerState<_BodyPhotoViewer> {
         messenger.showSnackBar(riseSnackBar('사진을 삭제했어요'));
       case Err(:final failure):
         setState(() => _deleting = false);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(riseSnackBar(failure.message, kind: RiseSnackKind.danger));
+        showFailureSnackBar(context, failure);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Stack(
-        children: [
-          // 아래로 쓸어 닫기. 확대 중엔 끈다(위 [_zoomed] 주석).
-          GestureDetector(
-            onVerticalDragEnd: _zoomed
-                ? null
-                : (d) {
-                    if ((d.primaryVelocity ?? 0) > 300) Navigator.of(context).pop();
-                  },
-            onDoubleTapDown: _toggleZoom,
-            onDoubleTap: () {},
-            child: Center(
-              child: Hero(
-                tag: widget.heroTag,
-                child: InteractiveViewer(
-                  transformationController: _zoom,
-                  minScale: 1,
-                  maxScale: 4,
-                  // 격자를 **InteractiveViewer 안**에 둔다 — 밖에 두면 확대·이동할 때
-                  // 눈금만 제자리에 남아 사진과 어긋난다(그 순간 눈금은 거짓말이 된다).
-                  child: MeasureGridPhoto(
-                    bytes: widget.bytes,
-                    showGrid: widget.showGrid,
-                    density: widget.gridDensity,
-                    refLine: widget.refLine,
-                    // 타임라인 타일과 달리 여기선 원본 해상도로 그린다 —
-                    // 확대해서 보는 게 이 화면의 존재 이유라 `cacheWidth`를 걸면
-                    // 확대할수록 뭉개진다.
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Stack(
+          children: [
+            // 아래로 쓸어 닫기. 확대 중엔 끈다(위 [_zoomed] 주석).
+            GestureDetector(
+              onVerticalDragEnd: _zoomed
+                  ? null
+                  : (d) {
+                      if ((d.primaryVelocity ?? 0) > 300) Navigator.of(context).pop();
+                    },
+              onDoubleTapDown: _toggleZoom,
+              onDoubleTap: () {},
+              child: Center(
+                child: Hero(
+                  tag: widget.heroTag,
+                  child: InteractiveViewer(
+                    transformationController: _zoom,
+                    minScale: 1,
+                    maxScale: 4,
+                    // 격자를 **InteractiveViewer 안**에 둔다 — 밖에 두면 확대·이동할 때
+                    // 눈금만 제자리에 남아 사진과 어긋난다(그 순간 눈금은 거짓말이 된다).
+                    child: MeasureGridPhoto(
+                      bytes: widget.bytes,
+                      showGrid: widget.showGrid,
+                      density: widget.gridDensity,
+                      refLine: widget.refLine,
+                      // 타임라인 타일과 달리 여기선 원본 해상도로 그린다 —
+                      // 확대해서 보는 게 이 화면의 존재 이유라 `cacheWidth`를 걸면
+                      // 확대할수록 뭉개진다.
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          _TopBar(
-            date: _fullDate(widget.entry.date),
-            pose: widget.poseLabel,
-            deleting: _deleting,
-            onClose: () => Navigator.of(context).pop(),
-            // 목록을 갱신할 방법이 없으면 삭제 버튼을 띄우지 않는다 — 지웠는데
-            // 화면이 그대로면 삭제가 거짓말이 된다.
-            onDelete: widget.onDeleted == null ? null : _confirmDelete,
-          ),
-          const _ScopeNote(),
-        ],
+            _TopBar(
+              date: _fullDate(widget.entry.date),
+              pose: widget.poseLabel,
+              deleting: _deleting,
+              onClose: () => Navigator.of(context).pop(),
+              // 목록을 갱신할 방법이 없으면 삭제 버튼을 띄우지 않는다 — 지웠는데
+              // 화면이 그대로면 삭제가 거짓말이 된다.
+              onDelete: widget.onDeleted == null ? null : _confirmDelete,
+            ),
+            const _ScopeNote(),
+          ],
+        ),
       ),
     );
   }
@@ -292,15 +294,18 @@ class _TopBar extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(date,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700)),
-                  Text(pose,
-                      style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.75),
-                          fontSize: 11.5)),
+                  Text(
+                    date,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    pose,
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 11.5),
+                  ),
                 ],
               ),
             ),
@@ -310,8 +315,7 @@ class _TopBar extends StatelessWidget {
                 child: SizedBox(
                   width: 18,
                   height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 ),
               )
             else if (onDelete != null)
@@ -354,9 +358,10 @@ class _ScopeNote extends StatelessWidget {
             '나와 담당 코치·대표만 볼 수 있어요 (동의를 끄면 코치·대표는 볼 수 없어요)',
             textAlign: TextAlign.center,
             style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.75),
-                fontSize: 11,
-                height: 1.4),
+              color: Colors.white.withValues(alpha: 0.75),
+              fontSize: 11,
+              height: 1.4,
+            ),
           ),
         ),
       ),

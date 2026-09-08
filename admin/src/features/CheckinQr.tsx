@@ -31,7 +31,7 @@ import {
   ErrorState,
   Spinner,
 } from "@/components/ui";
-import { ApiError } from "@/lib/api";
+import { isRouteNotFound } from "@/lib/api";
 import { todayStr } from "@/lib/format";
 import { useCheckinQr, useRotateCheckinQr } from "@/lib/queries";
 
@@ -60,11 +60,12 @@ const PREVIEW_PX = 188;
 const NOT_DEPLOYED_MSG =
   "이 기능이 아직 서버에 올라가지 않았어요 — 서버가 업데이트되면 발급 버튼이 나타납니다. 그동안 데스크에 붙어 있는 QR은 그대로 동작하니 떼지 마세요.";
 
-// 404 = "이 배포에는 그 주소가 없다". 미발급은 200 {issued:false}로 오므로(api.ts 주석) 404를
-// "데이터 없음"으로 읽을 여지가 없다. 전달 경로가 삼킨 404(Hosting 폴백 → 비JSON)도 같은 뜻이라
-// transport 플래그를 따로 보지 않는다.
+// "이 배포에는 그 주소가 없다" — 판정은 api.ts isRouteNotFound 한 곳이다(라우터 404 `code`).
+// 이 화면은 미발급이 200 {issued:false}로 와서 404를 "데이터 없음"으로 읽을 여지가 원래 없었지만
+// (P56이 "유일하게 옳은 적용"으로 판정한 자리), 근거를 status에서 code로 옮겨 두면 다른 화면과
+// 같은 규약이 되고 전달 경로가 삼킨 404(비JSON)는 TRANSPORT_MSG로 제 갈 길을 간다.
 function isNotDeployed(e: unknown): boolean {
-  return e instanceof ApiError && e.status === 404;
+  return isRouteNotFound(e);
 }
 
 export function CheckinQrCard() {

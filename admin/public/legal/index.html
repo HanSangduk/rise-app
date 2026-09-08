@@ -68,6 +68,11 @@ footer.doc p{margin:0 0 8px}
 
 
 <div class="cards">
+  <a class="card" href="./app-privacy.html">
+    <span class="n">00</span>
+    <span class="h">앱 개인정보처리방침 (앱 운영자)</span>
+    <span class="d">앱과 서버를 운영하는 개발자가 직접 처리하는 정보, 여러 센터가 함께 쓰는 앱에서 센터와 운영자의 역할 구분. <b>앱 스토어에 등록된 방침이 이 문서입니다.</b></span>
+  </a>
   <a class="card" href="./terms.html">
     <span class="n">01</span>
     <span class="h">이용약관</span>
@@ -75,8 +80,8 @@ footer.doc p{margin:0 0 8px}
   </a>
   <a class="card" href="./privacy.html">
     <span class="n">02</span>
-    <span class="h">개인정보처리방침</span>
-    <span class="d">수집하는 개인정보 항목과 목적, 보유기간, 처리위탁과 국외 이전, 파기 절차, 정보주체의 권리와 행사방법, 안전성 확보 조치.</span>
+    <span class="h">개인정보처리방침 (센터)</span>
+    <span class="d">회원이 다니는 <b>센터</b>가 처리자로서 공개하는 방침 — 수집하는 개인정보 항목과 목적, 보유기간, 처리위탁과 국외 이전, 파기 절차, 정보주체의 권리와 행사방법, 안전성 확보 조치.</span>
   </a>
   <a class="card" href="./sensitive-consent.html">
     <span class="n">03</span>
@@ -88,11 +93,17 @@ footer.doc p{margin:0 0 8px}
     <span class="h">계정·데이터 삭제 요청</span>
     <span class="d">계정과 개인정보(체형사진 포함)의 삭제를 요청하는 방법, 삭제되는 항목과 법령에 따라 보존되는 항목, 처리 기간.</span>
   </a>
+  <a class="card" href="./support.html">
+    <span class="n">05</span>
+    <span class="h">고객 지원</span>
+    <span class="d">앱 이용 문의 채널(이메일·센터)과 답변 시간, 로그인·예약·기록·계정 삭제에 관한 자주 묻는 질문.</span>
+  </a>
 </div>
 
 <div class="callout">
   <span class="t">문의</span>
-  <p>개인정보 보호와 관련한 문의는 <span class="ph" data-biz="privacy_officer_email">(보호책임자 이메일 미정)</span> 또는
+  <p>앱 이용·오류·계정에 관한 문의는 <a href="./support.html">고객 지원 페이지</a>의 이메일(richramsang@gmail.com)로 보내주세요.
+  개인정보 보호와 관련한 문의는 <span class="ph" data-biz="privacy_officer_email">(보호책임자 이메일 미정)</span> 또는
   <span class="ph" data-biz="phone">(대표 전화 미정)</span>로 연락해 주세요.</p>
 </div>
 
@@ -128,7 +139,14 @@ footer.doc p{margin:0 0 8px}
   var ctl = typeof AbortController === "function" ? new AbortController() : null;
   var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 6000);
 
-  fetch("/api/v1/public/business", ctl ? { signal: ctl.signal } : undefined)
+  /* **이 문서가 어느 센터의 고지인지는 URL이 정한다**(계약 v2.33). 여러 센터가 이 앱을 쓰므로
+   * 사업자 정보를 한 센터로 고정하면 나머지 센터의 법정 고지가 통째로 거짓이 된다.
+   * `?center=`가 없으면 서버가 기본 센터를 준다(배포돼 있는 구 링크 호환). 모르는 센터면 404이고,
+   * 그때는 아래 catch가 자리표시자를 그대로 남긴다 — 남의 사업자 정보를 대신 인쇄하지 않는다. */
+  var qsCenter = new URLSearchParams(location.search).get("center");
+  var bizUrl = "/api/v1/public/business" + (qsCenter ? "?center=" + encodeURIComponent(qsCenter) : "");
+
+  fetch(bizUrl, ctl ? { signal: ctl.signal } : undefined)
     .then(function (res) { return res.ok ? res.json() : null; })
     .then(function (data) {
       if (!data || typeof data !== "object") return;
@@ -151,6 +169,21 @@ footer.doc p{margin:0 0 8px}
     })
     .catch(function () { /* 폴백이 이미 렌더돼 있다 — 배너도 그대로 둔다(fail-closed) */ })
     .then(function () { clearTimeout(timer); });
+})();
+</script>
+<script>
+/* 센터 승계 — 같은 폴더의 다른 법정 문서로 갈 때 `?center=`를 잃지 않게 한다(계약 v2.33).
+ * 잃으면 회원이 이용약관에서 개인정보처리방침으로 한 번 넘어가는 순간 **다른 센터의 고지**를
+ * 읽게 된다. 링크를 손으로 6장에 박지 않고 여기서 한 번에 붙인다. */
+(function () {
+  var center = new URLSearchParams(location.search).get("center");
+  if (!center) return;
+  var links = document.querySelectorAll('a[href^="./"]');
+  for (var i = 0; i < links.length; i++) {
+    var href = links[i].getAttribute("href");
+    if (href.indexOf("center=") !== -1) continue;
+    links[i].setAttribute("href", href + (href.indexOf("?") === -1 ? "?" : "&") + "center=" + encodeURIComponent(center));
+  }
 })();
 </script>
 </body>

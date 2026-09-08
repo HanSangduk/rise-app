@@ -138,6 +138,18 @@ func (s *Service) DoneConsultRequest(ctx context.Context, p Principal, id string
 		return cr, nil
 	}
 	cr.Status = store.ConsultDone
+	// **note를 비운다**(v2.28, P56 A5) — JoinReject·JoinApprove가 이름·번호를 비우는 것과 같은
+	// 판단이다. note는 회원이 직접 쓴 자유 서술이라 무엇이 적혔는지 서버가 알 수 없고("무릎이
+	// 아파서" 같은 건강 정보가 실제로 들어온다 — P53), 그 처리 목적은 데스크가 상담을 마치는
+	// 순간 끝난다. P53이 이 큐를 5년 보존 대상이 아니라고 판정한 근거 그대로다: 여기서는
+	// 결제·발급이 일어나지 않고, 상담 후 남는 실제 사업 기록(Pass·Payment·Contract)은 따로
+	// 5년 보존된다. done 이후 note를 읽는 화면도 없다 — 어드민 "해야 할 일"은 pending을 위한
+	// 것이고, 회원 앱은 status로 "요청 보냈어요"를 복원할 뿐이다.
+	//
+	// 행은 남긴다(status·created_at·member_id·kind): 멱등(done→done)과 "요청이 있었다"는 사실이
+	// 그것으로 완결된다. 탈퇴 시엔 P53의 스윕이 행째 지운다 — 그쪽이 문서를 지우고 이쪽이 내용을
+	// 비우는 것은 JoinReject와 DeleteJoinRequestsByUID의 관계와 같다.
+	cr.Note = ""
 	if err := s.store.UpdateConsultRequest(ctx, p.CenterID, cr); err != nil {
 		return nil, err
 	}

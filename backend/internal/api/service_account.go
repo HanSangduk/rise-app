@@ -13,12 +13,20 @@ package api
 //
 //	파기 = 사람을 가리키는 값(domain.Member.Anonymized) + 건강·이용 기록(Store.PurgeMemberPersonalData)
 //	       + 체형사진 원본 파일(MediaPurger) + 로그인 수단(UserIndex·Firebase 계정)
+//	       + 회원발 요청 큐 2종(가입 요청·재등록/상담 요청, v2.26/P53)
 //	보존 = Ledger·Pass·Payment·Contract·과거 Booking — 전자상거래법 시행령 §6①(계약 5년,
 //	       대금결제 5년). 이름·번호가 사라져 member_id라는 가명만 붙은 거래 기록으로 남는다.
 //	       단, 미서명(draft/sent) 계약은 **문서를 보존한 채 voided로 종결**한다(v2.17, P40) —
 //	       서명 주체가 파기된 뒤의 "서명 대기"는 사실이 아니다. signed는 불가침.
 //
-// 근거의 전문은 domain.Member.Anonymized 주석과 work_log/P22를 참고.
+// **경계는 컬렉션 단위로 다시 그어야 한다**(v2.26/P53이 배운 것). 종전의 파기는 "centers/
+// {centerID}/… 아래에서 member_id가 일치하는 문서"라는 **모양**으로 정의돼 있었고, 그 모양을
+// 벗어난 개인정보 두 벌이 조용히 살아남았다 — 최상위 컬렉션 join_requests(이름·전화번호 원본,
+// member_id 없이 uid 키)와, v2.11 이후에 생겨 스윕 목록에 오르지 못한 consult_requests(자유
+// 서술 메모). 새 컬렉션을 만들 때 물어야 할 질문은 "센터 아래인가"가 아니라 **"탈퇴가 이걸
+// 지우는가"**다.
+//
+// 근거의 전문은 domain.Member.Anonymized 주석과 work_log/P22·P53을 참고.
 
 import (
 	"context"
@@ -63,9 +71,19 @@ type AccountDeletionResult struct {
 // v1.9 guardNotStaff·v2.0 락아웃 가드와 같은 계열의 방어선이고, 스태프의 이탈 경로는
 // 대표의 POST /v1/staff/{uid}/deactivate로 이미 있다.
 //
-// 가드 ②(연결 필수): member_id가 없으면(가입 매칭 전) 404 — 지울 대상 자체가 없다. 계정만
-// 만들고 센터에 연결되지 않은 사용자를 여기서 조용히 통과시키면 "탈퇴했다"는 응답이 실제로는
-// 아무것도 하지 않은 응답이 된다.
+// 가드 ②였던 것(연결 필수) — **v2.27에서 분기로 바뀌었다.** 종전엔 member_id가 없으면
+// store.ErrNotFound(404)로 **진입부터 막았다.** 근거는 "지울 대상 자체가 없다"였는데, 그것이
+// 사실이 아니었다: 미연결 계정에도 지울 것이 둘 있다 — Firebase 계정(전화번호를 품는다)과
+// **join_requests의 이름·전화번호 원본**(POST /v1/join/request가 신청자에게 직접 받아 적은 값).
+//
+// 그래서 v2.26이 만든 파기 경로(DeleteJoinRequestsByUID)에 도달할 길이 **회원이 된 사람에게만**
+// 열려 있었다. 대기실에 갇힌 사람 — 이름·번호를 서버에 넘겼는데 아직 승인되지 않은 사람 —
+// 은 자기 이름·전화번호를 지울 수단이 앱 안에 하나도 없었다. 개인정보보호법 §36(삭제 요구권)이
+// 정면으로 겨냥하는 상태이고, App Store Guideline 5.1.1(v)의 "앱 안에서의 계정 삭제"도
+// 계정을 만든 모든 사용자에게 적용된다(회원 연결 여부를 조건으로 달지 않는다).
+//
+// 아래 deleteUnlinkedAccount가 그 축소판을 돈다 — 새 패턴이 아니라 **같은 7단계 중 회원
+// 레코드에 의존하지 않는 단계만** 남긴 것이다(그 함수 주석에 단계별 판정을 적어 두었다).
 //
 // 가드 없음 ③: **잔여 회차가 남아 있어도 막지 않는다.** 검토하고 기각한 설계다 — Guideline
 // 5.1.1(v)는 사업상 상태를 이유로 앱 안의 삭제를 막는 것을 예외로 인정하지 않는다. 막을
@@ -83,7 +101,7 @@ func (s *Service) DeleteMyAccount(ctx context.Context, p Principal) (AccountDele
 		return res, ErrForbidden // 가드 ①
 	}
 	if p.MemberID == "" {
-		return res, store.ErrNotFound // 가드 ②
+		return s.deleteUnlinkedAccount(ctx, p) // v2.27 — 대기실 계정의 축소 경로
 	}
 	mem, err := s.store.GetMember(ctx, p.CenterID, p.MemberID)
 	if err != nil {
@@ -141,8 +159,8 @@ func (s *Service) DeleteMyAccount(ctx context.Context, p Principal) (AccountDele
 	// 남고 상태만 바뀌므로 5년 보존과 비저촉 — 환불의 미서명 void(v1.5)와 같은 논리다.
 	//
 	// 자리가 왜 여기인가(P22 순서 규약): ②보다 **뒤**여야 한다 — 외부 파기가 실패해 탈퇴가
-	// 좌초되면 살아 있는 회원의 계약이 이유 없이 voided로 남는다. ⑤(가명화)보다 앞이라
-	// 여기서 실패하면 회원 문서가 멀쩡한 채 500으로 멈춰 미완료가 눈에 보이고, ⑥(UserIndex)
+	// 좌초되면 살아 있는 회원의 계약이 이유 없이 voided로 남는다. ⑥(가명화)보다 앞이라
+	// 여기서 실패하면 회원 문서가 멀쩡한 채 500으로 멈춰 미완료가 눈에 보이고, ⑦(UserIndex)
 	// 보다 앞이라 그 재시도가 같은 토큰으로 가능하다. 각 void는 TransitionContract(CAS)라
 	// 부분 성공 잔여도 해가 없다 — 재시도가 이미 voided를 스킵한다(멱등).
 	voidedContracts, err := s.voidContractsForWithdrawal(ctx, p.CenterID, mem.ID)
@@ -150,7 +168,22 @@ func (s *Service) DeleteMyAccount(ctx context.Context, p Principal) (AccountDele
 		return res, err
 	}
 
-	// ---- 5단계: 가명화 + 건강·이용 기록 파기(DB) ----
+	// ---- 5단계: 가입 요청 파기(최상위 컬렉션, v2.26 · P53) ----
+	// join_requests는 **센터 아래가 아니라 최상위**이고 member_id도 없다(uid 키) — ⑥의
+	// 센터 스코프 스윕이 구조적으로 닿지 못하는 유일한 개인정보다. 그런데 담고 있는 것은
+	// 신청자가 직접 적은 **이름·전화번호 원본**이라, 여기 없으면 탈퇴는 "지웠다"고 보고하면서
+	// 그 둘을 남긴다(Play Data Safety의 "삭제 요청 가능" 답변이 거짓이 되는 자리).
+	//
+	// 자리가 왜 여기인가(P22 순서 규약 그대로): ⑥(가명화)보다 **앞**이어야 한다 — 뒤에 두면
+	// 실패했을 때 회원 문서는 이미 가명화돼 재시도가 "이미 탈퇴 처리된 계정이에요"(400)로
+	// 막히고, 이름·번호가 영구히 남는다. ⑦(UserIndex)보다 앞이라 그 재시도가 같은 토큰으로
+	// 가능하다. 삭제는 없는 문서에도 성공이라(스토어 규약) 부분 실패 후 재시도가 멱등이다.
+	joinReqs, err := s.store.DeleteJoinRequestsByUID(ctx, p.UID)
+	if err != nil {
+		return res, err
+	}
+
+	// ---- 6단계: 가명화 + 건강·이용 기록 파기(DB) ----
 	anon := mem.Anonymized(now)
 	purged, err := s.store.PurgeMemberPersonalData(ctx, p.CenterID, &anon)
 	if err != nil {
@@ -159,8 +192,12 @@ func (s *Service) DeleteMyAccount(ctx context.Context, p Principal) (AccountDele
 	// 파일 삭제 건수는 **메타 삭제 건수로 보고한다.** MediaPurger가 dev no-op일 수 있어
 	// 그쪽 숫자를 믿으면 로컬·운영이 다른 말을 한다. 어차피 둘은 짝이다(경로가 메타에서 나온다).
 	purged.BodyPhotos = len(photos)
+	// 가입 요청은 스토어 밖(⑤단계)에서 지웠으므로 건수를 여기서 합류시킨다 — 응답의 purged가
+	// **실제로 지운 것 전부**를 말해야 한다(PurgeCounts 주석: 세 자리가 각자 세면 화면이 거짓말을
+	// 시작한다). BodyPhotos를 같은 방식으로 덮어쓰는 바로 윗줄과 같은 자리다.
+	purged.JoinRequests = joinReqs
 
-	// ---- 6단계: 로그인 매핑 제거 ----
+	// ---- 7단계: 로그인 매핑 제거 ----
 	// 남으면 인증이 옛 member_id를 그대로 복원한다. 마지막에 두는 이유는 이것이 호출자의
 	// 권한 자체를 없애기 때문이다 — 앞 단계에서 이걸 지우면 뒤 단계가 자기 권한을 잃는다.
 	if err := s.store.DeleteUserIndex(ctx, p.UID); err != nil {
@@ -182,6 +219,57 @@ func (s *Service) DeleteMyAccount(ctx context.Context, p Principal) (AccountDele
 		Retained:          retained,
 		CancelledBookings: cancelled,
 		RemainingSessions: remaining,
+	}, nil
+}
+
+// deleteUnlinkedAccount — 회원 레코드가 **없는** 계정의 탈퇴(v2.27). DeleteMyAccount의 축소판.
+//
+// 어느 단계가 살아남는지는 "회원 레코드에 의존하는가"로 갈렸다. 전체 7단계를 그 기준으로 훑으면:
+//
+//	⓪ 사진 목록·보존 건수 세기   member_id 스코프 조회 → **없다**(셀 것이 없다)
+//	① 체형사진 원본 파일 파기    ⓪의 경로 목록이 입력 → **없다**
+//	② Firebase 계정 삭제         uid만 필요 → **남는다.** 계정 안의 전화번호까지 파기된다
+//	③ 미래 예약 무차감 취소      member_id 스코프 → **없다**(예약을 가질 수 없다)
+//	④ 미서명 계약 종결           member_id 스코프 → **없다**
+//	⑤ 가입 요청 파기             **uid 키다** → **남는다.** 이 경로의 존재 이유 그 자체다
+//	⑥ 가명화 + 건강기록 파기     회원 문서가 대상 → **없다**
+//	⑦ UserIndex 제거             uid 키 → **남는다.** 인덱스가 있을 수도(대기실 상태로 심긴
+//	                             경우) 없을 수도 있는데, 이 동사는 없는 uid도 성공이라
+//	                             (스토어 규약) 두 경우가 같은 코드를 탄다
+//
+// 남은 셋의 **순서는 전체 흐름 그대로**다(P22 순서 규약): 외부(②)가 DB(⑤·⑦)보다 앞이라
+// 실패해도 같은 ID 토큰으로 재시도가 되고, ⑦이 마지막이라 앞 단계가 자기 권한을 잃지 않는다.
+//
+// 응답의 모양은 회원 경로와 **같은 타입**이다. 숫자가 전부 0이어도 필드를 빼지 않는다 —
+// 앱의 완료 화면은 서버가 준 숫자만 옮기는 장치이고(RetainedCounts 주석), 계정 종류에 따라
+// 키가 달라지면 그 화면이 분기를 갖게 된다. member_id는 빈 문자열이다(가리킬 회원이 없다).
+func (s *Service) deleteUnlinkedAccount(ctx context.Context, p Principal) (AccountDeletionResult, error) {
+	var res AccountDeletionResult
+	now := time.Now().UTC()
+
+	// ---- ②단계: Firebase 계정(외부) ----
+	if err := s.users.DeleteUser(ctx, p.UID); err != nil {
+		return res, err
+	}
+	// ---- ⑤단계: 가입 요청 파기(이름·전화번호 원본) ----
+	joinReqs, err := s.store.DeleteJoinRequestsByUID(ctx, p.UID)
+	if err != nil {
+		return res, err
+	}
+	// ---- ⑦단계: 로그인 매핑 제거 ----
+	if err := s.store.DeleteUserIndex(ctx, p.UID); err != nil {
+		return res, err
+	}
+
+	// 회원 경로와 같은 감사 로그(member는 빈 값). 이 사건도 되돌릴 수 없고, "언제 무엇이
+	// 지워졌나"에 답해야 하는 것은 대기실 계정이라고 달라지지 않는다.
+	log.Printf("account deleted (unlinked): member= uid=%s purged=%+v", p.UID, store.PurgeCounts{JoinRequests: joinReqs})
+
+	return AccountDeletionResult{
+		Deleted:     true,
+		MemberID:    "",
+		WithdrawnAt: now,
+		Purged:      store.PurgeCounts{JoinRequests: joinReqs},
 	}, nil
 }
 

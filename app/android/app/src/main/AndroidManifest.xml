@@ -16,6 +16,16 @@
          찍는 앱이 마이크를 요구하는 모양이 된다. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>
 
+    <!-- image_picker_android가 갤러리 호환용으로 READ_EXTERNAL_STORAGE를 **무제한으로**
+         병합해 넣는다(우리 매니페스트엔 선언한 적이 없다). 그대로 두면 Android 13+에서도
+         저장소 권한을 요구하는 앱으로 보이고, Play가 매니페스트와 Data safety 신고를
+         교차검증할 때 "사진 접근"의 근거를 설명해야 한다.
+         이 앱이 갤러리를 쓰는 유일한 자리는 인바디 결과지 선택이고 그것도 시스템 포토피커를
+         타므로, 13+(API 33+)에서는 이 권한이 필요 없다 — 구버전 기기 호환 범위로 잘라 둔다.
+         제거가 아니라 상한인 이유: API 32 이하에서는 포토피커 백포트가 없어 실제로 필요하다. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" tools:replace="android:maxSdkVersion"/>
+
     <!-- camerax는 카메라를 required=true로 병합한다 — 카메라 없는 기기에서 스토어
          설치가 막힌다. QR·체형촬영을 못 쓸 뿐 예약·회원권은 정상 동작하므로
          선택 기능으로 낮춘다(mobile_scanner도 required="false"로 선언한다). -->

@@ -390,7 +390,15 @@ func contractVarValue(key string, c *domain.Contract, pass *domain.Pass, mem *do
 		if mem == nil {
 			return "", false
 		}
-		return nonBlank(mem.Phone) // 탈퇴 시 비워진다(P22) — 그 계약은 어차피 종단 상태다
+		// ⚠ 이 두 칸(회원명·회원 전화번호)은 **탈퇴가 지우지 못한다**(v2.26/P53에서 확인).
+		// 여기서 읽는 mem.Phone은 조립 시점의 값이고, 조립이 끝나 Vars에 얼린 뒤에는 원본 회원
+		// 문서가 가명화돼도 그 맵은 그대로다 — 종전 주석("탈퇴 시 비워진다")은 얼기 **전**만
+		// 참이라 사실상 반대로 읽혔다. 계약은 5년 보존(전자상거래법 시행령 §6①)이므로 이름·번호가
+		// 계약 스냅샷 안에서 그만큼 살아남는다. 의도된 잔존이고(계약서의 당사자 표시는 그 문서를
+		// 문서이게 하는 것), 그래서 지우지 않는다 — 근거·기각한 대안·재검토 조건은 work_log/P53
+		// "Contract.Vars — 이름·번호는 왜 계약 안에 남는가" 참고. 이 결정은
+		// TestWithdrawalKeepsContractVarsIdentity가 고정한다.
+		return nonBlank(mem.Phone)
 	case "결제방법":
 		return contractPayMethodVar(pays)
 	case "납부일정":

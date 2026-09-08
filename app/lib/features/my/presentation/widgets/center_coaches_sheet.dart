@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rise_member/core/widgets/rise_sheet.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rise_member/core/api/dto/staff_dto.dart';
 import 'package:rise_member/core/api/staff_directory.dart';
@@ -18,11 +19,8 @@ import 'package:rise_member/features/booking/presentation/widgets/trainer_profil
 /// 퇴사자는 이름 해석(담당 코치 표시)에는 남지만 소개 목록에 올리면 회원이
 /// 문의하고서야 없는 사람인 걸 알게 된다(staff_directory.dart의 필터링 규약).
 Future<void> showCenterCoachesSheet(BuildContext context) {
-  return showModalBottomSheet<void>(
-    context: context,
-    // 루트 Navigator — 셸 내부에 띄우면 하단 탭바가 시트 위에 남는다(P09).
-    useRootNavigator: true,
-    isScrollControlled: true,
+  return showRiseSheet<void>(
+    context,
     builder: (_) => const _CenterCoachesSheet(),
   );
 }
@@ -68,7 +66,7 @@ class _CenterCoachesSheet extends ConsumerWidget {
                     height: 20,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: AppColors.red,
+                      color: AppColors.brand,
                     ),
                   ),
                 ),

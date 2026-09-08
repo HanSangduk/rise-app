@@ -78,7 +78,7 @@ class HomeworkChecklistCard extends StatelessWidget {
                       // 그대로 두고 그 투명 여백만 걷어낸다.
                       Checkbox(
                         value: item.done,
-                        activeColor: AppColors.red,
+                        activeColor: AppColors.brand,
                         visualDensity: VisualDensity.compact,
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         // null이면 비활성(회색) — 잠겼다는 걸 눌러보기 전에 보여준다.

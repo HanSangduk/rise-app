@@ -120,6 +120,14 @@ type PurgeCounts struct {
 	HwChecks    int `json:"hw_checks"`
 	Checkins    int `json:"checkins"`
 	Recurrings  int `json:"recurrings"`
+	// ConsultRequests — 재등록/상담 요청(v2.20, P42). 회원이 남긴 한 줄 메모(Note)가 자유
+	// 서술이라 무엇이 적혔는지 서버가 알 수 없다 — 거래 기록이 아니므로 파기 대상이다
+	// (PurgeMemberPersonalData의 센터 스코프 스윕이 함께 지운다, P53).
+	ConsultRequests int `json:"consult_requests"`
+	// JoinRequests — 가입 요청(P48③). **이름·전화번호 원본**을 품는 최상위 컬렉션이라
+	// 센터 스코프 스윕이 닿지 못한다 — DeleteJoinRequestsByUID가 따로 지우고 호출측이
+	// 이 칸에 옮겨 담는다(api.Service.DeleteMyAccount ⑤단계, P53).
+	JoinRequests int `json:"join_requests"`
 }
 
 // Store — 전체 데이터 접근. Firestore(실연동)/Memory(개발) 구현.
@@ -148,6 +156,41 @@ type Store interface {
 	UpdateJoinRequest(ctx context.Context, jr *JoinRequest) error
 	// ListJoinRequests — 센터의 가입 요청 전체(GET /v1/join/requests, 어드민 가정 승인, v1.1 정합 패치).
 	ListJoinRequests(ctx context.Context, centerID string) ([]JoinRequest, error)
+	// ListJoinRequestsByUID — 그 uid가 낸 가입 요청 전부(센터 무관, 최신 먼저, v2.34 · P69).
+	//
+	// 왜 센터가 아니라 uid인가: 미연결 uid의 Principal.CenterID는 **기본 센터 폴백**이라 진실이
+	// 아니다(v2.32). v2.33이 가입 요청에 센터 선택을 열자 2호점에 보낸 요청이 `GET /v1/me`
+	// (기본 센터 큐만 훑던 latestJoinRequest)에 **아예 안 실렸다** — 앱은 "요청 없음"으로
+	// 읽고 사용자는 재요청 → 409 루프에 갇혔다. 신청자의 대기 상태를 묻는 동사는 그 사람의
+	// uid로 물어야 한다. 비용도 낫다: 센터 큐 전체(N, 상태 무관, 운영 기간에 비례해 자란다)
+	// 대신 그 사람의 요청(k, 보통 1~2)만 읽는다.
+	//
+	// 빈 uid는 **빈 목록**이다(DeleteJoinRequestsByUID와 같은 가드 — `uid == ""` 쿼리는
+	// uid가 빈 레거시 문서에 실제로 매칭된다). Firestore는 단일 필드 쿼리라 복합 인덱스가
+	// 필요 없다(정렬은 메모리에서).
+	ListJoinRequestsByUID(ctx context.Context, uid string) ([]JoinRequest, error)
+	// DeleteJoinRequestsByUID — 그 uid가 낸 가입 요청을 **전부** 지우고 건수를 돌려준다
+	// (회원탈퇴, P53). PurgeMemberPersonalData가 못 하는 일이라 별도 동사다:
+	//
+	//	① join_requests는 **최상위 컬렉션**이다(승인 전엔 센터 귀속 전 — Firestore 레이아웃
+	//	   주석 참고). centers/{centerID}/… 아래를 훑는 그 스윕은 여기 닿지 못한다.
+	//	② 이 문서엔 **member_id가 아예 없다**(승인돼야 회원이 생긴다). 키는 uid다 —
+	//	   member_id로 좁히는 deleteWhereMember 계열을 재사용할 수 없다.
+	//
+	// 왜 지우는가: 신청자가 직접 적은 **이름·전화번호 원본**을 품는다. 처리 목적(센터 매칭·
+	// 승인)은 계정이 사라진 순간 영구히 달성 불가능해지고, 계약·결제 기록이 아니라
+	// 개인정보보호법 §21① 단서의 예외를 타지 못한다. 남기면 실해도 있다: JoinApprove가
+	// jr.Name/jr.Phone을 그대로 새 회원 레코드로 굳히므로, pending 요청 하나가 파기한
+	// 이름·번호를 되살리는 **승인 한 번짜리 경로**로 남는다(Member.Anonymized가 번호를
+	// 비우는 이유와 같은 자리 — 그 방어선을 컬렉션 하나 옆에서 우회한다).
+	//
+	// **센터로 좁히지 않는다**(uid 전체). 다른 센터 큐에 남은 요청도 같은 사람의 이름·번호이고,
+	// 그 계정은 이제 존재하지 않아 어느 센터도 승인할 수 없다 — 좁히면 승인 불가능한 PII만
+	// 남는다.
+	//
+	// **없는 uid도 성공이다**(0건 반환 — DeleteUserIndex와 같은 규약): 탈퇴 재시도가 여기서
+	// 막히면 이름·번호가 영구히 남는다. 그래서 이 동사는 몇 번을 돌려도 결과가 같다(멱등).
+	DeleteJoinRequestsByUID(ctx context.Context, uid string) (int, error)
 
 	// ---- 재등록/상담 요청(계약 v2.20, P42) ----
 	// ListConsultRequests — memberID가 빈 값이면 센터 전체. 정렬은 CreatedAt 오름차순 →
@@ -168,9 +211,16 @@ type Store interface {
 	//
 	// 하는 일 두 가지:
 	//   ① anonymized.ID 회원의 **건강·이용 기록**을 지운다 — 체형사진 메타·인바디·수업기록·
-	//      홈워크 체크·체크인·고정 스케줄. 전자상거래법이 보존하라는 "계약·결제 기록"이
-	//      아니므로 개인정보보호법 §21① 단서의 예외를 타지 못한다 = 파기 대상이다.
+	//      홈워크 체크·체크인·고정 스케줄·재등록/상담 요청. 전자상거래법이 보존하라는
+	//      "계약·결제 기록"이 아니므로 개인정보보호법 §21① 단서의 예외를 타지 못한다
+	//      = 파기 대상이다.
 	//   ② 가명화된 회원 문서를 **마지막에** 저장한다.
+	//
+	// 스윕의 사정거리는 **centers/{centerID}/… 아래 + member_id 필드를 가진 컬렉션**까지다.
+	// 둘 중 하나라도 어긋나는 개인정보는 이 동사로 지울 수 없다 — 최상위 컬렉션인
+	// join_requests가 그 경우이고(uid 키), DeleteJoinRequestsByUID가 따로 맡는다(P53).
+	// **새 컬렉션을 만들 때 이 문단을 다시 읽어라**: 회원의 무언가를 담는데 여기 목록에도
+	// 그쪽 동사에도 없으면, 탈퇴는 성공을 보고하면서 그것만 남긴다(P53이 실제로 겪은 결함).
 	//
 	// 순서가 규약이다. 기록을 먼저 지우고 회원 문서를 나중에 쓰면, 중간에 실패했을 때 회원
 	// 문서에 이름·번호가 그대로 남아 **미완료가 눈에 보이고** 재시도가 깨끗하게 다시 돈다.

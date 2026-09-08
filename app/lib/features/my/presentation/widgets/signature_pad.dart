@@ -47,8 +47,7 @@ class SignaturePadController extends ChangeNotifier {
 
   /// 테스트 전용 — 정규화 저장이 리사이즈에 불변임을 검증하기 위한 읽기 창.
   @visibleForTesting
-  List<List<Offset>> get debugStrokes =>
-      [for (final s in _strokes) List.unmodifiable(s)];
+  List<List<Offset>> get debugStrokes => [for (final s in _strokes) List.unmodifiable(s)];
 
   /// 테스트 전용 — 40KB 상한 경로 재현용 합성 획 주입(정규화 0~1 좌표).
   /// 실제 서명은 결정 2의 실측 창(5~18KB) 안이라 제스처로는 상한을 못 넘는다.
@@ -110,10 +109,8 @@ class SignaturePadController extends ChangeNotifier {
   }
 
   /// 패드 밖으로 나간 드래그는 가장자리에 클램프 — 획이 캔버스 밖으로 새지 않는다.
-  Offset _normalize(Offset local, Size size) => Offset(
-        (local.dx / size.width).clamp(0.0, 1.0),
-        (local.dy / size.height).clamp(0.0, 1.0),
-      );
+  Offset _normalize(Offset local, Size size) =>
+      Offset((local.dx / size.width).clamp(0.0, 1.0), (local.dy / size.height).clamp(0.0, 1.0));
 
   // ── 내보내기(P44 결정 2) ───────────────────────────────────────────────
 
@@ -133,8 +130,7 @@ class SignaturePadController extends ChangeNotifier {
     @visibleForTesting int maxBytes = maxExportBytes,
   }) async {
     final size = _padSize;
-    final minScale =
-        math.max(_minExportWidth / size.width, _minExportHeight / size.height);
+    final minScale = math.max(_minExportWidth / size.width, _minExportHeight / size.height);
     var scale = math.max(math.min(devicePixelRatio, 2.0), minScale);
     var bytes = await _renderPng(size, scale);
     var rerenders = 0;
@@ -182,15 +178,10 @@ class SignaturePadController extends ChangeNotifier {
   void paintStrokes(Canvas canvas, Size size, Paint paint) {
     for (final stroke in _strokes) {
       if (stroke.length == 1) {
-        canvas.drawPoints(
-          ui.PointMode.points,
-          [_denormalize(stroke.single, size)],
-          paint,
-        );
+        canvas.drawPoints(ui.PointMode.points, [_denormalize(stroke.single, size)], paint);
         continue;
       }
-      final path = Path()
-        ..moveTo(stroke.first.dx * size.width, stroke.first.dy * size.height);
+      final path = Path()..moveTo(stroke.first.dx * size.width, stroke.first.dy * size.height);
       for (final p in stroke.skip(1)) {
         path.lineTo(p.dx * size.width, p.dy * size.height);
       }
@@ -229,34 +220,41 @@ class SignaturePad extends StatelessWidget {
                 clipBehavior: Clip.antiAlias,
                 // 패드가 유일한 제스처 주인이다 — 시트 쪽은 enableDrag를 꺼서
                 // (contract_sign_sheet) 세로 획이 시트 드래그로 새지 않는다.
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onPanStart: (d) =>
-                      controller._startStroke(d.localPosition, size),
-                  onPanUpdate: (d) =>
-                      controller._extendStroke(d.localPosition, size),
-                  child: AnimatedBuilder(
-                    animation: controller,
-                    builder: (context, _) => Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        CustomPaint(
-                          painter: _SignaturePadPainter(controller),
-                        ),
-                        if (controller.isEmpty)
-                          const IgnorePointer(
-                            child: Center(
-                              child: Text(
-                                '여기에 서명해 주세요',
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  color: AppColors.muted,
-                                  fontWeight: FontWeight.w600,
+                // 법적 구속력이 있는 계약의 서명란인데 시맨틱이 하나도 없었다
+                // (P54). 플레이스홀더 안내문조차 획이 하나라도 그어지면 사라져,
+                // 스크린리더 사용자에겐 아무 단서도 남지 않았다. 대체 입력(타이핑
+                // 서명)은 별건이지만, 최소한 여기가 무엇이고 지금 서명이 있는지는
+                // 읽혀야 한다.
+                child: Semantics(
+                  label: '서명란',
+                  hint: '손가락으로 서명해 주세요',
+                  value: controller.isEmpty ? '아직 서명하지 않았습니다' : '서명했습니다',
+                  liveRegion: true,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onPanStart: (d) => controller._startStroke(d.localPosition, size),
+                    onPanUpdate: (d) => controller._extendStroke(d.localPosition, size),
+                    child: AnimatedBuilder(
+                      animation: controller,
+                      builder: (context, _) => Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          CustomPaint(painter: _SignaturePadPainter(controller)),
+                          if (controller.isEmpty)
+                            const IgnorePointer(
+                              child: Center(
+                                child: Text(
+                                  '여기에 서명해 주세요',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: AppColors.muted,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -274,13 +272,13 @@ class SignaturePad extends StatelessWidget {
               behavior: HitTestBehavior.opaque,
               onTap: controller.isEmpty ? null : controller.clear,
               child: Padding(
-                padding: const EdgeInsets.only(top: 6, left: 12, bottom: 2),
+                padding: const EdgeInsets.only(top: 12, left: 12, bottom: 10),
                 child: Text(
                   '다시 쓰기',
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w700,
-                    color: controller.isEmpty ? AppColors.muted : AppColors.red,
+                    color: controller.isEmpty ? AppColors.muted : AppColors.brand,
                     decoration: TextDecoration.underline,
                   ),
                 ),
@@ -320,6 +318,5 @@ class _SignaturePadPainter extends CustomPainter {
 
   // repaint 리스너(컨트롤러)가 다시 그리게 한다 — 프레임마다 비교할 상태가 없다.
   @override
-  bool shouldRepaint(_SignaturePadPainter oldDelegate) =>
-      oldDelegate.controller != controller;
+  bool shouldRepaint(_SignaturePadPainter oldDelegate) => oldDelegate.controller != controller;
 }

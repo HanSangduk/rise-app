@@ -70,7 +70,9 @@ class CameraPermissionView extends StatelessWidget {
             _permanent
                 // 영구 거부에서는 [note]를 붙이지 않는다 — 이 화면의 유일한 다음
                 // 행동은 설정 경로라, 그 앞에 다른 문장이 끼면 경로가 묻힌다.
-                ? '$purpose 카메라 권한이 필요해요. 설정 > 권한 > 카메라를 켠 뒤 다시 들어와주세요.'
+                // 경로는 플랫폼 중립으로 — iOS는 설정 > (앱 이름) > 카메라이고 "권한" 항목이
+                // 없어 종전의 안드로이드식 "설정 > 권한 > 카메라"가 iOS에선 거짓 안내였다(P67).
+                ? '$purpose 카메라 권한이 필요해요. 설정 앱에서 이 앱의 카메라 권한을 켠 뒤 다시 들어와주세요.'
                 : '$purpose 카메라 권한이 필요해요.${note == null ? '' : ' $note'}',
             textAlign: TextAlign.center,
             style: TextStyle(color: subFg, fontSize: 11.5, height: 1.5),

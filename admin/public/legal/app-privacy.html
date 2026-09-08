@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="index,follow">
+<meta name="description" content="라이즈 컨디셔닝 회원 앱 — 앱 운영자(한상덕)의 개인정보처리방침. 앱이 직접 처리하는 정보, 센터와의 관계, 정보주체의 권리">
+<title>앱 개인정보처리방침 — 라이즈 컨디셔닝 회원 앱</title>
+<style>
+:root{
+  --bg:#14181f; --panel:#1c222c; --panel-2:#222a36;
+  --line:#2b3441; --line-soft:#232b37;
+  --text:#d7dde6; --dim:#a6b2c2; --faint:#7d8a9c;
+  --accent:#7db3f0; --ok:#86c48f; --warn:#e0af68; --danger:#e2726e;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,
+    "Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",system-ui,sans-serif;
+  font-size:16px; line-height:1.78; word-break:keep-all; overflow-wrap:anywhere;
+  letter-spacing:-.003em;
+}
+.wrap{max-width:74ch; margin:0 auto; padding:0 20px 96px}
+header.doc{padding:64px 0 30px; border-bottom:1px solid var(--line)}
+.eyebrow{font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); font-weight:700; margin:0 0 10px}
+h1{font-size:clamp(26px,4.6vw,34px); line-height:1.3; margin:0 0 14px; font-weight:800; letter-spacing:-.02em}
+h2{font-size:20px; margin:44px 0 12px; font-weight:750; letter-spacing:-.015em; color:#e9eef5}
+h2 .num{color:var(--faint); font-weight:700; font-size:14px; margin-right:9px; letter-spacing:.06em}
+h3{font-size:16px; margin:26px 0 8px; font-weight:750; color:#e9eef5}
+.meta{margin:0; color:var(--dim); font-size:14.8px}
+p{margin:0 0 14px}
+ul,ol{margin:0 0 14px; padding-left:1.35em}
+li{margin:0 0 7px}
+a{color:var(--accent); text-decoration:none}
+a:hover{text-decoration:underline}
+table{width:100%; border-collapse:collapse; margin:10px 0 16px; font-size:14.8px}
+th,td{text-align:left; padding:10px 12px; border-bottom:1px solid var(--line-soft); vertical-align:top}
+th{color:var(--dim); font-weight:600; background:rgba(255,255,255,.02)}
+.callout{margin:20px 0; padding:15px 18px; border-radius:10px; background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--accent); font-size:15.3px; line-height:1.72}
+.callout>:last-child{margin-bottom:0}
+.callout .t{display:block; font-weight:750; margin-bottom:6px; color:var(--accent); font-size:14.5px}
+.callout.ok{border-left-color:var(--ok)} .callout.ok .t{color:var(--ok)}
+.callout.warn{border-left-color:var(--warn)} .callout.warn .t{color:var(--warn)}
+.path{display:inline-block; padding:.05em .5em; border-radius:6px; background:rgba(125,179,240,.12); border:1px solid rgba(125,179,240,.35); font-size:.93em; font-weight:600; color:#cfe3fb; white-space:nowrap}
+footer.doc{margin-top:52px; padding-top:26px; border-top:1px solid var(--line); color:var(--faint); font-size:14px}
+footer.doc p{margin:0 0 8px}
+footer.doc a{margin-right:14px}
+details{border:1px solid var(--line); border-radius:10px; background:var(--panel); margin:10px 0; padding:0 18px}
+summary{cursor:pointer; padding:13px 0; font-weight:700; color:#e9eef5}
+details .body{padding:0 0 14px; font-size:15px; color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <p class="eyebrow">라이즈 컨디셔닝 회원 앱</p>
+  <h1>앱 개인정보처리방침</h1>
+  <p class="meta">이 방침은 <b>앱을 만들고 서버를 운영하는 개발자 한상덕</b>이 「개인정보 보호법」 제30조에 따라
+  수립·공개하는 것입니다. 앱 자체의 운영을 위해 무엇을 처리하는지, 회원이 다니는 센터와는 어떤 관계인지를 밝힙니다.</p>
+</header>
+
+<div class="callout">
+  <span class="t">한 문장 요약</span>
+  <p>회원의 <b>회원권·수업·건강기록</b>은 <b>회원이 다니는 센터</b>가 처리하고, 개발자는 그 센터의 위탁을 받아
+  앱과 서버를 운영합니다. 개발자가 스스로의 목적으로 처리하는 것은 <b>로그인 계정 식별자와 서버 접속기록</b>뿐이며,
+  광고·분석·추적 도구는 하나도 넣지 않았습니다.</p>
+</div>
+
+<h2><span class="num">제1조</span>이 방침이 다루는 범위</h2>
+<p>「라이즈 컨디셔닝 - PT 회원 앱」(이하 “앱”)은 <b>여러 피트니스 센터가 함께 쓰는 앱</b>입니다.
+그래서 개인정보를 처리하는 주체가 둘로 나뉩니다.</p>
+<table>
+  <thead><tr><th style="width:30%">주체</th><th>무엇을 처리하나</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><b>회원이 다니는 센터</b><br><span style="color:var(--dim);font-size:.94em">(개인정보처리자)</span></td>
+      <td>회원 등록 정보, 회원권·결제·계약, 예약과 수업 기록, 체성분·체형사진 등 건강 관련 기록.
+      센터마다 상호와 개인정보 보호책임자가 다르며, <b>회원이 다니는 센터의 방침</b>은 앱의
+      <span class="path">마이 → 약관·방침</span>에서 열 수 있습니다.</td>
+    </tr>
+    <tr>
+      <td><b>개발자 한상덕</b><br><span style="color:var(--dim);font-size:.94em">(앱·서버 운영자)</span></td>
+      <td>위 정보를 <b>센터의 위탁을 받아</b> 저장·처리합니다(「개인정보 보호법」 제26조).
+      이와 별개로 앱을 운영하기 위해 <b>제2조</b>의 정보를 직접 처리합니다.</td>
+    </tr>
+  </tbody>
+</table>
+<p>앱 스토어에 등록된 개인정보처리방침 주소는 이 문서입니다. 특정 센터 하나의 방침을 앱 전체의 방침으로
+걸면 다른 센터를 이용하는 회원에게 사실과 다른 고지가 되기 때문입니다.</p>
+
+<h2><span class="num">제2조</span>개발자가 직접 처리하는 개인정보</h2>
+<table>
+  <thead><tr><th style="width:34%">항목</th><th>목적</th><th style="width:24%">보유기간</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>휴대폰 번호, 인증 계정 식별자(UID)</td>
+      <td>로그인(문자 인증)과 본인 확인, 회원 계정과 센터 기록의 연결</td>
+      <td>계정 삭제 시 지체 없이 파기</td>
+    </tr>
+    <tr>
+      <td>서버 접속기록(접속 일시, 접속지 정보, 처리한 항목)</td>
+      <td>부정 이용·오남용 확인 등 안전성 확보 조치</td>
+      <td>「개인정보의 안전성 확보조치 기준」 제8조가 정한 기간</td>
+    </tr>
+    <tr>
+      <td>서버 운영 로그(오류·성능)</td>
+      <td>장애 대응과 서비스 안정성 확보</td>
+      <td>30일 후 자동 삭제</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout ok">
+  <span class="t">넣지 않은 것</span>
+  <p>앱과 어드민에는 <b>광고 네트워크, 사용자 분석(Analytics), 오류 수집(Crashlytics), 마케팅 자동화,
+  A/B 테스트, 세션 리플레이 도구가 하나도 포함되어 있지 않습니다.</b> 광고 식별자를 읽지 않고, 이용자를
+  추적하지 않으며, 개인정보를 판매하거나 광고 목적으로 제3자에게 제공하지 않습니다.
+  체성분 결과지의 글자 인식은 <b>기기 안에서만</b> 이루어지며 외부 서버로 보내지 않습니다.</p>
+</div>
+
+<h2><span class="num">제3조</span>기기 권한</h2>
+<p>앱이 요청하는 권한과 실제 사용처는 다음과 같습니다. 권한을 거부해도 예약·기록 조회 등 나머지 기능은
+그대로 사용할 수 있습니다.</p>
+<table>
+  <thead><tr><th style="width:26%">권한</th><th>사용처</th></tr></thead>
+  <tbody>
+    <tr><td>카메라</td><td>체형 분석 사진 촬영, 데스크 체크인 QR 읽기</td></tr>
+    <tr><td>사진 보관함</td><td>체성분(인바디) 결과지 사진을 불러올 때만. 촬영한 체형 사진을 보관함에 저장하지 않습니다</td></tr>
+    <tr><td>동작 센서</td><td>체형 사진 촬영 시 기기 기울기를 알려주는 수평 안내</td></tr>
+  </tbody>
+</table>
+
+<h2><span class="num">제4조</span>제3자 제공과 처리위탁</h2>
+<p><b>개인정보를 제3자에게 제공하지 않습니다.</b> 다만 서비스 운영에 필요한 범위에서 아래와 같이 처리를
+위탁하고 있습니다.</p>
+<table>
+  <thead><tr><th style="width:22%">수탁자</th><th>위탁 업무</th><th style="width:26%">보관 위치</th></tr></thead>
+  <tbody>
+    <tr>
+      <td rowspan="2">Google LLC</td>
+      <td>휴대폰 번호 인증(문자 발송·검증), 계정 인증 — Firebase Authentication</td>
+      <td>수탁자의 정책에 따름</td>
+    </tr>
+    <tr>
+      <td>데이터베이스·이미지 저장소·애플리케이션 서버·웹 호스팅 운영 — Cloud Firestore, Cloud Storage, Cloud Run, Firebase Hosting</td>
+      <td>대한민국 서울 리전(asia-northeast3)</td>
+    </tr>
+  </tbody>
+</table>
+<ul>
+  <li>수탁자는 위탁받은 목적 범위에서만 개인정보를 처리하며, Google은 Cloud 데이터 처리 부속서에 따라
+      처리자의 지위에서 처리합니다.</li>
+  <li>위탁 업무의 내용이나 수탁자가 변경되면 이 방침을 통해 공개합니다.</li>
+  <li>개발자는 <b>각 센터로부터 위탁받아</b> 회원의 기록을 처리합니다 — 그 관계와 항목은 회원이 다니는
+      센터의 개인정보처리방침에 공개되어 있습니다.</li>
+</ul>
+
+<h2><span class="num">제5조</span>정보주체의 권리와 행사 방법</h2>
+<p>회원은 언제든지 자신의 개인정보에 대해 <b>열람·정정·삭제·처리정지</b>를 요구할 수 있습니다.</p>
+<ul>
+  <li><b>앱에서 직접</b> — <span class="path">마이 → 회원탈퇴</span>로 계정과 개인정보를 삭제할 수 있습니다.
+      별도 연락 없이 즉시 처리됩니다. 센터에 아직 연결되지 않은 계정은 센터 연결 화면 하단에서 지울 수 있습니다.</li>
+  <li><b>기록의 개별 삭제</b> — <span class="path">기록</span> 탭에서 직접 입력한 체성분 기록과 체형 사진을
+      하나씩 삭제할 수 있습니다. 회원이 삭제한 체형 사진은 즉시 완전히 파기되며 복구되지 않습니다.</li>
+  <li><b>동의 철회</b> — 건강 관련 기록의 수집·이용 동의는 <span class="path">마이 → 동의 관리</span>에서
+      언제든 철회할 수 있습니다.</li>
+  <li><b>이메일</b> — 아래 연락처로 요청하실 수 있습니다. 접수 후 정당한 사유가 없는 한 <b>10일 이내</b>에
+      결과를 알려드립니다.</li>
+</ul>
+<p>회원권·수업·결제 등 <b>센터가 처리하는 기록</b>에 관한 요청은 그 센터로 전달되어 처리됩니다.
+어느 쪽으로 요청하시든 접수됩니다.</p>
+
+<h2><span class="num">제6조</span>파기</h2>
+<p>보유기간이 지나거나 처리 목적이 달성된 개인정보는 지체 없이 파기합니다. 전자적 파일은 복구할 수 없는
+방법으로 삭제하고, 법령에 따라 보존해야 하는 기록은 그 기간 동안 다른 개인정보와 분리하여 보관합니다.</p>
+
+<h2><span class="num">제7조</span>안전성 확보 조치</h2>
+<ul>
+  <li>전송 구간을 <b>암호화(HTTPS/TLS)</b>하고, 저장소는 클라우드 사업자의 저장 시 암호화를 적용합니다.</li>
+  <li>개인정보에 접근할 수 있는 사람을 <b>최소한으로 한정</b>하고, 센터 직원은 자기 센터의 정보에만 접근할 수 있습니다.</li>
+  <li>체형 사진은 <b>회원 본인과 담당 코치만</b> 볼 수 있으며, 접근할 때마다 권한을 다시 확인합니다.</li>
+  <li><b>접속기록을 보관</b>하고 위·변조를 방지합니다.</li>
+  <li>앱은 체형 사진을 기기 저장소에 남기지 않습니다.</li>
+</ul>
+
+<h2><span class="num">제8조</span>만 14세 미만 아동</h2>
+<p>이 앱은 센터에 등록된 회원을 위한 서비스이며, <b>만 14세 미만 아동의 가입을 받지 않습니다.</b>
+만 14세 미만임이 확인되면 해당 계정과 정보를 지체 없이 파기합니다.</p>
+
+<h2><span class="num">제9조</span>개인정보 보호책임자 및 문의처</h2>
+<table>
+  <tbody>
+    <tr><th style="width:30%">개인정보 보호책임자</th><td>한상덕 (개발자 본인)</td></tr>
+    <tr><th>문의·권리행사 접수</th><td><a href="mailto:richramsang@gmail.com">richramsang@gmail.com</a></td></tr>
+    <tr><th>답변 시간</th><td>영업일 기준 1~2일 이내 (권리행사 요청은 10일 이내 처리 결과 통지)</td></tr>
+  </tbody>
+</table>
+<p>개인정보 침해로 인한 상담·신고가 필요하시면 아래 기관에도 문의하실 수 있습니다.</p>
+<ul>
+  <li>개인정보침해신고센터 (privacy.kisa.or.kr / 국번없이 118)</li>
+  <li>개인정보 분쟁조정위원회 (kopico.go.kr / 1833-6972)</li>
+  <li>대검찰청 사이버수사과 (spo.go.kr / 1301) · 경찰청 사이버수사국 (ecrm.police.go.kr / 국번없이 182)</li>
+</ul>
+
+<h2><span class="num">제10조</span>방침의 변경</h2>
+<p>이 방침의 내용이 추가·삭제·수정될 때에는 변경 사항을 시행 7일 전부터 이 페이지에 공개합니다.
+다만 회원의 권리에 중대한 영향을 주는 변경은 시행 30일 전에 알립니다.</p>
+<details>
+  <summary>개정 이력</summary>
+  <div class="body">
+    <table>
+      <thead><tr><th style="width:16%">버전</th><th style="width:26%">시행일</th><th>주요 변경 내용</th></tr></thead>
+      <tbody>
+        <tr><td>v1.0</td><td>2026-09-06</td><td>최초 수립·공개 (앱 운영자 방침 신설 — 센터별 방침과 분리)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</details>
+
+<footer class="doc">
+  <p><a href="./index.html">약관 및 정책</a><a href="./support.html">고객 지원</a><a href="./privacy.html">센터 개인정보처리방침</a><a href="./account-deletion.html">계정·데이터 삭제</a></p>
+  <p>앱 운영자 <b>한상덕</b> · 문의 richramsang@gmail.com</p>
+  <p>시행일 2026-09-06</p>
+</footer>
+
+</div>
+<script>
+/* 센터 승계 — 같은 폴더의 다른 문서로 갈 때 `?center=`를 잃지 않게 한다(계약 v2.33).
+ * 이 문서 자체는 센터에 따라 달라지지 않지만(운영자 방침이다), 여기서 "센터 개인정보처리방침"으로
+ * 넘어가는 링크는 **그 회원의 센터**를 가리켜야 한다. */
+(function () {
+  var center = new URLSearchParams(location.search).get("center");
+  if (!center) return;
+  var links = document.querySelectorAll('a[href^="./"]');
+  for (var i = 0; i < links.length; i++) {
+    var href = links[i].getAttribute("href");
+    if (href.indexOf("center=") !== -1) continue;
+    links[i].setAttribute("href", href + (href.indexOf("?") === -1 ? "?" : "&") + "center=" + encodeURIComponent(center));
+  }
+})();
+</script>
+</body>
+</html>

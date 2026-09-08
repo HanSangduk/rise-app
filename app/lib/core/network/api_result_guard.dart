@@ -24,6 +24,18 @@ Future<Result<T>> guardApi<T>(Future<T> Function() call) async {
     if (status == 401) {
       return Err(AuthFailure(serverMessage ?? '로그인이 만료됐어요 — 다시 로그인해주세요'));
     }
+    // 409 + `code: join_pending`(계약 v2.34) — "이미 보낸 요청이 있다"는 서버의 pending 확답이다.
+    // `code`로만 가른다(문구 매칭은 서버가 문장을 다듬는 순간 조용히 깨진다). 구서버는 `code`가
+    // 없어 아래 RejectedFailure로 떨어진다 — 종전 동작(시트 안 빨간 문구) 그대로.
+    if (status == 409 && e.response?.data is Map) {
+      final body = e.response!.data as Map;
+      if (body['code'] == 'join_pending') {
+        return Err(JoinPendingFailure(
+          message: serverMessage ?? '이미 보낸 가입 요청이 있어요 — 센터에서 확인하면 연결돼요',
+          centerId: body['center_id']?.toString() ?? '',
+        ));
+      }
+    }
     if (status != null && status >= 400 && status < 500) {
       return Err(RejectedFailure(serverMessage ?? '요청을 처리할 수 없어요'));
     }

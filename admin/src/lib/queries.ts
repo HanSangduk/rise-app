@@ -1,10 +1,12 @@
 // TanStack Query 훅 — 서버상태(백엔드 API)를 클라이언트상태와 분리.
 // 각 훅은 src/lib/api.ts의 메서드 1:1 래핑 + 캐시 무효화 규칙만 담당한다.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, api } from "./api";
+import { ApiError, api, isRouteNotFound } from "./api";
+import { evictBodyPhotoBlob } from "./bodyPhotoBlob";
 import type {
   CenterBusiness,
   CenterFacility,
+  CenterIdentity,
   CenterPolicy,
   CreateStaffRequest,
   Exercise,
@@ -16,9 +18,12 @@ import type {
   StaffProfile,
   StaffUpdateRequest,
   Weekday,
+  CenterCreateBody,
 } from "./types";
 
 export const keys = {
+  // 관리 평면(superadmin) — 센터 목록. 센터 차원이 없는 다른 키들과 섞이지 않게 별도 축.
+  adminCenters: ["adminCenters"] as const,
   members: (trainer?: string, q?: string) => ["members", trainer ?? "", q ?? ""] as const,
   memberLedger: (id: string, pass?: string) => ["memberLedger", id, pass ?? ""] as const,
   contracts: (member?: string, status?: string) => ["contracts", member ?? "", status ?? ""] as const,
@@ -399,10 +404,13 @@ export function useStats(range: string, scope: "me" | "center") {
 }
 
 // ── 체형 분석 · 인바디 ─────────────────────────────────────────────────
+// 어드민은 스태프뿐이라 include_deleted를 항상 켠다(api.ts 주석) — 타임라인(살아 있는 것)과
+// 휴지통(deleted_at 있는 것)이 **같은 응답·같은 캐시 키**에서 갈라진다. 회원별 키라 삭제·복원
+// 무효화 한 번으로 두 목록이 함께 맞는다.
 export function useBodyPhotos(member: string | null) {
   return useQuery({
     queryKey: keys.bodyPhotos(member ?? ""),
-    queryFn: () => api.bodyPhotos(member!),
+    queryFn: () => api.bodyPhotos(member!, { includeDeleted: true }),
     enabled: !!member,
   });
 }
@@ -430,6 +438,46 @@ export function useDeleteInbody() {
   return useMutation({
     mutationFn: ({ id }: { id: string; memberId: string }) => api.deleteInbody(id),
     onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: keys.inbody(vars.memberId) }),
+  });
+}
+
+// [v2.14] 체형사진 삭제(스태프 = 소프트 삭제). 목록 캐시가 회원 단위라 memberId를 함께 받는다.
+// 성공 시 그 회원의 목록을 다시 읽는다(서버가 삭제분을 거르므로 방금 지운 사진이 빠진 채 온다).
+// blob 캐시도 함께 비운다 — 계약 v2.14가 앱에 요구한 것("삭제 후 로컬 바이트 캐시도 비운다")과
+// 같은 이유: 목록 갱신이 실패했을 때 방금 지운 사진의 바이트가 라이트박스에 그대로 다시 그려지면 안 된다.
+// storagePath는 Full 사진일 때만 온다 — 잠긴 회원의 Meta 행(v2.28)에는 경로가 없고, 그 사진의 바이트는
+// 이 세션이 받은 적도 없어 비울 것이 없다.
+export function useDeleteBodyPhoto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string; memberId: string; storagePath?: string }) => api.deleteBodyPhoto(id),
+    onSuccess: (_data, vars) => {
+      if (vars.storagePath) evictBodyPhotoBlob(vars.storagePath);
+      return qc.invalidateQueries({ queryKey: keys.bodyPhotos(vars.memberId) });
+    },
+  });
+}
+
+// [v2.14] 유예 안 복원 — 성공하면 목록에 다시 나타나야 하므로 같은 키를 비운다.
+export function useRestoreBodyPhoto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string; memberId: string }) => api.restoreBodyPhoto(id),
+    onSuccess: (_data, vars) => qc.invalidateQueries({ queryKey: keys.bodyPhotos(vars.memberId) }),
+  });
+}
+
+// [v2.14] 기한 지난 사진 즉시 파기(owner) — 파기되는 건 이미 목록에 없던 것들이라 비울 캐시가 없다.
+export function usePurgeBodyPhotos() {
+  return useMutation({ mutationFn: () => api.purgeBodyPhotos() });
+}
+
+// [v2.15] 정합 검사(owner) — 조회(apply=false)와 정리(apply=true)가 같은 동사다. 고아 파일은
+// 메타가 없어 어떤 목록에도 안 보이므로 여기서도 비울 캐시가 없다.
+export function useReconcileBodyPhotos() {
+  return useMutation({
+    mutationFn: ({ member, apply }: { member: string; apply: boolean }) =>
+      api.reconcileBodyPhotos(member, apply),
   });
 }
 
@@ -582,6 +630,23 @@ export function useUpdateCenterBusiness() {
   });
 }
 
+// [P55] 센터 신원(상호·전화·주소) 저장(owner 전용) — 정책·사업자 정보와 **같은 keys.center 캐시**를
+// 무효화한다(center도 GET /v1/center 응답의 한 절이라, 키를 나누면 같은 문서의 조각들이 서로 다른
+// 시점을 가리킨다 — useUpdateCenterBusiness와 같은 근거).
+//
+// 이 무효화가 닿는 곳이 설정 화면만이 아니다: 셸 사이드바·헤더의 센터 이름이 같은 keys.center를
+// 읽으므로(App.tsx CenterName), 저장하는 순간 화면 상단의 상호가 함께 바뀐다. 키를 따로 뒀다면
+// 설정 카드만 새 이름이고 헤더는 옛 이름인 상태가 남는다.
+export function useUpdateCenterIdentity() {
+  const qc = useQueryClient();
+  return useMutation({
+    // center — 3칸 전부(서버가 통 교체다, api.updateCenterIdentity 주석). 여기서 필드를 골라
+    // 담으면 안 된다: 빠뜨린 칸은 머지가 아니라 **빈 값으로 저장**된다.
+    mutationFn: (center: CenterIdentity) => api.updateCenterIdentity(center),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.center }),
+  });
+}
+
 // [P42] 체육시설업 신고 상태 저장(owner 전용) — 정책·사업자 정보와 **같은 keys.center 캐시**를
 // 무효화한다(facility가 GET /v1/center 응답의 한 절이라 키를 나누면 같은 문서의 조각들이 서로
 // 다른 시점을 가리킨다 — useUpdateCenterBusiness와 같은 근거). 응답이 facility 절뿐이라(Center
@@ -638,8 +703,8 @@ export function useRotateCheckinQr() {
 //    자리를 비운 시간은 과금되지 않고, 실제로는 이보다 적게 나간다.
 const JOIN_REQUESTS_POLL_MS = 60_000;
 
-// owner 전용 API(비-owner는 서버가 403 — service.ListJoinRequests). 설정 화면은 이미 owner
-// 게이트 뒤라 인자 없이 부르고, 대시보드처럼 두 역할이 함께 쓰는 화면은 enabled로 조회를 끈다
+// owner 전용 API(비-owner는 서버가 403 — service.ListJoinRequests). 회원 관리 상단 큐(P69)는
+// owner일 때만 마운트돼 인자 없이 부르고, 대시보드·네비 배지처럼 두 역할이 함께 쓰는 자리는 enabled로 조회를 끈다
 // — 트레이너에게 403을 받아놓고 "조회 실패"를 보여주지 않기 위해서다.
 // **폴링도 같은 게이트를 탄다**: enabled=false면 최초 조회도 주기 조회도 일어나지 않으므로
 // 트레이너 화면이 1분마다 403을 받는 일은 없다(owner 전용이라는 성질이 유지된다).
@@ -688,6 +753,22 @@ export function useConsultDone() {
   });
 }
 
+// 승인·거절이 **대상을 못 찾았다**는 응답 — 화면이 들고 있던 큐가 이미 낡았다는 뜻이다.
+//   404  요청 문서가 없다. 유일한 원인은 좀비 경합: 회원이 그 사이 번호 인증으로 **직접 연결**돼
+//        JoinConfirm이 pending을 파기했다(v2.27 A-5). 이 요청은 처리할 것이 아니라 **없어진 것**이다.
+//   409  이미 처리된 요청(다른 기기·다른 대표가 먼저 승인·거절).
+// 두 경우 모두 다음 행동은 하나 — 목록을 다시 읽는다. 그래서 훅이 스스로 무효화한다(화면이
+// "새로고침하세요"라고 말만 하고 수단을 안 주는 막다른 길을 만들지 않는다 — P56 클래스 3).
+// 라우터 404(미배포)는 제외한다: 그건 큐가 낡은 게 아니라 이 배포에 동사가 없는 것이다.
+function isJoinQueueStale(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return false;
+  if (e.status === 409) return true;
+  return e.status === 404 && !isRouteNotFound(e);
+}
+
+// 응답(data)은 승인으로 생긴 회원 — 호출부(JoinRequests.tsx)가 mutate 옵션 onSuccess로 받아 회원
+// 관리의 선택을 그 회원으로 옮긴다(P69). 확인 창이 성공까지 마운트돼 있어 mutate-레벨 콜백이
+// 떨어지는 문제(Members.tsx P40)는 여기 없다.
 export function useApproveJoin() {
   const qc = useQueryClient();
   return useMutation({
@@ -697,5 +778,44 @@ export function useApproveJoin() {
       // 승인 시 회원 생성/연결이 일어난다 — 회원 목록도 최신화.
       qc.invalidateQueries({ queryKey: ["members"] });
     },
+    onError: (e) => {
+      if (isJoinQueueStale(e)) qc.invalidateQueries({ queryKey: keys.joinRequests });
+    },
+  });
+}
+
+// [P55] 가입 요청 거절(owner 전용) — 승인과 **같은 무효화 규약**이되 회원 목록은 건드리지 않는다.
+// 거절은 회원을 만들지도 연결하지도 않는다(서버가 이름·번호를 비우고 status=rejected로 행만 남긴다)
+// — 회원 캐시를 함께 비우면 아무것도 달라지지 않은 목록을 매 거절마다 다시 끌어온다.
+//
+// 낙관적 갱신(onMutate로 큐에서 먼저 지우기)을 쓰지 않는 것도 승인과 같은 판단이다: 이 목록은
+// 1분 폴링·창 포커스로 스스로 움직이는 데다(useJoinRequests), 실패하면 되돌려 놓아야 하는데
+// 그 사이 폴링 응답이 끼면 지웠던 행이 되살아났다 다시 사라진다. 확인 창이 이미 열려 있어
+// 대기 시간을 사람이 인지하는 자리(버튼이 "거절 중…")라 낙관적 갱신으로 벌 시간이 없다.
+export function useRejectJoin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (requestId: string) => api.joinReject(requestId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.joinRequests }),
+    onError: (e) => {
+      if (isJoinQueueStale(e)) qc.invalidateQueries({ queryKey: keys.joinRequests });
+    },
+  });
+}
+
+// ── 관리 평면(멀티센터, superadmin 전용) ─────────────────────────────────────
+
+/** 센터 목록. superadmin이 아니면 서버가 403이라 이 훅은 superadmin 셸에서만 마운트한다. */
+export function useAdminCenters() {
+  return useQuery({ queryKey: keys.adminCenters, queryFn: () => api.adminCenters() });
+}
+
+/** 센터 + 최초 owner 생성. 성공 시 목록을 다시 받는다 — 방금 만든 센터가 목록에 없으면
+ *  사용자는 실패했다고 믿고 한 번 더 만든다(같은 ID라 409가 나고, 그 409가 더 헷갈린다). */
+export function useCreateCenter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CenterCreateBody) => api.createCenter(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.adminCenters }),
   });
 }

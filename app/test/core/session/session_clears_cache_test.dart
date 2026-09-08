@@ -32,7 +32,7 @@ void main() {
     await pumpEventQueue();
     expect(store.writes, hasLength(1));
 
-    container.read(sessionProvider.notifier).clear();
+    container.read(sessionProvider.notifier).clear(reason: SessionEndReason.signedOut);
     await pumpEventQueue();
 
     expect(store.cleared, 1, reason: '다음 기동에 그 신원으로 다시 들어온다');

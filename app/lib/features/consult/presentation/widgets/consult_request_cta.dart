@@ -45,12 +45,13 @@ class ConsultRequestCta extends ConsumerWidget {
         // 배지 줄에 서는 소형 링크 — 히트 영역은 패딩으로 44dp에 가깝게 벌린다
         // (독립 44dp 타깃을 그리면 배지 줄 높이가 배로 뛴다).
         child: const Padding(
-          padding: EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+          // 종전 10은 주석이 노린 44dp에 실제로 못 미쳤다(실측 ~34dp, P54).
+          padding: EdgeInsets.symmetric(vertical: 14, horizontal: 4),
           child: Text(
             '재등록 요청하기 ›',
             style: TextStyle(
               fontSize: 11,
-              color: AppColors.red,
+              color: AppColors.brand,
               fontWeight: FontWeight.w800,
             ),
           ),

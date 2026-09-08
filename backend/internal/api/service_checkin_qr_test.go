@@ -251,8 +251,12 @@ func TestCheckinTokenNeverLeaksToSharedResponses(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
 			t.Fatal(err)
 		}
+		// v2.27에서 `center`(신원 3칸) 한 키가 늘었다 — 전용 응답 타입(CenterIdentityView)이라
+		// 키 집합이 name/phone/address로 고정돼 있고, 토큰이 무임승차할 자리가 없다.
+		// **키를 늘릴 때 이 목록을 고치는 것 자체가 게이트다**: 여기서 손이 멈추면 "이 키가
+		// 세 역할 모두에게 나가도 되는가"를 한 번은 묻게 된다.
 		assertKeySet(t, role.role+" GET /v1/center", m,
-			[]string{"center_id", "name", "policy", "business", "facility"})
+			[]string{"center_id", "name", "center", "policy", "business", "facility"})
 		// 본문 전체를 문자열로도 훑는다 — 어떤 키 아래 중첩돼도 잡힌다(키 집합만 보면
 		// policy·business 안에 얹힌 값은 통과한다).
 		if strings.Contains(rec.Body.String(), issued.Token) {
@@ -260,14 +264,17 @@ func TestCheckinTokenNeverLeaksToSharedResponses(t *testing.T) {
 		}
 	}
 
-	// 무인증 공개 엔드포인트 — 여기로 새면 로그인조차 필요 없어진다.
+	// 무인증 공개 엔드포인트 — 여기로 새면 로그인조차 필요 없어진다. 공개 경로는 둘이다(v2.29).
+	for _, path := range []string{"/v1/public/business", "/v1/public/center"} {
+		pubRec := getJSON(t, r, path, "", "")
+		if pubRec.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d", path, pubRec.Code)
+		}
+		if strings.Contains(pubRec.Body.String(), issued.Token) {
+			t.Fatalf("무인증 공개 응답 %s에 체크인 토큰이 있다", path)
+		}
+	}
 	pub := getJSON(t, r, "/v1/public/business", "", "")
-	if pub.Code != http.StatusOK {
-		t.Fatalf("GET /v1/public/business = %d", pub.Code)
-	}
-	if strings.Contains(pub.Body.String(), issued.Token) {
-		t.Fatal("무인증 공개 응답에 체크인 토큰이 있다")
-	}
 	var pm map[string]any
 	if err := json.Unmarshal(pub.Body.Bytes(), &pm); err != nil {
 		t.Fatal(err)

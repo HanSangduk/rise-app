@@ -208,4 +208,24 @@ abstract final class RiseIcons {
       '<line x1="21" y1="3" x2="14" y2="10"/>'
       '<line x1="3" y1="21" x2="10" y2="14"/>'
       '$_footer';
+
+  /// 전화(대기실 센터 카드 "센터에 전화") — lucide phone 수화기.
+  static const phone =
+      '$_header'
+      '<path d="M5 4h3.5l1.5 4-2 1.5a11 11 0 0 0 6.5 6.5L16 14l4 1.5V19a1.5 1.5 0 0 1-1.5 1.5A15.5 15.5 0 0 1 3.5 5.5 1.5 1.5 0 0 1 5 4Z"/>'
+      '$_footer';
+
+  /// 위치 핀(대기실 센터 카드 주소 행 → 지도) — lucide map-pin.
+  static const mapPin =
+      '$_header'
+      '<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z"/>'
+      '<circle cx="12" cy="10" r="2.4"/>'
+      '$_footer';
+
+  /// 시계(대기실 센터 카드 "수업 09:00–22:00" 행) — lucide clock.
+  static const clock =
+      '$_header'
+      '<circle cx="12" cy="12" r="8.5"/>'
+      '<polyline points="12,7.5 12,12 15,14"/>'
+      '$_footer';
 }

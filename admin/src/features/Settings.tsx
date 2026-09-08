@@ -1,4 +1,14 @@
 // 설정 · 직원 — 목업 s-set 1:1(대표 전용, App.tsx에서 owner 게이트).
+//
+// **트레이너의 자기 프로필·휴무 편집은 이 화면이 아니라 MyProfile.tsx다**(P58 B3). 이 화면의
+// 나머지 카드(정책·사업자·신원·체크인 QR·직원 생애주기)는 서버가 전부 owner 전용이라
+// 탭을 트레이너에게 열면 "눌러보고 403" 카드가 여섯 개 생긴다.
+// **앱 가입 요청 큐는 이 화면에 없다**(P69) — 회원 관리 탭 최상단(features/JoinRequests.tsx)으로
+// 옮겼다. "신청한 회원"은 회원 관리에서 찾는데 큐가 설정 6번째 카드에 있어 대표가 못 찾았다.
+// 이 화면에는 "센터·앱 연결" 카드에 그리로 가는 문 한 줄만 남긴다. 서버가 본인에게 허용하는 두
+// 동사(PUT /profile · POST /offdays — service.go `!p.IsOwner() && p.UID != uid`)만 그쪽 탭이
+// 같은 모달(OffdaysModal·ProfileModal, export)을 빌려 쓴다. 직원 표의 [프로필]·[휴무] 버튼에
+// isOwner 게이트가 없는 것은 그래서 화석이 아니라 의도다 — 대표는 **누구의** 것이든 고친다.
 // 직원 신규 생성은 v1.8(POST /v1/staff)로 실제 초대 플로우가 됐다(InviteStaffModal).
 // v2.0(P08 직원 생애주기)으로 **되돌리기**가 생겼다 — 정정(PUT /v1/staff/{uid}) · 담당 이관
 // (transfer) · 퇴사(deactivate) · 재입사(reactivate). 종전엔 이름 오타·역할 오지정·퇴사를
@@ -47,19 +57,17 @@ import {
   Table,
   Textarea,
 } from "@/components/ui";
-import { ApiError } from "@/lib/api";
+import { ApiError, isRouteNotFound } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { auth } from "@/lib/firebase";
 // 데스크 체크인 QR(P11 → P49) — 발급·QR 렌더·A4 인쇄 시트가 한 덩어리라 별 파일로 뺀다
 // (인쇄 포털·print 전용 CSS가 이 화면의 다른 섹션과 공유하는 게 하나도 없다).
 import { CheckinQrCard } from "@/features/CheckinQr";
 import {
-  useApproveJoin,
   useBookings,
   useCenter,
   useCreateStaff,
   useDeactivateStaff,
-  useJoinRequests,
   useMembers,
   useReactivateStaff,
   useRecurrings,
@@ -68,6 +76,7 @@ import {
   useStaff,
   useTransferStaff,
   useUpdateCenterBusiness,
+  useUpdateCenterIdentity,
   useUpdateCenterPolicy,
   useUpdateStaff,
   useUpdateStaffProfile,
@@ -93,12 +102,18 @@ import {
   BUSINESS_PHONE_DIGITS_MIN,
   BUSINESS_PHONE_MAX,
   BUSINESS_REG_NO_DIGITS,
+  CENTER_ADDRESS_MAX,
+  CENTER_NAME_MAX,
+  CENTER_PHONE_MAX,
   EMPTY_BUSINESS,
   EMPTY_FACILITY,
   MAX_PENALTY_PCT,
   WEEKDAY_LABEL,
   businessMissingFields,
+  CENTER_NAME_FALLBACK,
+  centerDisplayName,
   centerHours,
+  centerIdentityOf,
   hourLabel,
   hoursValid,
   toBookingRef,
@@ -107,9 +122,9 @@ import {
   type CenterBusiness,
   type CenterBusinessView,
   type CenterFacility,
+  type CenterIdentity,
   type CenterPolicy,
   type FacilityReportStatus,
-  type JoinRequest,
   type Payout,
   type PayoutType,
   type Staff,
@@ -120,14 +135,13 @@ import {
   type StaffUpdateRequest,
 } from "@/lib/types";
 
-export function Settings() {
+export function Settings({ onOpenMembers }: { onOpenMembers?: () => void }) {
   const { me } = useAuth();
   // 이 화면 자체가 App.tsx owner 게이트 뒤에 있지만, 초대는 서버도 owner만 허용하므로(403)
   // 버튼 노출도 같은 조건으로 한 번 더 잠근다 — 눌러보고 403을 받는 UI를 만들지 않는다.
   const isOwner = me?.role === "owner";
   const staffQ = useStaff();
   const centerQ = useCenter();
-  const joinReqQ = useJoinRequests();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [offdayTarget, setOffdayTarget] = useState<Staff | null>(null);
   const [profileTarget, setProfileTarget] = useState<Staff | null>(null);
@@ -140,22 +154,6 @@ export function Settings() {
   );
   const [deactivateTarget, setDeactivateTarget] = useState<Staff | null>(null);
   const [reactivateTarget, setReactivateTarget] = useState<Staff | null>(null);
-  // 가입 요청 승인은 되돌릴 수 없다(승인 즉시 그 계정이 회원 데이터를 본다) — 목록이 폴링으로
-  // 움직이는 화면에서 한 번의 오클릭이 **남의 계정을 남의 기록에 붙인다**. 확인 창을 한 단계 둔다.
-  const [approveTarget, setApproveTarget] = useState<JoinRequest | null>(null);
-
-  // 서버는 최신순으로 주는데, 그대로 그리면 폴링(60초·창 포커스)으로 새 요청이 **맨 위에 삽입**돼
-  // 보고 있던 행이 전부 한 칸 내려간다 — 승인 버튼을 누르려던 손 밑에서 대상이 바뀌는 구조다.
-  // 요청 시각 오름차순(먼저 온 순)으로 고정하면 새 요청은 항상 **끝에 붙어** 기존 행이 움직이지
-  // 않는다. 처리 순서도 선착순이라 화면 순서와 대표의 일 처리 순서가 같아진다.
-  // (동시각 tie는 id로 갈라 매 응답마다 순서가 흔들리지 않게 한다.)
-  const joinRequests = [...(joinReqQ.data ?? [])].sort(
-    (a, b) => a.requested_at.localeCompare(b.requested_at) || a.id.localeCompare(b.id),
-  );
-  // 끝에 붙은 새 요청이 그냥 묻히지 않게 표시만 남긴다(최신순 정렬이 하던 "눈에 띄기" 역할).
-  // 응답 전(undefined)과 "응답이 빈 목록"을 구분해 넘긴다 — 첫 응답이 기준선이다.
-  const freshJoinIds = useFreshIds(joinReqQ.data ? joinRequests.map((r) => r.id) : undefined);
-
   const allStaff = staffQ.data ?? [];
   // GET /v1/staff는 inactive도 준다(이름 해석 보존) — 재직/퇴사 구분은 클라이언트 몫이다.
   const activeStaff = allStaff.filter((s) => isStaffActive(s));
@@ -336,6 +334,35 @@ export function Settings() {
           </CardContent>
         </Card>
 
+        {/* 센터 신원(P55) — 상호·전화·주소. 사업자 정보 **앞**에 둔다: 이 화면에서 제일 먼저
+            채워야 하는 값이고(비어 있으면 회원 앱이 임시 상호를 찍고 '센터에 전화하기'가
+            사업자 번호로 폴백한다 — GET /v1/public/center, v2.29), 옆 카드의
+            사업자명(상호)과 헷갈리기 쉬워 두 카드가 붙어 있어야 차이를 읽는다. */}
+        <Card>
+          <CardHeader>
+            <CardTitle>센터 신원</CardTitle>
+            {/* 배지는 **저장된** 상태만 말한다(사업자 정보·시설 신고 배지와 같은 규약) — 편집 중인
+                입력이 "등록됨"으로 보이면 회원 앱에 이미 뜬다고 오해한다. */}
+            {centerQ.data &&
+              (centerIdentityOf(centerQ.data).name.trim() ? (
+                <Badge tone="ok">등록 완료</Badge>
+              ) : (
+                <Badge tone="warn">상호 미등록</Badge>
+              ))}
+          </CardHeader>
+          <CardContent>
+            {centerQ.isLoading ? (
+              <Spinner />
+            ) : centerQ.isError ? (
+              <ErrorState error={centerQ.error} onRetry={() => void centerQ.refetch()} />
+            ) : !centerQ.data ? (
+              <EmptyState>센터 정보를 불러오지 못했습니다.</EmptyState>
+            ) : (
+              <CenterIdentityEditForm initial={centerIdentityOf(centerQ.data)} />
+            )}
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle>사업자 정보</CardTitle>
@@ -393,51 +420,6 @@ export function Settings() {
 
         <Card>
           <CardHeader>
-            <CardTitle>가입 요청 승인</CardTitle>
-            <Badge tone="muted">{joinReqQ.data?.length ?? 0}건</Badge>
-          </CardHeader>
-          <CardContent>
-            {joinReqQ.isLoading ? (
-              <Spinner />
-            ) : joinReqQ.isError ? (
-              <ErrorState error={joinReqQ.error} onRetry={() => void joinReqQ.refetch()} />
-            ) : !joinRequests.length ? (
-              <EmptyState>대기 중인 가입 요청이 없습니다.</EmptyState>
-            ) : (
-              <div className="space-y-1.5">
-                {joinRequests.map((r) => (
-                  <div
-                    key={r.id}
-                    className="flex items-center justify-between rounded-[10px] bg-panel-2 px-3 py-2 text-[12.5px]"
-                  >
-                    <span className="flex flex-wrap items-center gap-1.5">
-                      <b>{r.name}</b> <span className="text-muted">{r.phone}</span>
-                      {/* 이 화면을 열어둔 사이에 새로 들어온 요청 — 목록 끝에 붙으므로 표시로 알린다. */}
-                      {freshJoinIds.has(r.id) && <Badge tone="brand">새 요청</Badge>}
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setApproveTarget(r)}
-                      title="확인 창에서 이름·번호를 한 번 더 보고 승인합니다"
-                    >
-                      <Check className="h-3.5 w-3.5" /> 승인
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-            {/* 승인 실패 문구는 확인 창 안에 있다(창이 열린 채로 남아 재시도가 그 자리에서 된다). */}
-            <p className="mt-2.5 text-[10.5px] text-muted">
-              {/* 내부 티켓 번호(P48)·"폴백 경로" 같은 개발 용어는 화면에서 뺀다(어드민 UX 감사). */}
-              전화번호가 자동으로 맞지 않은 회원의 "센터 찾기" 요청만 여기 쌓입니다. 목록은 1분마다
-              자동 갱신되고, 먼저 온 순으로 고정돼 새 요청이 끼어들어도 기존 줄이 밀리지 않습니다.
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
             <CardTitle>센터 · 앱 연결</CardTitle>
           </CardHeader>
           <CardContent>
@@ -446,14 +428,39 @@ export function Settings() {
                 <TR>
                   <TD className="text-muted">센터명</TD>
                   <TD>
-                    {/* GET /v1/center(v1.4 확정)는 center_id+policy만 반환 — 표시명은 앱 셸과 동일한 고정값. */}
-                    <b>라이즈 컨디셔닝 센터</b> (강남)
+                    {/* [P55] 하드코딩을 걷어냈다 — 셸 헤더·사이드바와 **같은 해석**(centerDisplayName)을
+                        쓴다. 여기만 서버 값으로 바꾸면 같은 센터가 화면마다 다른 이름이 된다. */}
+                    <b>{centerDisplayName(centerQ.data)}</b>{" "}
+                    {centerIdentityOf(centerQ.data).name.trim() ? (
+                      <span className="text-muted">— 위 "센터 신원"에서 바꿉니다</span>
+                    ) : (
+                      // 미등록 상태를 숨기지 않는다: 지금 보이는 이름은 서버 값이 아니라 화면의
+                      // 폴백이고, 회원 앱도 같은 임시 상호를 보여준다(P56 L10).
+                      <span className="text-warn">— 아직 등록 전(임시 표시)</span>
+                    )}
                   </TD>
                 </TR>
                 <TR>
                   <TD className="text-muted">회원 연결(기본)</TD>
                   <TD>
                     <b>등록하면 끝</b> — 앱에서 번호 인증 시 자동 매칭 + 이름 확인 1탭
+                    {/* 가입 요청 큐가 있던 자리(P69) — 이 탭에서 찾던 대표가 헤매지 않게 실제 링크
+                        한 줄만 남긴다. 콜백이 없으면 일반 텍스트(데드 링크 금지 — Dashboard NameLink 규약). */}
+                    <div className="mt-1 text-[11px] text-muted">
+                      앱에서 보낸 가입 요청은{" "}
+                      {onOpenMembers ? (
+                        <button
+                          type="button"
+                          onClick={onOpenMembers}
+                          className="font-bold text-ink underline decoration-dotted underline-offset-2 transition hover:text-brand"
+                        >
+                          회원 관리
+                        </button>
+                      ) : (
+                        <b className="text-ink">회원 관리</b>
+                      )}{" "}
+                      맨 위에서 승인합니다.
+                    </div>
                   </TD>
                 </TR>
                 <TR>
@@ -493,7 +500,18 @@ export function Settings() {
       {/* 조건부 마운트 — 닫으면 언마운트되므로 다시 열 때 폼이 항상 빈 상태로 시작한다. */}
       {inviteOpen && <InviteStaffModal onClose={() => setInviteOpen(false)} />}
       {offdayTarget && <OffdaysModal staff={offdayTarget} onClose={() => setOffdayTarget(null)} />}
-      {profileTarget && <ProfileModal staff={profileTarget} onClose={() => setProfileTarget(null)} />}
+      {profileTarget && (
+        /* 퇴사 행은 photoEditable=false — 서버가 퇴사자 업로드를 400으로 막는다(v2.31). 눌러야 실패하는
+           [사진 선택]을 만들지 않고 그 사실을 문장으로 말한다(MyProfile의 owner-only 선례와 같은 규율).
+           clearable은 퇴사 행에서도 true — 퇴사자 프로필 PUT은 서버가 허용하고, 빈 photo_url 저장이 이
+           배포 이전에 퇴사한 스태프의 잔류 파일(또는 미구성 건너뜀분)을 지우는 유일한 어드민 경로다. */
+        <ProfileModal
+          staff={profileTarget}
+          photoEditable={isStaffActive(profileTarget)}
+          clearable
+          onClose={() => setProfileTarget(null)}
+        />
+      )}
       {editTarget && (
         <StaffEditModal
           staff={editTarget}
@@ -536,92 +554,7 @@ export function Settings() {
       {reactivateTarget && (
         <ReactivateStaffModal staff={reactivateTarget} onClose={() => setReactivateTarget(null)} />
       )}
-      {approveTarget && (
-        <ApproveJoinModal
-          request={approveTarget}
-          onClose={() => setApproveTarget(null)}
-          // 목록에서 사라진 요청(다른 기기에서 이미 승인·취소됨)을 계속 승인 대상으로 붙들지 않는다.
-          gone={!joinRequests.some((r) => r.id === approveTarget.id)}
-        />
-      )}
     </div>
-  );
-}
-
-// 폴링으로 갱신되는 목록에서 **이 화면을 연 뒤 새로 들어온 항목**의 id 집합.
-//
-// 기준선은 **첫 응답이 도착한 순간**이다. 로딩 중의 빈 배열을 기준선으로 삼으면 처음 뜬 요청들이
-// 전부 "새 요청"이 되어 배지가 아무 뜻도 갖지 못한다 — 그래서 미도착은 undefined로 구분해 건너뛴다.
-// 한 번 새 것으로 표시한 id는 계속 유지한다(다음 폴링에서 조용히 평범해지면 표시의 의미가 없다).
-function useFreshIds(ids: string[] | undefined): Set<string> {
-  const seen = useRef<Set<string> | null>(null);
-  const [fresh, setFresh] = useState<Set<string>>(new Set());
-  // 배열은 매 렌더 새 참조라 내용으로 비교한다(정렬이 고정돼 있어 문자열 비교로 충분).
-  const key = ids ? ids.join(",") : null;
-  useEffect(() => {
-    if (key === null) return; // 아직 응답 전 — 기준선을 잡지 않는다
-    const list = key ? key.split(",") : [];
-    const prev = seen.current;
-    // 사라진 id도 기억에 남긴다 — 다른 기기에서 처리됐다가 되살아난 요청을 "새 요청"으로 속이지 않는다.
-    seen.current = new Set([...(prev ?? []), ...list]);
-    if (prev === null) return; // 첫 응답 = 내가 오기 전부터 있던 것
-    const added = list.filter((id) => !prev.has(id));
-    if (added.length) setFresh((old) => new Set([...old, ...added]));
-  }, [key]);
-  return fresh;
-}
-
-// 가입 요청 승인 확인 — 되돌리기가 없는 유일한 1클릭 동작이라 한 단계를 세운다.
-//
-// 왜 폴링을 끄지 않고 확인 창을 세웠나: 회원 앱이 "센터에서 승인하면 연결돼요"라고 약속하고
-// 대기 화면에 머문다(queries.ts JOIN_REQUESTS_POLL_MS). 폴링을 끄면 그 약속이 깨진다.
-// 정렬 고정만으로도 삽입에 의한 밀림은 사라지지만, **삭제**(다른 기기·다른 대표가 먼저 승인)와
-// 손이 이미 움직이는 중인 클릭까지는 막지 못한다 — 그래서 대상을 객체로 붙들고 이름·번호를
-// 다시 보여준 뒤에 실행한다. 승인은 하루 0~2건이라 한 클릭의 비용이 오연결 위험보다 싸다.
-function ApproveJoinModal({
-  request,
-  onClose,
-  gone,
-}: {
-  request: JoinRequest;
-  onClose: () => void;
-  gone: boolean;
-}) {
-  const approveJoin = useApproveJoin();
-  return (
-    <Modal open onClose={onClose} title="가입 요청 승인">
-      <div className="space-y-3">
-        <p className="text-[12.5px]">
-          <b>{request.name}</b> <span className="text-muted">{request.phone}</span> 님을 이 센터
-          회원으로 연결합니다.
-        </p>
-        {gone ? (
-          <p className="rounded-[10px] border border-warn/40 bg-warn/10 px-3 py-2 text-[11px] text-warn">
-            <TriangleAlert className="mr-1 inline h-3.5 w-3.5" />이 요청이 목록에서 사라졌어요 —
-            다른 기기에서 이미 처리됐을 수 있습니다. 창을 닫고 목록을 다시 확인해주세요.
-          </p>
-        ) : (
-          <p className="text-[10.5px] text-muted">
-            승인하면 그 계정이 바로 이 회원의 기록을 보게 되고{" "}
-            <b className="text-ink">되돌리는 버튼은 없습니다</b>. 목록은 1분마다 갱신되니 눈앞의 그
-            사람이 맞는지 이름·번호를 한 번만 확인해주세요.
-          </p>
-        )}
-        {approveJoin.isError && (
-          <p className="text-[11px] text-danger">승인 실패: {approveJoin.error.message}</p>
-        )}
-        <Button
-          className="w-full"
-          disabled={approveJoin.isPending || gone}
-          onClick={() => approveJoin.mutate(request.id, { onSuccess: onClose })}
-        >
-          <Check className="h-4 w-4" /> {approveJoin.isPending ? "승인 중…" : "승인하기"}
-        </Button>
-        <Button className="w-full" variant="outline" onClick={onClose}>
-          취소
-        </Button>
-      </div>
-    </Modal>
   );
 }
 
@@ -1038,7 +971,7 @@ function CutoffRaiseNotice({ from, to }: { from: number; to: number }) {
 }
 
 // 컷오프 상향 확인 — 되돌릴 수 없는 결과가 딸린 유일한 정책 저장이라 한 단계를 세운다
-// (가입 요청 승인과 같은 자리). 정책값 자체는 되돌릴 수 있지만, 그 사이에 생긴 원장 항목과
+// (JoinRequests.tsx의 승인 확인 창과 같은 자리). 정책값 자체는 되돌릴 수 있지만, 그 사이에 생긴 원장 항목과
 // 차감된 세션은 정책을 되돌려도 남는다.
 function CutoffRaiseModal({
   from,
@@ -1086,6 +1019,203 @@ function CutoffRaiseModal({
   );
 }
 
+// ── 센터 신원(P55, PUT /v1/center {center} — owner 전용) ───────────────────────────────
+
+// 저장 직후 무엇이 달라지는지 — BUSINESS_EFFECT_NOTE·FACILITY_EFFECT_NOTE와 같은 자리.
+// 예약·정산·계약서는 하나도 움직이지 않는다: 바뀌는 건 **화면에 인쇄되는 이름**과 회원 앱이
+// 보여주는 상호·연락처다(GET /v1/public/center, v2.29 — 센터 연결 화면·홈 헤더·마이 탭·다음 예약
+// 카드). 계약서 상호는 옆 카드(사업자 정보)의 사업자명이라는 사실을 함께 말한다 — 두 칸을 같은
+// 것으로 알고 한쪽만 채우는 것이 이 폼에서 제일 하기 쉬운 실수다.
+//
+// 종전 문안은 "회원 앱의 센터 찾기 목록에 뜬다"고 했다 — 그런 목록은 없다(P55는 센터 선택 대신
+// 대기실을 택했다). 앱이 실제로 읽는 자리만 적는다(P56 L10). "다음 앱 업데이트부터"는 운영시간
+// 안내(1022행)와 같은 정직 고지 — 스토어 1.0(4) 이전 빌드는 이 값을 읽지 않는다.
+const CENTER_IDENTITY_EFFECT_NOTE =
+  "어드민 화면 상단과 설정의 센터 이름이 바로 이 값으로 바뀝니다. 회원 앱에서는 센터 연결 화면·홈·마이 탭에 이 상호가 뜨고, 전화·주소는 센터 연결 화면의 연락 카드에 쓰여요(비워 두면 아래 사업자 정보의 전화·주소를 대신 보여줍니다). 계약서·법정 고지에 인쇄되는 상호는 아래 사업자 정보의 사업자명(상호)이에요.";
+
+/**
+ * 센터 신원 편집 폼(P55, PUT /v1/center {center} — owner 전용).
+ *
+ * **3칸을 항상 전부 보낸다**(통 교체 — FacilityEditForm과 같은 규약). 전화·주소는 잘못 적은 값을
+ * 비워서 지우는 일이 실제로 필요하고, 머지였다면 한 번 들어간 오타를 지울 방법이 없다.
+ *
+ * 이름만 필수다(서버 domain.Center.Validate). 전화·주소를 필수로 올리지 않는 이유는 사업자 정보
+ * 폼과 같다 — 아는 칸부터 채우고 저장할 수 있어야 한다. 다만 이름은 빈 값을 서버가 400으로
+ * 거절하므로(빈 이름 저장은 "이름 지우기"가 아니라 그냥 실패다) 화면이 먼저 잠근다.
+ *
+ * baseline을 마운트 시점에 얼리는 이유는 이웃 폼들과 같다: initial은 폴링·창 포커스 재조회로
+ * 움직이는 살아 있는 prop이라, 그대로 비교하면 다른 창의 저장이 "내가 바꾼 것"으로 둔갑한다.
+ */
+function CenterIdentityEditForm({ initial }: { initial: CenterIdentity }) {
+  const updateIdentity = useUpdateCenterIdentity();
+  const nameId = useId();
+  const phoneId = useId();
+  const addressId = useId();
+  const [baseline, setBaseline] = useState<CenterIdentity>(initial);
+  const [name, setName] = useState(initial.name);
+  const [phone, setPhone] = useState(initial.phone);
+  const [address, setAddress] = useState(initial.address);
+  // 저장 성공 문구는 이후 입력이 바뀌면 숨긴다 — 이웃 폼들과 같은 규약.
+  const [touched, setTouched] = useState(false);
+
+  // 서버 domain.Center.Validate 미러. 길이는 **코드 포인트**로 센다(서버 len([]rune(s))) —
+  // s.length(UTF-16)로 세면 이모지가 든 상호에서 서버가 받아주는 값을 화면이 먼저 막는다.
+  const nameLen = [...name.trim()].length;
+  const nameEmpty = name.trim() === "";
+  const nameErr = nameEmpty
+    ? null // 빈 값은 아래 버튼 라벨이 이유를 말한다(빨간 문구를 첫 렌더부터 띄우지 않는다)
+    : nameLen > CENTER_NAME_MAX
+      ? `센터 이름은 ${CENTER_NAME_MAX}자 이내여야 해요`
+      : null;
+  const phoneErr =
+    [...phone.trim()].length > CENTER_PHONE_MAX ? `전화번호는 ${CENTER_PHONE_MAX}자 이내여야 해요` : null;
+  const addressErr =
+    [...address.trim()].length > CENTER_ADDRESS_MAX ? `주소는 ${CENTER_ADDRESS_MAX}자 이내여야 해요` : null;
+  const invalid = nameEmpty || !!nameErr || !!phoneErr || !!addressErr;
+
+  // 공백만 늘린 값은 서버 입장에서 "안 바뀜"(서버 Normalize가 앞뒤 공백을 턴다) — 이웃 폼들과
+  // 같은 trim 비교. 그대로 비교하면 아무것도 달라지지 않는 저장 요청을 열어 주게 된다.
+  const changedCount = [
+    name.trim() !== baseline.name.trim(),
+    phone.trim() !== baseline.phone.trim(),
+    address.trim() !== baseline.address.trim(),
+  ].filter(Boolean).length;
+
+  // 이 창을 연 뒤 다른 창·다른 대표가 센터 신원을 바꿨나 — 통 교체라 지금 저장하면 그쪽 값이
+  // 내 화면의 옛 값으로 덮인다(사업자 정보·시설 신고와 같은 경고 자리).
+  const serverMoved =
+    baseline.name !== initial.name ||
+    baseline.phone !== initial.phone ||
+    baseline.address !== initial.address;
+
+  function save() {
+    if (invalid || changedCount === 0) return;
+    setTouched(false);
+    const sent: CenterIdentity = { name: name.trim(), phone: phone.trim(), address: address.trim() };
+    updateIdentity.mutate(sent, {
+      // 서버가 돌려준 값(GET /v1/center과 같은 모양)이 새 기준선이자 새 화면 값 —
+      // BusinessEditForm과 같은 재장전. 서버가 정규화한 값과 입력칸이 어긋나 방금 저장한 폼이
+      // 곧바로 "바뀐 항목 1개"로 되살아나지 않게 한다.
+      //
+      // 응답에 center 덩어리가 없으면(저장은 받아 주지만 아직 되돌려주지 않는 배포 — 지금 서버는
+      // 상호만 top-level name으로 준다) **방금 보낸 값**을 기준선으로 삼는다. 서버가 200으로
+      // 받아들인 값이라 그대로 두는 편이 정직하다 — 응답에 없다고 빈칸으로 되돌리면 대표는
+      // 전화·주소가 저장되지 않은 줄 알고 다시 입력하고, 저장할 때마다 다시 사라진다.
+      onSuccess: (center) => {
+        const saved = center.center ? centerIdentityOf(center) : sent;
+        setBaseline(saved);
+        setName(saved.name);
+        setPhone(saved.phone);
+        setAddress(saved.address);
+      },
+    });
+  }
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="col-span-2">
+          <Label htmlFor={nameId}>센터 이름(상호) — 필수</Label>
+          <Input
+            id={nameId}
+            value={name}
+            placeholder="라이즈 컨디셔닝 센터"
+            onChange={(e) => {
+              setName(e.target.value);
+              setTouched(true);
+            }}
+          />
+          {nameErr && <p className="mt-1 text-[10.5px] text-danger">{nameErr}</p>}
+        </div>
+        <div>
+          <Label htmlFor={phoneId}>센터 전화 (선택)</Label>
+          <Input
+            id={phoneId}
+            inputMode="tel"
+            value={phone}
+            placeholder="02-1234-5678"
+            onChange={(e) => {
+              setPhone(e.target.value);
+              setTouched(true);
+            }}
+          />
+          {phoneErr && <p className="mt-1 text-[10.5px] text-danger">{phoneErr}</p>}
+        </div>
+        <div>
+          <Label htmlFor={addressId}>센터 주소 (선택)</Label>
+          <Input
+            id={addressId}
+            value={address}
+            placeholder="서울특별시 강남구 …"
+            onChange={(e) => {
+              setAddress(e.target.value);
+              setTouched(true);
+            }}
+          />
+          {addressErr && <p className="mt-1 text-[10.5px] text-danger">{addressErr}</p>}
+        </div>
+      </div>
+
+      {/* 상호가 비어 있다는 사실을 "선택 안 함"이 아니라 **지금 무엇이 안 되고 있는지**로 말한다.
+          이름이 없으면 회원 앱은 앱에 내장된 임시 상호를 찍고, 어드민 화면의 이름도 서버 값이
+          아니라 임시 폴백이다(둘은 같은 문자열 — 등록 전 상태에서 두 화면이 다른 이름을 말하지 않게). */}
+      {baseline.name.trim() === "" && (
+        <div className="mt-2 rounded-[10px] border border-warn/40 bg-warn/10 px-3 py-2 text-[11px] leading-[1.8] text-warn">
+          <TriangleAlert className="mr-1 -mt-0.5 inline h-3.5 w-3.5" />
+          아직 <b>센터 이름이 등록되지 않았어요</b> — 회원 앱의 센터 연결 화면·홈·마이 탭에는
+          앱에 내장된 임시 상호("{CENTER_NAME_FALLBACK}")가 뜹니다. 지금 화면 곳곳에 보이는
+          이름도 서버 값이 아니라 <b>등록 전까지만 쓰는 임시 표시</b>예요.
+        </div>
+      )}
+
+      {serverMoved && (
+        <p className="mt-2 rounded-[10px] border border-warn/40 bg-warn/10 px-3 py-2 text-[11px] leading-[1.8] text-warn">
+          <TriangleAlert className="mr-1 -mt-0.5 inline h-3.5 w-3.5" />이 창을 연 뒤 다른 곳에서
+          센터 정보가 바뀌었어요 — 화면의 값은 그때 것입니다. 저장은{" "}
+          <b>3칸을 통째로 덮어쓰기</b> 때문에 지금 저장하면 그쪽에서 바꾼 값도 화면의 옛 값으로
+          되돌아갑니다. 새로고침으로 최신 값을 먼저 확인해주세요.
+        </p>
+      )}
+      {updateIdentity.isSuccess && !touched && (
+        <p className="mt-2 text-[11px] text-ok">
+          <Check className="mr-1 inline h-3 w-3" />
+          저장됐어요 — {CENTER_IDENTITY_EFFECT_NOTE}
+        </p>
+      )}
+      {/* 서버 400 문구를 그대로 보여준다 — 미러가 놓친 규칙이 있어도 이유가 화면에 남는다.
+          이 배포에 center 덩어리가 아직 없는 서버라면 여기에 "지원하지 않는 필드" 400이 뜬다. */}
+      {updateIdentity.isError && (
+        <p className="mt-2 text-[11px] text-danger">{updateIdentity.error.message}</p>
+      )}
+
+      <Button
+        className="mt-2.5 w-full"
+        disabled={updateIdentity.isPending || invalid || changedCount === 0}
+        onClick={save}
+      >
+        <Save className="h-4 w-4" />{" "}
+        {updateIdentity.isPending
+          ? "저장 중…"
+          : // 이유를 사실대로 말한다 — 이름이 비어 저장이 잠긴 것을 "바뀐 항목 없음"으로 쓰면
+            // 대표는 무엇을 해야 하는지 알 수 없다(FacilityEditForm의 "신고번호를 입력해주세요"와 같은 자리).
+            nameEmpty
+            ? "센터 이름을 입력해주세요"
+            : invalid
+              ? "입력 길이를 확인해주세요"
+              : changedCount === 0
+                ? "바뀐 항목 없음"
+                : `저장 (${changedCount}개 항목)`}
+      </Button>
+      <p className="mt-2.5 text-[10.5px] leading-[1.8] text-muted">
+        여기 적은 이름이 <b className="text-ink">어드민 화면 상단·설정의 센터 이름</b>이 되고,
+        회원이 앱에서 센터를 찾을 때 보이는 이름이에요. 계약서와 법정 고지에 인쇄되는 상호는 아래{" "}
+        <b className="text-ink">사업자 정보의 사업자명(상호)</b>으로, 이 칸과 다를 수 있습니다(간판
+        이름과 사업자등록증의 이름). 저장은 3칸을 통째로 바꾸므로 지운 칸은 실제로 비워집니다.
+      </p>
+    </div>
+  );
+}
+
 // ── 사업자 정보(v2.13, PUT /v1/center {business} — owner 전용) ─────────────────────────
 
 // businessOf — 응답에서 사업자 정보를 꺼내되, **없으면 미등록과 같은 모양으로 접는다**.
@@ -1093,7 +1223,7 @@ function CutoffRaiseModal({
 // 타입은 business를 필수로 선언한다(계약이 그렇게 약속한다). 이 한 겹은 그 약속이 깨지는 유일한
 // 창을 위한 것이다: 계약 v2.13 "배포 순서"는 서버 먼저를 요구하는데, 어드민이 먼저 뜨면 응답에
 // business가 없다. 그때 대가가 "사업자 정보 칸이 빈다"가 아니라 **설정 화면 전체가 흰 화면**이라는
-// 게 문제다 — 직원 관리·운영 정책·가입 승인이 같이 죽는다. 접어 두면 그 순간이 장애가 아니라
+// 게 문제다 — 직원 관리·운영 정책·시설 신고가 같이 죽는다. 접어 두면 그 순간이 장애가 아니라
 // "아직 등록 전"으로 보이고, 서버가 뜨는 순간 저절로 낫는다.
 function businessOf(c: Center): CenterBusinessView {
   return c.business ?? EMPTY_BUSINESS;
@@ -1617,7 +1747,7 @@ function FacilityEditForm({ initial }: { initial: CenterFacility }) {
   );
 }
 
-function OffdaysModal({ staff, onClose }: { staff: Staff; onClose: () => void }) {
+export function OffdaysModal({ staff, onClose }: { staff: Staff; onClose: () => void }) {
   const [offdays, setOffdays] = useState<string[]>(staff.offdays);
   const [newDate, setNewDate] = useState(todayStr());
   const setOffdaysMut = useSetOffdays();
@@ -1698,7 +1828,7 @@ function OffdaysModal({ staff, onClose }: { staff: Staff; onClose: () => void })
 
 // 원형 아바타 — photo_url이 있으면 이미지, 없거나 로드 실패하면 Staff.color 배경 + 이름 첫 글자
 // 이니셜(계약 v1.6 폴백 규약). URL이 바뀌면 실패 상태를 리셋해 재시도한다(모달 실시간 미리보기).
-function StaffAvatar({
+export function StaffAvatar({
   name,
   color,
   photoUrl,
@@ -1726,7 +1856,7 @@ function StaffAvatar({
     <span
       aria-hidden
       className={`${cls} flex shrink-0 select-none items-center justify-center rounded-full font-extrabold text-white`}
-      style={{ background: color || "#f43f5e" }}
+      style={{ background: color || "#7fa0c4" }}
     >
       {name.charAt(0)}
     </span>
@@ -1734,7 +1864,7 @@ function StaffAvatar({
 }
 
 // 프로필 미등록 판정 — 전 필드가 빈 값(계약 v1.6: profile은 항상 객체·배열은 항상 []).
-function isProfileEmpty(p: StaffProfile): boolean {
+export function isProfileEmpty(p: StaffProfile): boolean {
   return (
     !p.photo_url &&
     !p.title &&
@@ -1824,7 +1954,9 @@ const PHOTO_NOT_DEPLOYED_MSG =
 //        시도"라고 말하는데 그건 이 실패에서 **절대 통하지 않는 다음 행동**이다.
 function photoUploadErrorKo(e: unknown): string {
   if (e instanceof ApiError) {
-    if (e.status === 404) return PHOTO_NOT_DEPLOYED_MSG;
+    // 라우터 404만 미배포다(api.ts isRouteNotFound) — 그 외 404(예: 퇴사 처리로 사라진 uid)는
+    // 서버 문구를 그대로 쓴다.
+    if (isRouteNotFound(e)) return PHOTO_NOT_DEPLOYED_MSG;
     if (e.status === 413) {
       return "사진 용량이 서버 상한을 넘었어요 — 더 작게 찍히거나 잘라 둔 사진으로 다시 올려주세요.";
     }
@@ -1876,7 +2008,7 @@ function TrainerPhotoField({
   const [sizeNote, setSizeNote] = useState<{ from: number; to: number } | null>(null);
 
   const busy = preparing || upload.isPending;
-  const notDeployed = upload.error instanceof ApiError && upload.error.status === 404;
+  const notDeployed = isRouteNotFound(upload.error);
 
   // 드롭 존을 살짝 빗나간 드롭으로 **브라우저가 그 파일로 이동해 버리는** 사고를 막는다.
   // 그 순간 이 모달의 미저장 입력(직함·소개문·칩 목록)이 통째로 사라진다 — 사진 한 장 올리려다
@@ -2024,7 +2156,32 @@ function TrainerPhotoField({
 // 항상 전송한다(머지 아님). 전부 비우고 저장하면 자연스럽게 "프로필 지우기"가 된다.
 // 범위 위반(URL http(s)·직함 40자·연차 0~50·소개 500자·배열 20개/80자)은 서버 400 한국어
 // 메시지를 그대로 인라인 표시 — 클라이언트는 maxLength·클램프로 선차단만 돕는다.
-function ProfileModal({ staff, onClose }: { staff: Staff; onClose: () => void }) {
+//
+// photoEditable — 사진 컨트롤을 그릴지. 프로필 PUT은 본인 트레이너도 되지만 **사진 업로드는
+// owner 전용**이다(service_staff_photo.go `!p.IsOwner()` — 센터 공용 버킷에 쓰는 일이라 되돌리는
+// 수단·비용이 대표에게 있다). 트레이너의 자기 편집(MyProfile.tsx)에서는 false로 넘겨, 눌러보고
+// 403을 받는 [사진 선택]을 만들지 않고 그 사실을 문장으로 말한다. 사진 값은 손대지 않은 채
+// 그대로 다시 실어 보낸다(통 교체라 빼면 지워진다 — 서버는 지워진 우리 파일을 실제로 파기한다, v2.31).
+// 퇴사 행(직원 표)에서도 false다 — 서버가 퇴사자 업로드를 400으로 막는다(퇴사가 파기한 사진을 실수로
+// 되살리지 않기 위해). 어느 이유로 잠겼는지는 staff.status로 가려 문장을 고른다.
+//
+// clearable — 업로드는 막혀도 [사진 지우기](빈 photo_url PUT)는 열어 둘지. 퇴사 행이 true다: 퇴사자
+// 프로필 PUT은 서버가 허용하고, 이 배포 이전에 퇴사해 파일이 남은 스태프(또는 미구성 서버가 파기를
+// 건너뛴 건)를 대표가 정리할 유일한 어드민 경로다 — 서버가 파일까지 지운다(v2.31). MyProfile(트레이너
+// 본인)은 photoEditable=false만 넘기고 clearable은 기본값(=photoEditable, false)이다: 사진은 대표의 것이라
+// 본인이 지울 수도 없어야 한다. 프롭 이름을 uploadable로 바꾸지 않은 이유는 MyProfile 호출부가 이
+// 체인의 파일 범위 밖이라서다(뜻은 "업로드 가능"이다).
+export function ProfileModal({
+  staff,
+  onClose,
+  photoEditable = true,
+  clearable = photoEditable,
+}: {
+  staff: Staff;
+  onClose: () => void;
+  photoEditable?: boolean;
+  clearable?: boolean;
+}) {
   const updateProfile = useUpdateStaffProfile();
   const [photoUrl, setPhotoUrl] = useState(staff.profile.photo_url);
   // **서버에 지금 저장돼 있는** 사진 주소. staff prop은 목록에서 클릭한 순간의 스냅샷이라
@@ -2041,7 +2198,7 @@ function ProfileModal({ staff, onClose }: { staff: Staff; onClose: () => void })
   const trimmedUrl = photoUrl.trim();
   // 사진을 지웠지만 아직 저장 전 — 업로드는 즉시 반영인데 지우기는 저장이 필요하다는
   // 비대칭이 이 화면의 유일한 함정이라, 그 상태를 화면이 직접 말한다.
-  const photoCleared = savedPhotoUrl !== "" && trimmedUrl === "";
+  const photoCleared = (photoEditable || clearable) && savedPhotoUrl !== "" && trimmedUrl === "";
 
   function save() {
     updateProfile.mutate(
@@ -2064,15 +2221,69 @@ function ProfileModal({ staff, onClose }: { staff: Staff; onClose: () => void })
   return (
     <Modal open onClose={onClose} title={`프로필 편집 — ${staff.name}`} wide>
       <div className="space-y-3">
-        <TrainerPhotoField
-          staff={staff}
-          photoUrl={trimmedUrl}
-          onUploaded={(url) => {
-            setPhotoUrl(url);
-            setSavedPhotoUrl(url);
-          }}
-          onClear={() => setPhotoUrl("")}
-        />
+        {photoEditable ? (
+          <TrainerPhotoField
+            staff={staff}
+            photoUrl={trimmedUrl}
+            onUploaded={(url) => {
+              setPhotoUrl(url);
+              setSavedPhotoUrl(url);
+            }}
+            onClear={() => setPhotoUrl("")}
+          />
+        ) : (
+          /* 읽기 전용 사진 — 서버가 막는 동사(대표 아님 · 퇴사자)라 컨트롤 대신 사실을 적는다. */
+          <div className="flex flex-wrap items-start gap-3">
+            <div className="flex w-[132px] shrink-0 items-center justify-center rounded-[12px] border border-line bg-panel-2 px-3 py-3">
+              <StaffAvatar
+                name={staff.name}
+                color={staff.color}
+                photoUrl={safePhotoSrc(trimmedUrl)}
+                size="lg"
+              />
+            </div>
+            <div className="min-w-[220px] flex-1">
+              <Label>프로필 사진</Label>
+              {isStaffActive(staff) ? (
+                <p className="text-[10.5px] leading-[1.7] text-muted">
+                  사진은 <b className="text-ink">대표만 올리거나 바꿀 수 있어요</b> — 서버가 센터
+                  공용 저장소 쓰기를 대표에게만 허용합니다. 바꾸고 싶은 사진이 있으면 대표에게
+                  보내주세요. 아래 칸들은 여기서 바로 고칠 수 있고, 저장해도 사진은 그대로예요.
+                </p>
+              ) : savedPhotoUrl === "" ? (
+                /* 서버가 퇴사 때 파기했다(불변식: 빈 URL ⇔ 이 스태프 명의의 우리 파일 없음). 문장의 명사는
+                   서버 400("퇴사 처리된 스태프의 사진은 …")과 같은 '스태프'다. */
+                <p className="text-[10.5px] leading-[1.7] text-muted">
+                  <b className="text-ink">퇴사 처리된 스태프의 사진은 올릴 수 없어요</b> — 재입사 처리 후
+                  올려주세요. 퇴사 때 업로드했던 사진 파일은 삭제됐어요. 아래 칸들은 여기서 고칠 수
+                  있고, 저장해도 사진 칸은 그대로예요.
+                </p>
+              ) : (
+                /* 값이 남아 있다 = 이 배포 이전에 퇴사해 파기를 지나지 않았거나, 외부 주소이거나, 서버가
+                   미구성이라 파기를 건너뛴 건. "삭제됐어요"라고 말하면 거짓이다 — 남은 사실과 정리 경로
+                   ([사진 지우기] → 저장, 서버가 우리 파일이면 파일까지 지운다)를 말한다. */
+                <div className="text-[10.5px] leading-[1.7] text-muted">
+                  <p>
+                    <b className="text-ink">이전 방식으로 남았거나 외부 주소인 사진이에요</b> —{" "}
+                    <b className="text-ink">[사진 지우기]</b> 후 저장하면 파일도 삭제돼요(외부 주소면
+                    주소만 지워져요). 퇴사 처리된 스태프의 사진은 새로 올릴 수 없어요 — 재입사 처리 후
+                    올려주세요.
+                  </p>
+                  {clearable && trimmedUrl !== "" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-1.5 text-danger"
+                      onClick={() => setPhotoUrl("")}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> 사진 지우기
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {photoCleared && (
           <p className="text-[11px] text-warn">
             사진을 뺐어요 — <b>아래 저장을 눌러야</b> 실제로 지워집니다(그 전까지는 기존 사진이
@@ -2147,8 +2358,13 @@ function ProfileModal({ staff, onClose }: { staff: Staff; onClose: () => void })
         </Button>
         <p className="text-[10.5px] text-muted">
           프로필은 회원 열람 전제의 공개 정보예요(정산 정보와 무관). 모든 칸을 비우고 저장하면
-          프로필이 지워집니다. <b className="text-ink">사진만 규약이 달라요</b> — 고르는 즉시
-          올라가 저장되고, 나머지 칸은 저장을 눌러야 반영됩니다.
+          프로필이 지워집니다{photoEditable || clearable ? "" : "(사진은 남아요)"}.{" "}
+          {photoEditable && (
+            <>
+              <b className="text-ink">사진만 규약이 달라요</b> — 고르는 즉시 올라가 저장되고, 나머지
+              칸은 저장을 눌러야 반영됩니다.
+            </>
+          )}
         </p>
       </div>
     </Modal>
@@ -2376,8 +2592,8 @@ function InviteStaffModal({ onClose }: { onClose: () => void }) {
           <p className="text-[10.5px] text-muted">
             초대하면 계정이 만들어지고 그 이메일로 비밀번호 설정 메일이 갑니다 — 임시 비밀번호를
             사람 손으로 전달하지 않아요. 정산은 비워둬도 되고, 휴무·프로필은 초대 후 직원 표에서
-            설정하세요. 퇴사한 직원을 같은 이메일로 다시 초대하면 재입사로 처리되고 프로필·휴무가
-            그대로 복원됩니다(직원 표의 "재입사" 버튼과 같은 결과예요).
+            설정하세요. 퇴사한 직원을 같은 이메일로 다시 초대하면 재입사로 처리되고 프로필(사진 제외 —
+            퇴사 때 삭제돼요)·휴무가 그대로 복원됩니다(직원 표의 "재입사" 버튼과 같은 결과예요).
           </p>
         </div>
       )}
@@ -2407,7 +2623,7 @@ function StaffEditModal({
   // 본인 정정이면 헤더 이름도 함께 갱신해야 한다 — 아래 onSuccess 참고.
   const { me, refreshMe } = useAuth();
   const [name, setName] = useState(staff.name);
-  const [color, setColor] = useState(staff.color || "#f43f5e");
+  const [color, setColor] = useState(staff.color || "#7fa0c4");
   const [role, setRole] = useState<StaffRole>(staff.role);
   const [payoutType, setPayoutType] = useState<PayoutType>(staff.payout.type);
   // rate는 0~1 소수 규약 — 입력은 %로 받고 저장 시 /100(InviteStaffModal·PolicyEditForm과 동일).
@@ -2473,7 +2689,7 @@ function StaffEditModal({
               <input
                 id="se-color"
                 type="color"
-                value={colorOk ? normalizedColor : "#f43f5e"}
+                value={colorOk ? normalizedColor : "#7fa0c4"}
                 onChange={(e) => setColor(e.target.value)}
                 className="h-[38px] w-11 shrink-0 rounded-[10px] border border-line bg-panel-2"
                 aria-label="식별 색상 선택"
@@ -2885,7 +3101,8 @@ function DeactivateStaffModal({
           />
           <p className="mt-1 text-[10.5px] text-muted">
             지난 날짜로 소급 입력할 수 있어요(기본 오늘). 처리 즉시 로그인 계정이 잠기고 대표·트레이너
-            권한이 회수됩니다 — 과거 정산·원장·수업 기록은 그대로 남아요.
+            권한이 회수되며, 업로드한 프로필 사진 파일은 삭제됩니다 — 과거 정산·원장·수업 기록은 그대로
+            남아요.
           </p>
         </div>
 
@@ -2949,7 +3166,8 @@ function DeactivateStaffModal({
         </Button>
         <p className="text-[10.5px] text-muted">
           계정을 지우지 않습니다 — 원장(잔여 세션의 유일한 출처)과 정산 비교표가 이 계정을 참조하고
-          있고, 근로자 명부·정산 기록에는 법정 보존 의무가 있어요. 재입사도 언제든 가능합니다.
+          있고, 근로자 명부·정산 기록에는 법정 보존 의무가 있어요. 재입사도 언제든 가능합니다 — 다만
+          재입사하면 프로필 사진은 비어 있어 다시 올려야 해요.
         </p>
       </div>
     </Modal>
@@ -2970,7 +3188,8 @@ function ReactivateStaffModal({ staff, onClose }: { staff: Staff; onClose: () =>
         </p>
         <p className="text-[10.5px] text-muted">
           담당은 자동으로 돌아오지 않습니다. 퇴사 전에 넘긴 회원·회원권은 인수자에게 남아 있어요 —
-          필요하면 재입사 후 "담당 이관"으로 다시 넘겨주세요.
+          필요하면 재입사 후 "담당 이관"으로 다시 넘겨주세요. 프로필 사진은 퇴사 때 삭제되어 복원되지
+          않아요 — 필요하면 프로필에서 다시 올려주세요.
         </p>
         {reactivate.isError && (
           <p className="text-[11px] text-danger">{reactivate.error.message}</p>

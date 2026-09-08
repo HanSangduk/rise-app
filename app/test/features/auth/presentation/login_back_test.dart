@@ -82,7 +82,7 @@ void main() {
       (tester) async {
     await pumpLogin(tester, at: '/login/center-confirm');
     // 화면 내 상시 탈출구.
-    expect(find.text('다른 번호로 다시 시도'), findsOneWidget);
+    expect(find.text('번호 다시 인증하기'), findsOneWidget);
 
     await pressSystemBack(tester);
 
@@ -93,6 +93,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('번호 입력으로 돌아갈까요?'), findsNothing);
-    expect(find.text('다른 번호로 다시 시도'), findsOneWidget);
+    expect(find.text('번호 다시 인증하기'), findsOneWidget);
   });
 }

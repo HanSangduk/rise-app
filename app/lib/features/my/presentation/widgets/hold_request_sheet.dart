@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:rise_member/core/widgets/rise_sheet.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rise_member/core/icons/rise_icon.dart';
 import 'package:rise_member/core/icons/rise_icons.dart';
@@ -27,22 +28,31 @@ Future<void> showHoldRequestSheet(
   required List<PassDetail> passes,
   required String initialPassId,
 }) {
-  return showModalBottomSheet<void>(
-    context: context,
-    // 루트 Navigator에 띄운다 — 기본값(false)이면 셸 내부 Navigator에 올라가
-    // **하단 탭바가 시트와 스크림 위에 남는다**(실기기 점검에서 발견, P09).
-    // 모달이 뜬 채로 다른 탭을 누를 수 있어 확정 전 화면을 벗어나게 된다.
-    useRootNavigator: true,
-    isScrollControlled: true,
-    builder: (_) =>
-        _HoldRequestSheet(passes: passes, initialPassId: initialPassId),
+  // 제출 중 잠금 신호(P56 M1) — 날짜·사유를 다 채운 신청이 날아가는 동안 시트를
+  // 쓸어 내리면 서버 거부 문구가 갈 곳이 없다(rise_sheet.dart 헤더).
+  final submitting = ValueNotifier(false);
+  return showRiseSheet<void>(
+    context,
+    submitting: submitting,
+    builder: (_) => _HoldRequestSheet(
+      passes: passes,
+      initialPassId: initialPassId,
+      submitting: submitting,
+    ),
   );
 }
 
 class _HoldRequestSheet extends ConsumerStatefulWidget {
-  const _HoldRequestSheet({required this.passes, required this.initialPassId});
+  const _HoldRequestSheet({
+    required this.passes,
+    required this.initialPassId,
+    required this.submitting,
+  });
   final List<PassDetail> passes;
   final String initialPassId;
+
+  /// 제출 중 신호 — 래퍼의 잠금과 같은 객체(booking_confirm_sheet와 같은 배선).
+  final ValueNotifier<bool> submitting;
 
   @override
   ConsumerState<_HoldRequestSheet> createState() => _HoldRequestSheetState();
@@ -55,7 +65,9 @@ class _HoldRequestSheetState extends ConsumerState<_HoldRequestSheet> {
   DateTime? _from;
   DateTime? _to;
   final _reasonController = TextEditingController();
-  bool _submitting = false;
+
+  /// 저장소는 [widget.submitting] 하나다(rise_sheet.dart `submitting` 절).
+  bool get _submitting => widget.submitting.value;
 
   /// 서버가 돌려준 거부/실패 문구. 사전 판정([_rejection])과 구분해 둔다 —
   /// 입력을 고치면 사라져야 하는 값이라 패스·날짜가 바뀔 때 지운다.
@@ -80,6 +92,7 @@ class _HoldRequestSheetState extends ConsumerState<_HoldRequestSheet> {
   @override
   void dispose() {
     _reasonController.dispose();
+    widget.submitting.dispose();
     super.dispose();
   }
 
@@ -95,6 +108,12 @@ class _HoldRequestSheetState extends ConsumerState<_HoldRequestSheet> {
       today: DateFmt.todayKst(),
       maxHoldsPerPass: policy.maxHoldsPerPass,
       maxHoldTotalDays: policy.maxHoldTotalDays,
+      // **정책을 못 받았으면 상한으로 막지 않는다**(P56 H4). `centerPolicyProvider`는
+      // 조회 실패 시 예외가 아니라 폴백(2회/30일)을 **데이터로** 준다 — 그 숫자로
+      // 판정하면 센터 실제 정책이 5회/90일인데 홀딩 2건을 쓴 회원의 버튼을 "이미
+      // 2회를 썼어요"로 잠근다. 서버는 통과시킬 신청이다(hold_rules 헤더의 금지 사항).
+      // 상태·구간·겹침 검사는 정책과 무관하므로 그대로 돈다.
+      capsUnknown: policy.isFallback,
     );
     return state is HoldRejected ? state : null;
   }
@@ -117,6 +136,9 @@ class _HoldRequestSheetState extends ConsumerState<_HoldRequestSheet> {
       pass: selected,
       maxHoldsPerPass: policy.maxHoldsPerPass,
       maxHoldTotalDays: policy.maxHoldTotalDays,
+      // 판정([_rejection])과 같은 값 — 표시만 "확인하지 못했어요"이고 판정은 폴백으로
+      // 막는(또는 그 반대) 조합이 hold_rules가 막으려는 불일치다.
+      capsUnknown: policy.isFallback,
     );
     final datesComplete = _from != null && _to != null;
 
@@ -398,7 +420,7 @@ class _HoldRequestSheetState extends ConsumerState<_HoldRequestSheet> {
       return;
     }
     setState(() {
-      _submitting = true;
+      widget.submitting.value = true;
       _error = null;
     });
     final result = await ref
@@ -421,7 +443,7 @@ class _HoldRequestSheetState extends ConsumerState<_HoldRequestSheet> {
         );
       case Err(:final failure):
         setState(() {
-          _submitting = false;
+          widget.submitting.value = false;
           _error = failure.message;
         });
     }

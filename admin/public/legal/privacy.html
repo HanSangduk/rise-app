@@ -103,7 +103,7 @@ footer.doc p{margin:0 0 8px}
   <h1>개인정보처리방침</h1>
   <p class="meta">
     <b>시행일</b> <span class="ph" data-biz="effective_date">(시행일 미정)</span> · <b>버전</b> v1.0 (최초 수립)<br>
-    <b>적용 대상</b> 라이즈 컨디셔닝 회원 앱(iOS · Android, <code>ai.stra.rize</code>)과 센터 운영 도구(어드민)
+    <b>적용 대상</b> 라이즈 컨디셔닝 회원 앱(iOS · Android, <code>com.han.rise</code>)과 센터 운영 도구(어드민)
   </p>
   <div class="docnav">
     <a href="./terms.html">이용약관</a>
@@ -184,6 +184,8 @@ footer.doc p{margin:0 0 8px}
 <tr><td>결제 기록</td><td>결제 수단 구분(카드·현금·계좌이체), 총액, 분할 회차별 금액·납부 예정일·납부일시</td><td>센터가 결제 후 입력</td><td><span class="tag req">계약이행</span></td></tr>
 <tr><td>전자계약</td><td>계약 대상 상품·금액·위약금율, 계약 상태, 발송·서명 일시, <b>서명 당시 IP 주소</b>, <b>자필 서명 이미지</b>(앱 서명 화면에 직접 입력한 경우), 문서 해시값, 문서 경로</td><td>회원이 앱에서 서명할 때 자동 기록</td><td><span class="tag req">계약이행</span></td></tr>
 <tr><td>예약·출석</td><td>예약 일시·담당 코치·사용 회원권·예약 상태, 고정 스케줄, 체크인 기록</td><td>회원 또는 센터가 입력 / QR 체크인 시 자동 기록</td><td><span class="tag req">계약이행</span></td></tr>
+<tr><td>센터 찾기 요청</td><td>이름, 휴대폰 번호, 요청 시각, 처리 상태</td><td>전화번호가 자동으로 맞지 않을 때 회원이 앱에서 직접 요청</td><td><span class="tag req">계약이행</span></td></tr>
+<tr><td>재등록·상담 요청</td><td>요청 종류, <b>회원이 직접 쓴 메모</b>, 요청 시각, 처리 상태</td><td>회원이 앱에서 입력</td><td><span class="tag req">계약이행</span></td></tr>
 <tr><td>운동 기록</td><td>수업별 운동 종목·세트·횟수·중량·메모, <b>코치 코멘트</b>, 홈워크 배정 내용과 수행 체크 결과</td><td>코치가 작성 / 회원이 앱에서 체크</td><td><span class="tag req">계약이행</span></td></tr>
 <tr><td><b>체성분(InBody)</b></td><td>측정일, 체중(kg), 골격근량 SMM(kg), 체지방량 BFM(kg), 체지방률 PBF(%), 내장지방레벨 VFL, 기초대사량 BMR(kcal), 입력 주체(본인·센터)</td><td>회원이 결과지를 보고 앱에 직접 입력(결과지 사진을 이용한 자동 입력 보조 포함) 또는 센터가 입력</td><td><span class="tag sen">민감</span></td></tr>
 <tr><td><b>체형사진</b></td><td>촬영 이미지 파일, 촬영일, 포즈, 촬영 방향(정면·측면·후면)</td><td>회원이 앱 카메라로 직접 촬영·업로드</td><td><span class="tag sen">민감</span></td></tr>
@@ -210,7 +212,7 @@ footer.doc p{margin:0 0 8px}
 <tr><td>이메일 주소(로그인 ID), 이름, 담당 색상, 재직 상태, 입·퇴사 일자, 휴무일</td><td>센터 대표가 등록</td></tr>
 <tr><td>정산 조건(세션당 금액 또는 요율)</td><td>센터 대표가 등록</td></tr>
 <tr><td>프로필 — 직함, 경력 연차, 전문분야, 자격, 수상·선수 경력, 소개문</td><td>센터가 등록(회원 앱에 공개됩니다)</td></tr>
-<tr><td>프로필 사진의 <b>인터넷 주소</b><br><span style="color:var(--dim);font-size:.94em">(이미지 파일 자체를 센터가 보관하지 않고, 센터가 입력한 주소를 앱이 불러와 표시합니다)</span></td><td>센터가 등록(회원 앱에 공개됩니다)</td></tr>
+<tr><td>프로필 사진<br><span style="color:var(--dim);font-size:.94em">(센터가 어드민에서 업로드하며, 이미지 파일은 센터의 저장소(Google Cloud Storage, 서울 리전)에 보관되고 회원 앱이 그 파일을 불러와 표시합니다. 사진을 교체하거나 지우면 이전 파일은 삭제되며, 스태프가 퇴사 처리되면 사진 파일도 함께 삭제됩니다)</span></td><td>센터가 등록(회원 앱에 공개됩니다)</td></tr>
 </tbody>
 </table>
 </div>
@@ -218,9 +220,10 @@ footer.doc p{margin:0 0 8px}
 암호화하여 보관하며, 센터는 초기 등록과 비밀번호 재설정 메일 발송만 요청할 수 있습니다.</p>
 
 <h3>3. 이용자의 기기 안에 저장되는 정보</h3>
-<p>다음 정보는 서버로 전송되지 않고 회원의 기기 안에만 저장됩니다.</p>
+<p>다음 정보는 회원의 기기 안에 저장됩니다. <b>대부분은 서버로 전송되지 않지만, 아래에 따로 표시한 항목은 서버에도 저장됩니다</b> — 항목마다 어디에 남는지 함께 적었습니다.</p>
 <ul>
-  <li><b>가입 요청 중인 휴대폰 번호와 요청 시각</b> — “승인 대기 중” 상태를 앱을 껐다 켜도 유지하기 위한 것으로, 계정 연결이 끝나면 삭제됩니다.</li>
+  <li><b>가입 요청 중인 휴대폰 번호와 요청 시각(기기 사본)</b> — “승인 대기 중” 상태를 앱을 껐다 켜도 유지하기 위해 기기에도 남겨 둡니다. 계정 연결이 끝나거나 앱에서 계정을 삭제하면 삭제됩니다.
+    <b>다만 요청 자체(이름·휴대폰 번호)는 센터가 승인할 수 있도록 서버에도 저장됩니다</b> — 아래 제1조 수집 항목표의 “센터 찾기 요청”을 보세요. 이 항목은 회원이 탈퇴하면 서버에서 함께 삭제됩니다.</li>
   <li><b>로그인 토큰</b> — 인증 서비스 SDK가 iOS 키체인 / Android 내부 저장소에 보관합니다.</li>
   <li><b>체형사진 임시 사본</b> — 촬영 직후 업로드에 사용한 임시 파일은 <b>즉시 삭제</b>되고, 조회한 사진은 <b>메모리에만</b> 캐시되어 앱을 종료하면 사라집니다. 기기 앨범이나 앱 저장소에 저장하지 않습니다.</li>
   <li><b>체성분 결과지 사진</b> — 자동 입력을 위해 선택한 결과지 사진은 <b>기기 안에서만</b> 글자를 인식하고, 인식이 끝나면 사본을 즉시 삭제합니다. <b>이 사진은 서버로 전송되지도, 저장되지도 않습니다.</b></li>
@@ -262,8 +265,10 @@ footer.doc p{margin:0 0 8px}
 <thead><tr><th>항목</th><th>보유 기간</th><th>근거</th></tr></thead>
 <tbody>
 <tr><td>회원 계정·프로필, 동의 상태와 동의·철회 시각</td><td>이용계약 종료(탈퇴) 시까지</td><td>정보주체의 동의</td></tr>
-<tr><td>예약·체크인·운동 기록·홈워크</td><td>이용계약 종료(탈퇴) 시까지</td><td>정보주체의 동의</td></tr>
-<tr><td><b>체성분 수치·체형사진·건강 상태 메모</b></td><td>동의 철회, 삭제 요청 또는 탈퇴 시 <b>지체 없이 파기</b>. 그 전이라도 회원이 요청하면 개별 삭제</td><td>민감정보 별도 동의</td></tr>
+<tr><td>운동 기록·홈워크, 체크인 기록</td><td>이용계약 종료(탈퇴) 시까지</td><td>정보주체의 동의</td></tr>
+<tr><td>센터 찾기 요청, 재등록·상담 요청</td><td>처리 완료 또는 탈퇴 시 <b>지체 없이 파기</b></td><td>목적 달성(개인정보 보호법 제21조)</td></tr>
+<tr><td>지난 예약 내역</td><td>세션 차감·환불 정산의 근거가 되므로 <b>계약 기록과 함께 5년</b></td><td>「전자상거래 등에서의 소비자보호에 관한 법률」 제6조·시행령 제6조</td></tr>
+<tr><td><b>체성분 수치·체형사진·건강 상태 메모</b></td><td>삭제 요청 또는 탈퇴 시 <b>지체 없이 파기</b>. 동의를 철회하면 파기가 아니라 <b>열람·신규 저장이 즉시 잠기며</b>(제4조 참조), 잠긴 상태에서도 회원이 요청하면 개별 삭제합니다</td><td>민감정보 별도 동의</td></tr>
 <tr><td>계약 또는 청약철회 등에 관한 기록<br><span style="color:var(--dim);font-size:.94em">(전자계약, 회원권 발급·해지·환불)</span></td><td class="num">5년</td><td>「전자상거래 등에서의 소비자보호에 관한 법률」 제6조·시행령 제6조</td></tr>
 <tr><td>대금결제 및 재화등의 공급에 관한 기록<br><span style="color:var(--dim);font-size:.94em">(결제 내역, 세션 이용내역)</span></td><td class="num">5년</td><td>동 법 제6조·시행령 제6조</td></tr>
 <tr><td>소비자의 불만 또는 분쟁처리에 관한 기록</td><td class="num">3년</td><td>동 법 제6조·시행령 제6조</td></tr>
@@ -364,7 +369,7 @@ footer.doc p{margin:0 0 8px}
 <tr>
   <td><b>Google LLC</b><br><span style="color:var(--dim);font-size:.94em">Cloud Storage — 대한민국 서울(asia-northeast3) 리전에 보관</span></td>
   <td>이미지 저장소 운영·보관</td>
-  <td><b>체형사진</b></td>
+  <td><b>체형사진</b>, 스태프 프로필 사진</td>
 </tr>
 <tr>
   <td><b>Google LLC</b><br><span style="color:var(--dim);font-size:.94em">Cloud Run · Firebase Hosting — 대한민국 서울(asia-northeast3) 리전에서 실행</span></td>
@@ -492,6 +497,7 @@ footer.doc p{margin:0 0 8px}
       <li>대금결제 및 재화등의 공급에 관한 기록 — <b>5년</b></li>
       <li>소비자의 불만 또는 분쟁처리에 관한 기록 — <b>3년</b></li>
       <li>개인정보처리시스템 접속기록 — <b>2년</b></li>
+      <li><b>서명한 전자계약서 안의 이름·휴대폰 번호</b> — 계약서 보존 기간(<b>5년</b>)과 함께. 계정 쪽 이름·번호는 즉시 파기되지만, 계약서에 적힌 값은 계약 내용의 일부라 지우면 그 계약서가 분쟁 시 증거로서 의미를 잃기 때문에 함께 남습니다.</li>
     </ul>
   </li>
   <li>백업본에 남은 데이터는 <a href="#c3">제3조</a>에 안내한 대로 <b>7일 이내</b> 자동으로 소멸합니다.</li>
@@ -675,7 +681,14 @@ footer.doc p{margin:0 0 8px}
   var ctl = typeof AbortController === "function" ? new AbortController() : null;
   var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 6000);
 
-  fetch("/api/v1/public/business", ctl ? { signal: ctl.signal } : undefined)
+  /* **이 문서가 어느 센터의 고지인지는 URL이 정한다**(계약 v2.33). 여러 센터가 이 앱을 쓰므로
+   * 사업자 정보를 한 센터로 고정하면 나머지 센터의 법정 고지가 통째로 거짓이 된다.
+   * `?center=`가 없으면 서버가 기본 센터를 준다(배포돼 있는 구 링크 호환). 모르는 센터면 404이고,
+   * 그때는 아래 catch가 자리표시자를 그대로 남긴다 — 남의 사업자 정보를 대신 인쇄하지 않는다. */
+  var qsCenter = new URLSearchParams(location.search).get("center");
+  var bizUrl = "/api/v1/public/business" + (qsCenter ? "?center=" + encodeURIComponent(qsCenter) : "");
+
+  fetch(bizUrl, ctl ? { signal: ctl.signal } : undefined)
     .then(function (res) { return res.ok ? res.json() : null; })
     .then(function (data) {
       if (!data || typeof data !== "object") return;
@@ -705,6 +718,21 @@ footer.doc p{margin:0 0 8px}
   var b=document.getElementById('totop');
   addEventListener('scroll',function(){b.classList.toggle('on',scrollY>600)},{passive:true});
   b.addEventListener('click',function(){scrollTo({top:0,behavior:'smooth'})});
+})();
+</script>
+<script>
+/* 센터 승계 — 같은 폴더의 다른 법정 문서로 갈 때 `?center=`를 잃지 않게 한다(계약 v2.33).
+ * 잃으면 회원이 이용약관에서 개인정보처리방침으로 한 번 넘어가는 순간 **다른 센터의 고지**를
+ * 읽게 된다. 링크를 손으로 6장에 박지 않고 여기서 한 번에 붙인다. */
+(function () {
+  var center = new URLSearchParams(location.search).get("center");
+  if (!center) return;
+  var links = document.querySelectorAll('a[href^="./"]');
+  for (var i = 0; i < links.length; i++) {
+    var href = links[i].getAttribute("href");
+    if (href.indexOf("center=") !== -1) continue;
+    links[i].setAttribute("href", href + (href.indexOf("?") === -1 ? "?" : "&") + "center=" + encodeURIComponent(center));
+  }
 })();
 </script>
 </body>

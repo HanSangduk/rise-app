@@ -159,10 +159,12 @@ class _RowAction extends ConsumerWidget {
 
     final result = await ref.read(recordsViewModelProvider.notifier).deleteInbody(record.id);
     if (!context.mounted) return;
-    final (message, kind) = switch (result) {
-      Ok() => ('인바디 기록을 삭제했어요', RiseSnackKind.ok),
-      Err(:final failure) => (failure.message, RiseSnackKind.danger),
-    };
-    ScaffoldMessenger.of(context).showSnackBar(riseSnackBar(message, kind: kind));
+    switch (result) {
+      case Ok():
+        ScaffoldMessenger.of(context)
+            .showSnackBar(riseSnackBar('인바디 기록을 삭제했어요', kind: RiseSnackKind.ok));
+      case Err(:final failure):
+        showFailureSnackBar(context, failure);
+    }
   }
 }

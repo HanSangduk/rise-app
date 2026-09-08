@@ -39,5 +39,23 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+
+    # permission_handler_apple은 권한별 코드를 PERMISSION_* 매크로로 잘라 컴파일한다(ITMS-90683 회피).
+    # CocoaPods 경로에서는 이 매크로를 **Podfile이 직접** 줘야 하고, 없으면 카메라 전략이
+    # UnknownPermissionStrategy로 떨어져 status=denied · request=**permanentlyDenied**를 돌려준다
+    # — 시스템 권한 프롬프트가 한 번도 뜨지 않은 채 앱이 "설정 열기"로 보냈다.
+    # 2026-09-07 App Store 리젝 1.0(7) 5.1.1(iv)의 원인(work_log/P67). 검증: ios/scripts/check_release_target.sh
+    # 가 빌드마다(Debug 포함) Pods 프로젝트에 이 정의가 있는지 보고, store/scripts/verify-ios-archive.sh가
+    # 아카이브 바이너리에서 카메라 블록 고유 심볼로 다시 본다.
+    # 켜는 항목은 Dart가 실제로 부르는 Permission.camera 하나뿐 — 매크로를 켜면 그 권한 API가 링크되므로
+    # Info.plist에 Usage Description이 있는 것만 켠다(NSCameraUsageDescription ✓).
+    if target.name == 'permission_handler_apple'
+      target.build_configurations.each do |config|
+        # 기존 값이 문자열이어도(CocoaPods 버전에 따라) 배열로 정규화하고, 재실행에도 한 번만 넣는다.
+        defs = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS']
+        defs = defs.is_a?(String) ? defs.split : Array(defs || '$(inherited)')
+        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = (defs + ['PERMISSION_CAMERA=1']).uniq
+      end
+    end
   end
 end

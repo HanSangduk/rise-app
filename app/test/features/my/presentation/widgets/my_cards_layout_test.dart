@@ -7,6 +7,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rise_member/core/theme/app_theme.dart';
 
 import '../../../../support/font_loader.dart';
@@ -42,13 +43,17 @@ void main() {
     tester.view.physicalSize = Size(width, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
+    // ProviderScope — 약관 카드가 세션에서 센터를 읽어 법정 문서 URL에 싣는다(v2.33).
+    // 이 스위트는 레이아웃만 보므로 오버라이드 없이 기본 세션(null)이면 충분하다.
     await tester.pumpWidget(
-      MaterialApp(
-        theme: buildAppTheme(),
-        home: Scaffold(
-          body: MediaQuery(
-            data: MediaQueryData(textScaler: TextScaler.linear(scale)),
-            child: SingleChildScrollView(child: child),
+      ProviderScope(
+        child: MaterialApp(
+          theme: buildAppTheme(),
+          home: Scaffold(
+            body: MediaQuery(
+              data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+              child: SingleChildScrollView(child: child),
+            ),
           ),
         ),
       ),
@@ -70,12 +75,13 @@ void main() {
   });
 
   group('탭 타깃', () {
-    testWidgets('약관 4행 모두 44dp — 넘치지 않는 것과 누를 수 있는 것은 다른 문제다', (tester) async {
+    testWidgets('약관 5행 모두 44dp — 넘치지 않는 것과 누를 수 있는 것은 다른 문제다', (tester) async {
       await pump(tester, const LegalLinksCard());
 
       for (final label in const [
+        '앱 개인정보처리방침 (운영자)',
         '이용약관',
-        '개인정보처리방침',
+        '개인정보처리방침 (센터)',
         '민감정보(인바디·체형사진) 처리 안내',
         '계정·데이터 삭제 안내',
       ]) {

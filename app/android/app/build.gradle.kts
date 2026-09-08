@@ -23,8 +23,8 @@ if (hasReleaseKeystore) {
 }
 
 android {
-    // Firebase 콘솔 등록 패키지와 일치해야 한다 (rize-218c1 / ai.stra.rize).
-    namespace = "ai.stra.rize"
+    // Firebase 콘솔 등록 패키지와 일치해야 한다 (rize-218c1 / com.han.rise).
+    namespace = "com.han.rise"
     // Flutter 3.44 기본값은 36인데 permission_handler_android 14.0.0(= permission_handler
     // 13.0.1이 끌고 오는 버전)이 자기 모듈을 compileSdk 37로 컴파일한다. 프로젝트가 36에
     // 머무르면 Flutter Gradle 플러그인이 "plugin(s) require a higher Android SDK version"
@@ -40,7 +40,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "ai.stra.rize"
+        applicationId = "com.han.rise"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         // Flutter 3.44 기본 minSdk=24 — Firebase Auth 요구(23 이상) 충족.
@@ -68,6 +68,13 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // R8 규칙(P46) — ML Kit이 쓰지 않는 언어 인식기를 참조해 릴리스 빌드가
+            // "Missing classes detected while running R8"으로 죽었다. 규칙과 근거는
+            // android/proguard-rules.pro. 디버그에서는 R8이 안 돌아 안 드러난다.
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                rootProject.file("proguard-rules.pro"),
+            )
         }
     }
 }

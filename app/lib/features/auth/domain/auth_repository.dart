@@ -25,13 +25,17 @@ abstract interface class AuthRepository {
   Future<Result<void>> confirmJoin({required String memberId, required bool confirm, required String phone});
 
   /// 매칭 실패 시 가입 요청 경로 (POST /v1/join/request {center_id, name, phone}).
-  /// center_id는 비워 보내면 서버가 기본 센터로 폴백한다.
-  Future<Result<void>> requestJoin({required String name, required String phone});
+  /// [centerId]는 회원이 목록에서 고른 센터(계약 v2.33) — 비우면 서버가 기본 센터로 폴백한다.
+  Future<Result<void>> requestJoin({required String name, required String phone, String centerId});
+
+  /// 가입 요청을 보낼 수 있는 센터 목록 (GET /v1/join/centers, v2.33).
+  /// 고를 것이 1곳 이하면 화면은 선택을 묻지 않는다 — 선택지가 없는 선택 화면은 방해일 뿐이다.
+  Future<Result<List<CenterDirectory>>> fetchJoinCenters();
 
   /// 로그인 완료 후 세션 부트스트랩 (GET /v1/me).
   Future<Result<AppSession>> loadSession();
 
-  /// 인증 상태 초기화 — "다른 번호로 다시 시도" 탈출구가 쓴다.
+  /// 인증 상태 초기화 — "번호 다시 인증하기" 탈출구가 쓴다.
   /// 실패해도 화면 전환을 막지 않도록 Result가 아닌 void.
   Future<void> signOut();
 

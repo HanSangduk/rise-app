@@ -120,6 +120,13 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 			}{Error: "인증이 필요해요 — 다시 로그인해주세요", Code: code})
 			return
 		}
+		// 접속기록(accesslog.go, v2.30)에 Principal을 역주입한다. accessLog는 이 미들웨어보다
+		// **앞**에 서 있고(401을 기록하려고), 아래 r.WithContext가 만드는 파생 컨텍스트의 값 타입
+		// Principal은 그쪽에서 보이지 않는다 — 그래서 앞에서 심어 둔 포인터 엔트리를 여기서 채운다.
+		// 이 두 줄을 지우면 모든 스태프 요청이 '미인증'으로 기록된다(TestAccessLogRecordsStaffRequest).
+		if e := accessEntryFrom(r.Context()); e != nil {
+			e.principal, e.resolved = p, true
+		}
 		// superadmin은 관리 평면(/admin/*)과 /me만 쓴다. 센터 스코프 API에 들어가면
 		// CenterID=""로 store를 때려 Firestore nil doc ref panic(→500)이 되거나 빈 답을
 		// 진실처럼 주게 된다 — 개별 서비스 가드 87곳을 재검토하는 대신 여기 한 관문에서

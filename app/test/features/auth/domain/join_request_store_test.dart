@@ -37,6 +37,37 @@ void main() {
     });
   });
 
+  // P69 H3 — v2 필드 center_id. 구 JSON(v1)에는 없다 → ''로 읽히고 기록 자체는 유효해야 한다.
+  group('JoinRequestRecord.centerId — v2 스키마 하위호환', () {
+    test('centerId가 왕복에서 보존된다', () {
+      final v2 = JoinRequestRecord(phone: '+821012345678', requestedAt: requestedAt, centerId: 'gangnam-2');
+      final restored = JoinRequestRecord.decode(v2.encode());
+      expect(restored!.centerId, 'gangnam-2');
+      expect(restored.phone, '+821012345678');
+    });
+
+    test('구 JSON(center_id 없음)은 \'\'로 읽힌다 — 기록을 버리면 재실행 뒤 대기 상태를 잃는다', () {
+      final restored = JoinRequestRecord.decode(
+        '{"phone":"+821012345678","requested_at":"2026-08-22T14:30:05.000"}',
+      );
+      expect(restored, isNotNull);
+      expect(restored!.centerId, '');
+      expect(restored.requestedAt, requestedAt);
+    });
+
+    test('center_id가 문자열이 아니면 \'\' — 손상 한 칸이 기록 전체를 죽이지 않는다', () {
+      final restored = JoinRequestRecord.decode(
+        '{"phone":"+821012345678","requested_at":"2026-08-22T14:30:05.000","center_id":7}',
+      );
+      expect(restored!.centerId, '');
+    });
+
+    test('기본값은 \'\'(기본 센터 — 종전 동작)', () {
+      expect(record.centerId, '');
+      expect(record.encode(), contains('"center_id":""'));
+    });
+  });
+
   group('JoinRequestRecord.matches — 다른 번호로 로그인했을 때의 오복원 방지', () {
     test('표기가 달라도 같은 번호면 true (정규화 후 비교)', () {
       expect(record.matches('+821012345678'), isTrue);

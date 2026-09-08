@@ -785,9 +785,14 @@ func TestJoinRequestPhoneMustMatchToken(t *testing.T) {
 	}
 
 	// 번호 미입력이면 토큰의 검증된 번호로 채운다.
-	jr2, err := s.JoinRequestCreate(ctx, p, JoinRequestBody{Name: "김민지"})
+	//
+	// **uid를 바꿔서 확인한다**(v2.27): 같은 uid로 두 번째 pending을 만드는 것은 이제 409다
+	// (A-2 — 같은 사람이 큐에 여러 건 쌓이던 것이 C-2 좀비 승인의 재료였다). 이 테스트가
+	// 고정하려는 것은 번호 폴백 규칙이지 중복 허용이 아니므로, 다른 신청자로 같은 규칙을 본다.
+	p2 := Principal{UID: "u_new2", Role: domain.RoleMember, CenterID: testCenter, Phone: "+821012345678"}
+	jr2, err := s.JoinRequestCreate(ctx, p2, JoinRequestBody{Name: "김민지"})
 	if err != nil || jr2.Phone != "+821012345678" {
-		t.Fatalf("미입력 시 토큰 번호 폴백 실패: %v phone=%q", err, jr2.Phone)
+		t.Fatalf("미입력 시 토큰 번호 폴백 실패: %v phone=%+v", err, jr2)
 	}
 
 	// dev 모드(토큰 번호 없음)는 기존 동작 유지 — 바디 값 그대로.
@@ -800,19 +805,31 @@ func TestJoinRequestPhoneMustMatchToken(t *testing.T) {
 
 // 감사 회귀: 가입 요청의 센터는 토큰이 정한다 — 바디의 center_id를 그대로 저장하면 존재하지
 // 않는 센터로도 200이 나가고, 그 요청은 어느 owner 목록에도 뜨지 않아 영원히 pending으로 남는다.
-func TestJoinRequestIgnoresBodyCenterID(t *testing.T) {
+// **v2.33에서 규약이 바뀌었다**: 바디 `center_id`를 무시하는 대신 **서버 목록에 있을 때만**
+// 받는다(센터 선택). 이 테스트가 지키던 진짜 불변식은 "센터는 토큰이 정한다"가 아니라
+// **"존재하지 않는 센터로는 요청이 만들어지지 않는다"**였다 — 그 요청은 어느 대표의 큐에도
+// 뜨지 않아 신청자가 영원히 기다리기 때문이다. 그 불변식은 그대로 지키고, 확인 방법만
+// "무시하고 저장" → "거부"로 바꾼다.
+func TestJoinRequestRejectsUnknownCenterID(t *testing.T) {
 	s := newTestService()
 	ctx := context.Background()
 	applicant := Principal{UID: "u_new", Role: domain.RoleMember, CenterID: testCenter}
 
-	jr, err := s.JoinRequestCreate(ctx, applicant, JoinRequestBody{
+	if _, err := s.JoinRequestCreate(ctx, applicant, JoinRequestBody{
 		CenterID: "존재하지-않는-센터", Name: "신규회원", Phone: "010-7777-1111",
+	}); !errors.Is(err, errBadRequest) {
+		t.Fatalf("모르는 센터로 요청 = %v, want 400 — 어느 큐에도 안 뜨는 요청이 만들어진다", err)
+	}
+
+	// 생략하면 종전 동작 그대로(구버전 앱 호환) — Principal의 센터.
+	jr, err := s.JoinRequestCreate(ctx, applicant, JoinRequestBody{
+		Name: "신규회원", Phone: "010-7777-1111",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if jr.CenterID != testCenter {
-		t.Fatalf("바디 center_id가 저장됨: %q (want %q — 센터는 토큰이 정한다)", jr.CenterID, testCenter)
+		t.Fatalf("center_id 생략 시 = %q, want %q", jr.CenterID, testCenter)
 	}
 
 	// 대표의 큐에 실제로 떠야 하고(예전엔 안 떴다), 원탭 승인까지 이어져야 한다.

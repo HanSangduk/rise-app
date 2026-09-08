@@ -23,9 +23,9 @@ class RiseCard extends StatelessWidget {
       margin: margin,
       padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
-        color: tinted ? AppColors.redLight : AppColors.surface,
+        color: tinted ? AppColors.brandLight : AppColors.surface,
         borderRadius: BorderRadius.circular(AppRadius.card),
-        border: Border.all(color: tinted ? AppColors.redBorder : AppColors.line),
+        border: Border.all(color: tinted ? AppColors.brandBorder : AppColors.line),
       ),
       child: child,
     );

@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>App Store 재제출 체크리스트 — 라이즈 1.0 (4)</title>
+<style>
+:root{--bg:#14181f;--panel:#1c222c;--panel-2:#222a36;--line:#2b3441;--text:#d7dde6;--dim:#a6b2c2;--faint:#7d8a9c;
+  --accent:#7db3f0;--ok:#86c48f;--warn:#e0af68;--danger:#e2726e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Pretendard,"Pretendard Variable",-apple-system,"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
+  font-size:16px;line-height:1.7;word-break:keep-all;overflow-wrap:anywhere}
+.wrap{max-width:76ch;margin:0 auto;padding:40px 20px 80px}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.02em}
+.sub{color:var(--dim);margin:0 0 22px;font-size:14.5px}
+h2{font-size:18px;margin:34px 0 12px;color:#e9eef5}
+.state{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(200px,1px));margin:0 0 6px}
+.chip{padding:12px 14px;border-radius:10px;background:var(--panel);border:1px solid var(--line);font-size:14.5px}
+.chip b{display:block;font-size:13px;letter-spacing:.08em;color:var(--faint);margin-bottom:4px}
+.chip.ok{border-left:3px solid var(--ok)} .chip.warn{border-left:3px solid var(--warn)} .chip.danger{border-left:3px solid var(--danger)}
+ol.todo{list-style:none;padding:0;margin:0;counter-reset:n}
+ol.todo li{position:relative;display:grid;grid-template-columns:28px 1fr;gap:12px;padding:14px 16px;margin:0 0 10px;border-radius:12px;background:var(--panel);border:1px solid var(--line)}
+ol.todo li.crit{border-left:3px solid var(--danger)}
+ol.todo li input{width:20px;height:20px;margin:4px 0 0;accent-color:var(--ok);cursor:pointer}
+ol.todo li .t{font-weight:750;color:#e9eef5}
+ol.todo li .t .n{color:var(--faint);font-weight:700;margin-right:6px}
+ol.todo li .d{color:var(--dim);font-size:14.6px;margin-top:3px}
+ol.todo li.done .t,ol.todo li.done .d{opacity:.45;text-decoration:line-through}
+.tag{display:inline-block;padding:.05em .5em;border-radius:6px;font-size:.86em;font-weight:700;margin-left:6px;vertical-align:middle}
+.tag.r{background:rgba(226,114,110,.15);color:var(--danger)} .tag.y{background:rgba(224,175,104,.15);color:var(--warn)}
+code{font-family:"SF Mono",Menlo,monospace;font-size:.9em;background:var(--panel-2);padding:.08em .4em;border-radius:5px;color:#cfe3fb}
+.path{font-weight:700;color:#cfe3fb}
+.box{padding:14px 16px;border-radius:10px;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);margin:10px 0}
+.box .h{display:block;font-weight:750;color:var(--accent);margin-bottom:6px;font-size:14.5px}
+pre{margin:0;white-space:pre-wrap;font-family:"SF Mono",Menlo,monospace;font-size:13.5px;line-height:1.6;color:#e2e8f0;background:#0f1319;padding:14px;border-radius:8px;border:1px solid var(--line)}
+button{font:inherit;font-size:14px;font-weight:700;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--text);cursor:pointer}
+button:hover{border-color:var(--accent)}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
+details{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:0 16px;margin:8px 0}
+summary{cursor:pointer;padding:12px 0;font-weight:700;color:#e9eef5}
+details .b{padding:0 0 14px;color:var(--dim);font-size:14.6px}
+a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+table{width:100%;border-collapse:collapse;font-size:14.5px}
+td,th{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top} th{color:var(--dim);font-weight:600;width:32%}
+footer{margin-top:40px;color:var(--faint);font-size:13px;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>App Store 재제출 체크리스트</h1>
+<p class="sub">라이즈 컨디셔닝 - PT 회원 앱 · 빌드 <b>1.0.0 (4)</b> · 2026-09-04 · 리젝 2건(2.1(a) 무한 스피너 · 1.5 지원 URL) 대응</p>
+
+<div class="state">
+  <div class="chip ok"><b>준비 완료</b>검증된 IPA · 지원 페이지 라이브 · 회신 문안</div>
+  <div class="chip danger"><b>남은 차단 1건</b>사업자 정보 미등록 (개인정보처리방침에 "초안" 배너)</div>
+  <div class="chip warn"><b>람만 할 수 있는 것</b>실기기 확인 · 업로드 · ASC 입력 · 제출</div>
+</div>
+
+<h2>순서대로 하기</h2>
+<ol class="todo" id="todo">
+  <li class="crit"><input type="checkbox" id="c1"><div>
+    <div class="t"><span class="n">1</span>어드민에서 사업자 정보 등록 <span class="tag r">필수 · 5.1.1 리젝 방지</span></div>
+    <div class="d">어드민 → <span class="path">설정 → 사업자 정보</span> 12항목 + 약관 시행일 저장. 지금은 개인정보처리방침이 "앱 스토어 제출에 쓰면 안 됩니다" 배너와 "(보호책임자 이메일 미정)"을 그대로 보여줍니다.<br>
+    확인: <a href="https://rize-218c1.web.app/legal/privacy.html" target="_blank">privacy.html</a>을 열어 빨간 배너가 사라졌는지(반영 최대 5분).</div></div></li>
+
+  <li><input type="checkbox" id="c2"><div>
+    <div class="t"><span class="n">2</span>빌드 업로드 (Xcode Organizer)</div>
+    <div class="d">Xcode → Window → <b>Organizer</b> → Archives에 오늘(9/5) <b>Runner 1.0.0 (4) P60</b> 하나만 보입니다 → 선택 → <b>Distribute App</b> → App Store Connect → Upload. (Apple ID 로그인 창이 뜨면 로그인.) 10~30분 뒤 "빌드 처리 완료" 메일.<br>
+    <span style="color:var(--faint)">Organizer의 <b>Archive 버튼은 누르지 않습니다.</b> 8/30의 리젝 아카이브 3개는 <code>Archives/2026-08-30/rejected-not-for-upload/</code>로 옮겨 목록에서 숨겼습니다(삭제는 안 함).<br>
+    대안: <code>~/Downloads/rise_member-1.0.0+4.ipa</code>를 Transporter로 올려도 됩니다. 단 이 파일은 00:14 빌드로, 마지막 방어 수정(공개 API 401에 로그아웃 안 함) 하나가 빠져 있습니다. 심사 통과에는 지장 없지만 Organizer 경로가 최신입니다.</span></div></div></li>
+
+  <li><input type="checkbox" id="c3"><div>
+    <div class="t"><span class="n">3</span>TestFlight로 실기기 확인</div>
+    <div class="d">iPhone에 TestFlight 설치 → 로그인 화면에 <b>010-0000-0000</b> → 인증번호 <b>000000</b> → "심사용 계정 님" 확인 → 홈·예약·기록(운동/인바디/체형 분석)·마이가 뜨는지. 로그인 중 웹뷰(reCAPTCHA)가 뜨지 않아야 정상입니다.</div></div></li>
+
+  <li><input type="checkbox" id="c4"><div>
+    <div class="t"><span class="n">4</span>App Store Connect · 앱 정보 → 지원 URL 교체</div>
+    <div class="d"><code>https://rize-218c1.web.app/legal/support.html</code> (<a href="https://rize-218c1.web.app/legal/support.html" target="_blank">열어보기</a>). 개인정보처리방침 URL은 그대로.</div></div></li>
+
+  <li><input type="checkbox" id="c5"><div>
+    <div class="t"><span class="n">5</span>버전 1.0 페이지 정리 → 제출</div>
+    <div class="d">① 빌드에서 <b>1.0 (4)</b> 선택 ② 심사 정보 → 메모에서 "국가를 Korea(+82)로 선택" 문장 삭제(로그인 화면에 국가 선택이 없음) — 새 메모는 <code>store/metadata/appstore.md</code> 심사 노트 ③ 리젝 메시지 답글에 아래 회신 문안 ④ 심사 제출.</div></div></li>
+
+  <li><input type="checkbox" id="c6"><div>
+    <div class="t"><span class="n">6</span>커밋할 때</div>
+    <div class="d"><code>app/ios/scripts/check_release_target.sh</code>와 <code>project.pbxproj</code>는 <b>같은 커밋</b>에. 스크립트 없이 체크아웃하면 iOS 빌드가 전부 실패합니다.</div></div></li>
+</ol>
+
+<h2>리젝 답글 문안 (영문, 그대로 복사)</h2>
+<div class="box">
+  <span class="h">3번(실기기 확인)을 끝낸 뒤에만 보냅니다 — "verified on a physical iPhone"이 그때 참이 됩니다</span>
+  <div class="row"><span style="color:var(--dim);font-size:14px">App Store Connect → 버전 → 리젝 메시지 → 답글</span><button onclick="copyText('reply',this)">복사</button></div>
+<pre id="reply">Thank you for the detailed review.
+
+Guideline 2.1(a) — Root cause identified: build 1.0 (3) was produced with an incorrect build configuration that pointed the app at a non-production server address, so it could not load any data after launch. Build 1.0 (4) is built with the correct production configuration, and we added an automated check to our release process so this cannot recur. We verified 1.0 (4) on a physical iPhone with the demo account: sign-in, home, booking, records (workout, InBody, body check), and profile all load correctly.
+
+Guideline 1.5 — The Support URL now points to a dedicated support page, https://rize-218c1.web.app/legal/support.html, with a support email address, response times, and FAQs covering sign-in, bookings, records, and account deletion. The page is publicly accessible without sign-in and works without JavaScript.
+
+Demo account (unchanged): enter phone number 010-0000-0000 on the sign-in screen (Korean numbers only, no country selector), then SMS code 000000.</pre>
+</div>
+
+<h2>한눈에</h2>
+<table>
+  <tr><th>데모 계정</th><td>전화 010-0000-0000 · 인증번호 000000 (Firebase 테스트 번호 · 심사 회원 "심사용 계정" 활성 확인됨)</td></tr>
+  <tr><th>업로드할 빌드</th><td>Organizer의 <b>Runner 1.0.0 (4) P60</b> (09-05 00:27, 최종 트리 · 테스트 1,276 통과) — 검사 스크립트 전 항목 통과(프로덕션 API 주소 · 로컬 주소 0 · 테스트 잔재 0 · 심사 번호). IPA 자동 내보내기는 Mac이 잠긴 뒤 서명 계정을 못 읽어 실패했으므로 Organizer에서 올립니다.</td></tr>
+  <tr><th>지원 URL</th><td><a href="https://rize-218c1.web.app/legal/support.html" target="_blank">rize-218c1.web.app/legal/support.html</a> — 이메일 richramsang@gmail.com 정적 표시</td></tr>
+  <tr><th>백엔드</th><td>리비전 00030 라이브 — <code>GET /v1/public/center</code> 200 확인. 지금은 값이 비어 앱이 "라이즈 컨디셔닝 센터"로 표시합니다. 1번(사업자 정보)과 함께 어드민 설정의 <b>센터 상호·전화</b>를 채우면 홈·마이에 실제 값이 뜹니다.</td></tr>
+  <tr><th>다음 빌드 만들 때</th><td><code>bash store/scripts/build-release.sh ios</code> 한 줄. 검사 통과 문구 "✅ 아카이브 검사 통과"가 나와야 업로드.</td></tr>
+</table>
+
+<details><summary>왜 리젝됐나 (30초)</summary><div class="b">
+스크린샷 캡처 도구가 남긴 Xcode 설정(테스트 진입점 + <code>localhost:8081</code> API)을 Organizer Archive가 그대로 읽어, 1.0 (1)~(3) 전부 <b>스크린샷 통합테스트가 앱으로 컴파일</b>됐습니다. 심사자 iPad에서는 서버에 한 번도 닿지 못했고(Cloud Run 로그에 Apple 요청 0건), 테스트가 자동으로 기록 → 체형 분석 탭까지 이동해 스피너만 돌았습니다. 1.5는 지원 URL 페이지에 문의 수단이 "(미정)"뿐이었기 때문입니다.
+</div></details>
+<details><summary>재발 방지 3겹 (설치 완료)</summary><div class="b">
+① Xcode 빌드 페이즈 가드가 Release에서 테스트 진입점·localhost·LAN 주소를 거부 ② 캡처 스크립트가 끝나면 설정을 복원 ③ 아카이브 검사 스크립트가 산출물 문자열로 판정(리젝 아카이브는 5건 거부, 새 아카이브는 통과 실증). 버전은 <code>pubspec.yaml</code> 하나로만 정합니다.
+</div></details>
+
+<footer>work_log/P60-ios-review-reject-fix.md · store/README.md 제출 순서 · store/metadata/appstore.md 심사 노트</footer>
+</div>
+<script>
+(function(){
+  var KEY='rise-appstore-todo-1.0.4';
+  var saved={}; try{ saved=JSON.parse(localStorage.getItem(KEY)||'{}'); }catch(e){}
+  var boxes=document.querySelectorAll('#todo input[type=checkbox]');
+  boxes.forEach(function(b){
+    b.checked=!!saved[b.id]; b.closest('li').classList.toggle('done',b.checked);
+    b.addEventListener('change',function(){
+      saved[b.id]=b.checked; b.closest('li').classList.toggle('done',b.checked);
+      try{ localStorage.setItem(KEY,JSON.stringify(saved)); }catch(e){}
+    });
+  });
+})();
+function copyText(id,btn){
+  var t=document.getElementById(id).textContent;
+  function done(){ btn.textContent='복사됨'; setTimeout(function(){btn.textContent='복사';},1500); }
+  if(navigator.clipboard){ navigator.clipboard.writeText(t).then(done,function(){fallback();}); } else { fallback(); }
+  function fallback(){ var r=document.createRange(); r.selectNodeContents(document.getElementById(id)); var s=getSelection(); s.removeAllRanges(); s.addRange(r); try{document.execCommand('copy');done();}catch(e){} }
+}
+</script>
+</body>
+</html>

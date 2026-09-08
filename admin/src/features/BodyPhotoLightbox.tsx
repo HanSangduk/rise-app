@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { BodyPhotoLoadError, loadBodyPhotoUrl } from "@/lib/bodyPhotoBlob";
 import { formatMonthDay } from "@/lib/format";
@@ -13,15 +13,21 @@ import type { BodyPhoto } from "@/lib/types";
  * 실패는 세 갈래로 갈라 말한다. 특히 403은 **회원이 동의를 철회한 것**이 대표적 원인이고,
  * 이건 장애가 아니라 정상 동작이다 — 목록 API는 동의를 안 보고 내려주는데 Storage 규칙은
  * 보기 때문에 "목록은 뜨는데 사진만 안 열리는" 상태가 설계상 존재한다.
+ *
+ * footer — 사진 아래 조작 슬롯(P58 A2: 삭제 컨트롤). 삭제가 **여기에만** 있는 이유: 타임라인
+ * 타일은 사진이 아니라 아이콘+날짜라(원본은 클릭해야 받는다) 거기에 휴지통을 달면 **보지 않은
+ * 사진을 지우는 UI**가 된다. 원본이 눈앞에 있는 자리가 지우는 자리다.
  */
 export function BodyPhotoLightbox({
   photo,
   label,
   onClose,
+  footer,
 }: {
   photo: BodyPhoto;
   label: string;
   onClose: () => void;
+  footer?: ReactNode;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<BodyPhotoLoadError | null>(null);
@@ -108,6 +114,7 @@ export function BodyPhotoLightbox({
           )}
         </div>
 
+        {footer && <div className="border-t border-line px-4 py-2.5">{footer}</div>}
         <p className="border-t border-line px-4 py-2 text-[10.5px] text-muted">
           {/* 내부 티켓 번호(P8)는 화면에서 뺀다 — 대표에게 아무 의미가 없고 찾아볼 곳도 없다(어드민 UX 감사). */}
           민감정보입니다 — 화면을 공유하거나 내려받아 보관하지 마세요.

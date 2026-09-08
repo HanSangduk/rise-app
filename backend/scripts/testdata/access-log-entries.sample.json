@@ -1,0 +1,63 @@
+[
+  {
+    "insertId": "sample-0001",
+    "logName": "projects/rize-218c1/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-08-12T02:10:01.100Z",
+    "timestamp": "2026-08-12T02:10:00.913456789Z",
+    "severity": "INFO",
+    "trace": "projects/rize-218c1/traces/a1b2c3",
+    "resource": {"type": "cloud_run_revision", "labels": {"service_name": "rize-api", "location": "asia-northeast3", "revision_name": "rize-api-00042-abc"}},
+    "jsonPayload": {
+      "log_type": "access", "message": "access owner1 PUT /v1/members/{id} 200", "request_id": "host/abc-000001",
+      "uid": "owner1", "role": "owner", "center_id": "rise",
+      "method": "PUT", "route": "/v1/members/{id}", "path": "/v1/members/m1", "status": 200, "latency_ms": 12, "bytes": 412,
+      "remote_ip": "203.0.113.7", "x_forwarded_for": "203.0.113.7, 35.191.10.20", "xff_last": "35.191.10.20",
+      "user_agent": "Mozilla/5.0 (Macintosh) Chrome/128 | admin", "subject": {"member_id": "m1"}
+    }
+  },
+  {
+    "insertId": "sample-0002",
+    "logName": "projects/rize-218c1/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-08-15T16:31:00.000Z",
+    "timestamp": "2026-08-15T16:30:12.000Z",
+    "severity": "INFO",
+    "resource": {"type": "cloud_run_revision", "labels": {"service_name": "rize-api", "location": "asia-northeast3", "revision_name": "rize-api-00042-abc"}},
+    "jsonPayload": {
+      "log_type": "access", "message": "access trainer7 GET /v1/body-photos 200", "request_id": "host/abc-000002",
+      "uid": "trainer7", "role": "trainer", "center_id": "rise",
+      "method": "GET", "route": "/v1/body-photos", "path": "/v1/body-photos", "status": 200, "latency_ms": 40, "bytes": 9120,
+      "remote_ip": "198.51.100.4", "x_forwarded_for": "198.51.100.4, 35.191.10.21", "xff_last": "35.191.10.21",
+      "user_agent": "Dart/3.9 (dart:io)", "subject": {"member_id": "m22"}
+    }
+  },
+  {
+    "insertId": "sample-0003",
+    "logName": "projects/rize-218c1/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-08-20T09:05:00.000Z",
+    "timestamp": "2026-08-20T09:04:59.500Z",
+    "severity": "WARNING",
+    "resource": {"type": "cloud_run_revision", "labels": {"service_name": "rize-api", "location": "asia-northeast3", "revision_name": "rize-api-00042-abc"}},
+    "jsonPayload": {
+      "log_type": "access", "message": "access - GET /v1/* 401", "request_id": "host/abc-000003",
+      "uid": "", "role": "", "center_id": "",
+      "method": "GET", "route": "/v1/*", "path": "/v1/members|probe", "status": 401, "latency_ms": 1, "bytes": 44,
+      "remote_ip": "6.6.6.6", "x_forwarded_for": "6.6.6.6, 192.0.2.77, 35.191.10.22", "xff_last": "35.191.10.22",
+      "user_agent": "curl/8.7.1"
+    }
+  },
+  {
+    "insertId": "sample-0004",
+    "logName": "projects/rize-218c1/logs/run.googleapis.com%2Fstdout",
+    "receiveTimestamp": "2026-08-28T05:00:31.000Z",
+    "timestamp": "2026-08-28T05:00:30.250Z",
+    "severity": "ERROR",
+    "resource": {"type": "cloud_run_revision", "labels": {"service_name": "rize-api", "location": "asia-northeast3", "revision_name": "rize-api-00042-abc"}},
+    "jsonPayload": {
+      "log_type": "access", "message": "access owner1 GET /api/v1/members 504", "request_id": "host/abc-000004",
+      "uid": "owner1", "role": "owner", "center_id": "rise",
+      "method": "GET", "route": "/api/v1/members", "path": "/api/v1/members", "status": 504, "latency_ms": 30001, "bytes": 0,
+      "remote_ip": "203.0.113.7", "x_forwarded_for": "203.0.113.7, 151.101.1.195, 35.191.10.23", "xff_last": "35.191.10.23",
+      "user_agent": "Mozilla/5.0 (Macintosh) Chrome/128"
+    }
+  }
+]

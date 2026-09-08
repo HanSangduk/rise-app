@@ -27,7 +27,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyAQawLECjeyQ3ZQj__YgMWb8WjRf8CI0wg',
-    appId: '1:773077624928:android:6e8fdbacda6ef84db0fb05',
+    appId: '1:773077624928:android:66408d0259a5f46ab0fb05',
     messagingSenderId: '773077624928',
     projectId: 'rize-218c1',
     storageBucket: 'rize-218c1.firebasestorage.app',
@@ -35,10 +35,10 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyDbFInJ75AzMFcMjDee6Gn1R9UqM-yXyMw',
-    appId: '1:773077624928:ios:b700434a369d2acfb0fb05',
+    appId: '1:773077624928:ios:3b39ab1c6c889eb0b0fb05',
     messagingSenderId: '773077624928',
     projectId: 'rize-218c1',
     storageBucket: 'rize-218c1.firebasestorage.app',
-    iosBundleId: 'ai.stra.rize',
+    iosBundleId: 'com.han.rise',
   );
 }

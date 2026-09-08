@@ -74,7 +74,7 @@ final class MyViewModelProvider
   MyViewModel create() => MyViewModel();
 }
 
-String _$myViewModelHash() => r'75e0d019b0f0e7cf06d762d7a58735817a0a4ab3';
+String _$myViewModelHash() => r'd6f8cef3bb6575ae3d120fa506d3f132ddd539bf';
 
 abstract class _$MyViewModel extends $AsyncNotifier<MySummary> {
   FutureOr<MySummary> build();
