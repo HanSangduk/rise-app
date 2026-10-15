@@ -58,4 +58,29 @@ void main() {
     await pump(tester, [rec('2026-05-26', 35.6, 13.7), rec('2026-08-23', 32.1, 18.4)]);
     expect(tester.takeException(), isNull);
   });
+
+  // 앱 전역 배율 상한(app.dart `_maxTextScale` = 1.35)에서 남은 고정 높이(80dp)가 터지지 않는다.
+  // P72가 "인바디 차트 80"을 재지 않은 고정 높이로 남겼고, app.dart 주석이 가리키던 회귀
+  // 테스트 파일은 존재하지 않았다(P73). 여기서 두 분기(차트·빈 상태 문구) 모두 잰다.
+  testWidgets('배율 1.35 · 320dp에서 차트도 빈 상태 문구도 넘치지 않는다', (tester) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    Future<void> pumpScaled(List<InbodyRecord> records) => tester.pumpWidget(MaterialApp(
+          theme: buildAppTheme(),
+          home: MediaQuery(
+            data: const MediaQueryData(textScaler: TextScaler.linear(1.35)),
+            child: Scaffold(body: InbodyChart(records: records)),
+          ),
+        ));
+
+    await pumpScaled([rec('2026-05-26', 35.6, 13.7), rec('2026-08-23', 32.1, 18.4)]);
+    expect(tester.takeException(), isNull, reason: '차트 분기(범례 Row)가 1.35에서 넘친다');
+    await pumpScaled([rec('2026-08-23', 32.1, 18.4)]);
+    // 빈 상태는 Row/Column이 아니라 SizedBox(80) 안의 Center>Text다 — RenderFlex 오버플로 예외가
+    // 나지 않으므로 takeException만으로는 아무것도 못 잡는다. 글자 상자의 실제 높이를 잰다.
+    final text = tester.getSize(find.textContaining('2회 이상 필요해요'));
+    expect(text.height, lessThanOrEqualTo(80), reason: '빈 상태 문구가 1.35에서 80dp를 넘친다');
+  });
 }

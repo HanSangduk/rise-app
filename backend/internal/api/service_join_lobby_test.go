@@ -278,7 +278,7 @@ func TestJoinRequestRejectsDuplicatePending(t *testing.T) {
 
 	// 남의 pending은 막지 않는다(uid 스코프 — 센터 전체를 잠그면 두 번째 신청자가 못 들어온다).
 	other := Principal{UID: "u_other", Role: domain.RoleMember, CenterID: testCenter}
-	if _, err := s.JoinRequestCreate(ctx, other, JoinRequestBody{Name: "이서준", Phone: "010-9999-0000"}); err != nil {
+	if _, err := s.JoinRequestCreate(ctx, other, JoinRequestBody{Name: "이서준", Phone: "010-1234-5678"}); err != nil {
 		t.Fatalf("다른 신청자 요청 = %v, want 성공", err)
 	}
 }
@@ -468,7 +468,7 @@ func TestJoinConfirmDestroysPendingJoinRequests(t *testing.T) {
 	// 이웃 신청자 — 남의 요청까지 쓸어가면 안 된다.
 	if _, err := s.JoinRequestCreate(ctx,
 		Principal{UID: "u_other", Role: domain.RoleMember, CenterID: testCenter},
-		JoinRequestBody{Name: "이서준", Phone: "010-9999-0000"}); err != nil {
+		JoinRequestBody{Name: "이서준", Phone: "010-1234-5678"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -567,7 +567,7 @@ func TestJoinRejectAnonymizesAndGuards(t *testing.T) {
 	// 승인된 요청도 뒤늦게 거절로 덮을 수 없다.
 	jr2, err := s.JoinRequestCreate(ctx,
 		Principal{UID: "u_ok", Role: domain.RoleMember, CenterID: testCenter},
-		JoinRequestBody{Name: "이서준", Phone: "010-9999-0000"})
+		JoinRequestBody{Name: "이서준", Phone: "010-1234-5678"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -19,6 +19,17 @@ type Pass struct {
 	ValidUntil    string `json:"valid_until"` // "2026-08-14"
 	Status        string `json:"status"`      // active|scheduled|expired|refunded
 	Holds         []Hold `json:"holds"`
+
+	// RefundedAmount / RefundedAt — 환불 마감이 정산한 **실제 환불액(원)**과 마감 시각(v2.37, P73).
+	// 종전엔 이 금액이 RefundResult(HTTP 응답)에만 있었다: 돈이 **나가는** 유일한 사건의 액수가
+	// 응답 창을 닫는 순간 어디에도 남지 않아, "이 회원에게 얼마를 돌려줬나"를 나중에 원장·결제·
+	// 계약을 손으로 합쳐 SettleRefund를 재실행해야만 복원할 수 있었다. 마감 트랜잭션 안에서
+	// status=refunded와 함께 쓰므로 둘이 어긋날 수 없다. 환불 전엔 nil(omitempty).
+	// 포인터인 이유: 정산이 정확히 0원으로 끝나는 환불이 실재한다(사용분+위약금 ≥ 실수납 —
+	// SettleRefund가 0으로 접는다). int+omitempty면 그 "0원 환불"과 "환불 전·구버전 문서"가 와이어에서
+	// 같은 모양이 된다. nil = 모름(환불 전·v2.37 이전 환불), &0 = 0원 환불.
+	RefundedAmount *int       `json:"refunded_amount,omitempty"`
+	RefundedAt     *time.Time `json:"refunded_at,omitempty"`
 }
 
 // Pass.Status 값.

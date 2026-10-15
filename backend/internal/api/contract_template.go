@@ -300,20 +300,16 @@ func (s *Service) gatherContractVars(ctx context.Context, centerID string, c *do
 		}
 		fac = f
 	}
-	// 결제는 이 패스의 것만(recordedPaymentTotal과 같은 센터 전체 조회 + 필터 패턴).
+	// 결제는 이 패스의 것만(ListPaymentsByPass — v2.38, P74부터 스토어가 pass_id로 거른다).
 	// c.PassID가 비면(발급 조립 시점 — IssuePass가 아직 ID를 안 채웠다) 결제 0건으로 간다 —
 	// 빈 PassID 매칭으로 엉뚱한 레코드를 집어가지 않기 위한 가드.
 	pays := []domain.Payment{}
 	if c.PassID != "" {
-		all, err := s.store.ListPayments(ctx, centerID)
+		list, err := s.store.ListPaymentsByPass(ctx, centerID, c.PassID)
 		if err != nil {
 			return nil, nil, err
 		}
-		for _, pay := range all {
-			if pay.PassID == c.PassID {
-				pays = append(pays, pay)
-			}
-		}
+		pays = list
 	}
 	biz, err := s.store.GetBusiness(ctx, centerID)
 	if err != nil {

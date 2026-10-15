@@ -16,7 +16,11 @@ class DateStrip extends StatelessWidget {
     // "오늘"은 센터(KST) 기준 — 기기 로컬 날짜로 시작하면 해외 체류 시 스트립이
     // 하루 어긋나고, 기본 선택일(SelectedBookingDate)과 칩 목록이 서로 안 맞는다.
     final base = DateFmt.todayKst();
-    final days = List.generate(14, (i) => base.add(Duration(days: i)));
+    // 달력 날짜로 센다(`day + i`는 생성자가 월을 넘겨 정규화한다). `add(Duration(days: i))`는
+    // 절대 시각 +24h×i라 기기가 서머타임 지역이면 가을 전환 뒤 칩이 전날 23:00으로 밀려
+    // **같은 날짜 칩이 둘, 하루가 빠지는** 스트립이 됐다(P73 — 한국엔 DST가 없지만 이
+    // 산술은 기기 타임존 규칙을 탄다).
+    final days = List.generate(14, (i) => DateTime(base.year, base.month, base.day + i));
 
     // 예약 흐름의 주 내비게이션 — 날짜 칩은 44dp 히트가 필요하다(RiseChip이 상하
     // 9의 투명 패딩으로 만든다).

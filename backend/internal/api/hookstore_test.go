@@ -300,6 +300,15 @@ func (h *hookStore) GetFacility(ctx context.Context, centerID string) (*domain.F
 	return h.Store.GetFacility(ctx, centerID)
 }
 
+// GetStaff — 예약·고정 스케줄 생성의 퇴사자·휴무일 방어선이 스토어 순단에 조용히 꺼지지 않는지
+// (v2.37, P73 — TestGuardsDoNotSilentlyOpenOnStoreFailure) 재현용. hookedOps에는 넣지 않는다.
+func (h *hookStore) GetStaff(ctx context.Context, centerID, uid string) (*domain.Staff, error) {
+	if err := h.enter("GetStaff"); err != nil {
+		return nil, err
+	}
+	return h.Store.GetStaff(ctx, centerID, uid)
+}
+
 // SaveStaff — 사진 업로드(v2.25)의 **찢어진 쓰기** 재현용. 업로드는 이미 끝났는데 프로필
 // 저장이 실패하는 창이 실제로 존재하고, 그때 방금 올린 오브젝트를 정리하지 않으면 아무도
 // 가리키지 않는 파일이 버킷에 남는다(발견 경로 0 — P22가 체형사진에서 겪은 그 상태).
@@ -331,6 +340,37 @@ func (h *hookStore) DeleteJoinRequestsByUID(ctx context.Context, uid string) (in
 		return 0, err
 	}
 	return h.Store.DeleteJoinRequestsByUID(ctx, uid)
+}
+
+// ListHwChecks / ListHwChecksByMember / ListPaymentsByPass — 읽기 범위 검증용(v2.38, P74): "회원 1명
+// 조회가 센터 전체를 읽지 않는다", "환불 정산이 센터 전체 결제를 읽지 않는다"를 호출 횟수로 잰다.
+// hookedOps(돈·세션 원자성 스윕)에는 넣지 않는다 — 그쪽 관심사가 아니다.
+func (h *hookStore) ListHwChecks(ctx context.Context, centerID string) ([]domain.HwCheck, error) {
+	if err := h.enter("ListHwChecks"); err != nil {
+		return nil, err
+	}
+	return h.Store.ListHwChecks(ctx, centerID)
+}
+
+func (h *hookStore) ListHwChecksByMember(ctx context.Context, centerID, memberID string) ([]domain.HwCheck, error) {
+	if err := h.enter("ListHwChecksByMember"); err != nil {
+		return nil, err
+	}
+	return h.Store.ListHwChecksByMember(ctx, centerID, memberID)
+}
+
+func (h *hookStore) ListPaymentsByMember(ctx context.Context, centerID, memberID string) ([]domain.Payment, error) {
+	if err := h.enter("ListPaymentsByMember"); err != nil {
+		return nil, err
+	}
+	return h.Store.ListPaymentsByMember(ctx, centerID, memberID)
+}
+
+func (h *hookStore) ListPaymentsByPass(ctx context.Context, centerID, passID string) ([]domain.Payment, error) {
+	if err := h.enter("ListPaymentsByPass"); err != nil {
+		return nil, err
+	}
+	return h.Store.ListPaymentsByPass(ctx, centerID, passID)
 }
 
 // hookedOps — 찢어진 쓰기 스윕이 하나씩 실패시켜 볼 메서드 목록. 위에서 래핑한 것과 같아야

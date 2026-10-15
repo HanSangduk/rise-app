@@ -1,7 +1,7 @@
 name: rise_member
 description: "라이즈 컨디셔닝 — 회원 앱 (예약 · 체형 분석 카메라 · 인바디 · 회원권)"
 publish_to: "none"
-version: 1.0.0+8
+version: 1.0.1+9
 
 # 버전 기준: 2026-08 (Flutter 3.44 / Dart 3.12 / Riverpod 3.0).
 # 정확한 최신은 `flutter pub upgrade --major-versions`로 확인.

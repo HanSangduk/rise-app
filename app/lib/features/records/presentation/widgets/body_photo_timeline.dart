@@ -374,7 +374,11 @@ class _BodyPhotoTimelineCardState extends State<BodyPhotoTimelineCard> {
     if (baseIndex == compareIndex) {
       text = '기준과 같은 사진이에요 — 손잡이를 옮기면 다른 날짜와 비교해요';
     } else {
-      final days = compare.difference(base).inDays;
+      // 달력 날짜 차이 — UTC 자정으로 옮겨 뺀다(hold_rules.durationDays와 같은 이유: 기기
+      // 서머타임 전환일을 낀 하루는 23시간이라 `inDays`가 하루를 흘린다, P73).
+      final days = DateTime.utc(compare.year, compare.month, compare.day)
+          .difference(DateTime.utc(base.year, base.month, base.day))
+          .inDays;
       // 과거로 훑는 것도 정당한 행동이라 "뒤"만 말하면 거짓이 된다.
       final gap = days >= 0 ? '$days일 뒤' : '${-days}일 전';
       text =

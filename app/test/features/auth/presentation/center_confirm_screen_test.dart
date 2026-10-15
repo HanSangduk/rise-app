@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rise_member/core/api/dto/staff_dto.dart';
+import 'package:rise_member/core/brand/rise_mark.dart';
 import 'package:rise_member/core/api/staff_directory.dart';
 import 'package:rise_member/core/result/failure.dart';
 import 'package:rise_member/core/result/result.dart';
@@ -199,7 +200,7 @@ void main() {
 
       // "승인되면 바로 연결돼요"는 뺐다(P69 C1) — 확인 주기만큼 늦는다.
       expect(find.text('아직 승인 전이에요'), findsOneWidget);
-      expect(find.text('센터 확인 기다리는 중'), findsOneWidget); // 스텝퍼 그대로
+      expect(find.text('센터 승인 기다리는 중'), findsOneWidget); // 스텝퍼 그대로
     });
 
     testWidgets('좁은 화면에서도 두 버튼이 넘치지 않는다 (Wrap으로 줄바꿈)', (tester) async {
@@ -223,7 +224,7 @@ void main() {
       await tester.tap(find.text('지금 확인'));
       await tester.pumpAndSettle();
 
-      expect(find.text('센터 확인 기다리는 중'), findsOneWidget);
+      expect(find.text('센터 승인 기다리는 중'), findsOneWidget);
       expect(find.text('연결이 불안정해요'), findsOneWidget);
     });
   });
@@ -268,7 +269,7 @@ void main() {
           .markConnectionUnknown(const NetworkFailure());
       await pumpScreen(tester);
 
-      expect(find.text('연결 상태를 확인하지 못했어요'), findsOneWidget);
+      expect(find.text('센터에 연결됐는지 확인하지 못했어요'), findsOneWidget);
       // notFound 화면(제목)을 그리지 않는다 — 서버가 확답한 결론이 아니다.
       expect(find.text('아직 연결된 센터가 없어요'), findsNothing);
       expect(find.text('연결됐는지 다시 확인'), findsOneWidget);
@@ -309,7 +310,7 @@ void main() {
       await pumpScreen(tester);
 
       expect(find.text('가입 요청을 보냈어요'), findsOneWidget); // 제목
-      expect(find.text('센터 확인 기다리는 중'), findsOneWidget); // 대기 카드
+      expect(find.text('센터 승인 기다리는 중'), findsOneWidget); // 대기 카드
       // 빈 상태의 연락 카드 힌트(notFound 전용)가 대기 화면에 섞이지 않는다.
       expect(
         find.textContaining('아직 등록 전이면 자동 연결이 안 돼요'),
@@ -322,7 +323,7 @@ void main() {
       await pumpScreen(tester);
 
       expect(find.text('아직 연결된 센터가 없어요'), findsOneWidget); // 제목
-      expect(find.text('센터 확인 기다리는 중'), findsNothing);
+      expect(find.text('센터 승인 기다리는 중'), findsNothing);
     });
 
     // 없는 기능을 약속하지 않는다 — 삭제한 문구가 **6단계 어디서도** 안 뜬다.
@@ -388,6 +389,42 @@ void main() {
       expect(find.text('제가 아니에요'), findsOneWidget);
       expect(find.text('가입 요청을 따로 보낼 수 있어요'), findsOneWidget);
     });
+
+    // P65 후속 3(P73): 매칭 카드의 상호는 **매칭 응답이 실은 그 회원의 센터**다. 종전엔 무인증
+    // `GET /v1/public/center`(기본 센터 고정)만 읽어 2호점 회원에게 1호점 상호를 보여줬다.
+    testWidgets('matched 카드 상호는 매칭 응답의 센터 — 기본 센터 상호를 찍지 않는다', (tester) async {
+      rebuildContainer([
+        centerContactProvider.overrideWith(
+          (ref, _) async => const CenterContact(name: '라이즈 컨디셔닝 센터(1호점)'),
+        ),
+      ]);
+      repo.match = const JoinMatch(
+        member: MatchedMember(id: 'm2', name: '람', trainerId: 't1', status: 'active'),
+        needsConfirm: true,
+        centerName: '라이즈 2호점',
+      );
+      final notifier = container.read(authViewModelProvider.notifier);
+      notifier.setPhone('01012345678');
+      await notifier.sendCode();
+      notifier.setCode('123456');
+      await notifier.verifyAndMatch();
+      await pumpScreen(tester);
+
+      expect(find.text('라이즈 2호점'), findsOneWidget);
+      expect(find.text('라이즈 컨디셔닝 센터(1호점)'), findsNothing, reason: '2호점 회원 카드에 1호점 상호가 찍혔다');
+    });
+
+    testWidgets('매칭 응답에 센터가 없으면(구서버·미등록) 종전대로 기본 센터 상호', (tester) async {
+      rebuildContainer([
+        centerContactProvider.overrideWith(
+          (ref, _) async => const CenterContact(name: '라이즈 컨디셔닝 센터(1호점)'),
+        ),
+      ]);
+      await seedMatched('t1');
+      await pumpScreen(tester);
+
+      expect(find.text('라이즈 컨디셔닝 센터(1호점)'), findsOneWidget);
+    });
   });
 
   group('서버가 대기 상태의 주인이다 (계약 v2.27)', () {
@@ -403,7 +440,7 @@ void main() {
       await pumpScreen(tester);
 
       expect(find.text('가입 요청을 보냈어요'), findsOneWidget); // 제목
-      expect(find.text('센터 확인 기다리는 중'), findsOneWidget);
+      expect(find.text('센터 승인 기다리는 중'), findsOneWidget);
       expect(
         find.text('아직 연결된 센터가 없어요'),
         findsNothing,
@@ -417,7 +454,7 @@ void main() {
 
       expect(find.text('센터에서 연결하지 않았어요'), findsOneWidget);
       expect(
-        find.text('센터 확인 기다리는 중'),
+        find.text('센터 승인 기다리는 중'),
         findsNothing,
         reason: '거절인데 대기 카드를 보여주면 오지 않을 승인을 영원히 기다린다',
       );
@@ -429,7 +466,7 @@ void main() {
       await pumpScreen(tester);
 
       expect(find.text('센터에서 연결하지 않았어요'), findsOneWidget);
-      expect(find.text('센터 확인 기다리는 중'), findsNothing);
+      expect(find.text('센터 승인 기다리는 중'), findsNothing);
     });
   });
 
@@ -611,7 +648,7 @@ void main() {
       // 뮤테이션: joinRequestTrace가 로컬 기록(joinRequestedAt)만으로 pending을 돌려주면 죽는다.
       seedPending();
       await pumpScreen(tester);
-      expect(find.text('센터 확인 기다리는 중'), findsOneWidget); // 화면은 대기
+      expect(find.text('센터 승인 기다리는 중'), findsOneWidget); // 화면은 대기
       await openDeletion(tester);
 
       expect(find.text('보낸 가입 요청이 있다면 그 요청 (이름·전화번호)'), findsOneWidget);
@@ -665,7 +702,8 @@ void main() {
     // declined는 고친 뒤의 재인증 단계까지, pending은 전화·주소가 비어도 참인 문장.
     const notFoundHint =
         '센터에 등록된 번호가 다르거나 아직 등록 전이면 자동 연결이 안 돼요. '
-        '데스크에서 번호를 고치거나 등록한 뒤 같은 번호를 다시 인증하면 이름 확인 한 번으로 연결돼요.';
+        '센터 데스크에 이 번호를 알려주면 등록·수정해 드려요 — 그 뒤 이 화면에서 [지금 확인]을 '
+        '누르면 이름 확인 한 번으로 연결돼요.';
     const rejectedHint = '데스크에 확인한 뒤 다시 요청할 수 있어요.';
     const declinedHint =
         '내 번호가 다른 회원에게 등록된 것 같다면 데스크에서 고쳐드려요 — '
@@ -727,22 +765,22 @@ void main() {
       // 종전 대기 카드 문장은 사라졌다 — 그 정보는 스텝퍼와 상태 줄이 말한다.
       expect(find.text('승인을 기다리는 중'), findsNothing);
       expect(find.text('승인됐는지 아래 버튼으로 확인할 수 있어요.'), findsNothing);
-      expect(find.text('센터 확인 기다리는 중'), findsOneWidget);
+      expect(find.text('센터 승인 기다리는 중'), findsOneWidget);
       expect(find.text('아직 확인 전'), findsOneWidget);
       expect(find.text('승인 대기 중'), findsNothing, reason: '제목과 같은 말을 배지로 또 했다');
       expect(find.text(pendingHint), findsOneWidget);
       // 쿨다운 문장은 버튼 라벨이 실시간으로 말한다 — 정적 문장은 30초 뒤 거짓이 된다.
       expect(find.textContaining('다시 요청'), findsOneWidget);
       // 안내문의 "바로"도 뺐다.
-      expect(find.text('앱을 껐다 켜도 이 화면으로 돌아와요. 연결되면 홈으로 들어가요.'), findsOneWidget);
+      expect(find.text('앱을 껐다 켜도 이 화면으로 돌아와요. 승인되면 다음에 앱을 열 때 홈으로 들어가요.'), findsOneWidget);
     });
 
     testWidgets('connectionUnknown — 카드는 안심 문장 하나, 제목·부제를 되풀이하지 않는다', (tester) async {
       container.read(authViewModelProvider.notifier).markConnectionUnknown(const NetworkFailure());
       await pumpScreen(tester);
 
-      expect(find.text('연결 상태를 확인하지 못했어요'), findsOneWidget);
-      expect(find.text('네트워크가 돌아오면 다시 확인해주세요'), findsOneWidget);
+      expect(find.text('센터에 연결됐는지 확인하지 못했어요'), findsOneWidget);
+      expect(find.text('잠시 뒤 다시 확인해주세요'), findsOneWidget);
       expect(find.text('이미 연결된 회원이라면 다시 확인했을 때 그대로 홈으로 들어가요.'), findsOneWidget);
       expect(find.textContaining('연결 상태를 불러오지 못했어요'), findsNothing);
       expect(find.text('연결이 불안정해요'), findsOneWidget); // 사유는 인라인 error 한 곳
@@ -867,7 +905,7 @@ void main() {
   // 참으로 만들고, 센터 카드·코치 줄·미리보기로 "우리 센터가 안 보인다"를 채운다.
 
   group('스텝퍼 (P69 H2)', () {
-    testWidgets('pending — 네 단계, 현재는 "센터 확인 기다리는 중", 요청 시각이 붙는다', (tester) async {
+    testWidgets('pending — 네 단계, 현재는 "센터 승인 기다리는 중", 요청 시각이 붙는다', (tester) async {
       container.read(authViewModelProvider.notifier).restorePendingJoinRequest(
             JoinRequestRecord(phone: '+821012345678', requestedAt: DateTime(2026, 9, 8, 12, 5)),
           );
@@ -875,8 +913,26 @@ void main() {
 
       expect(find.text('번호 인증'), findsOneWidget);
       expect(find.text('가입 요청 보냄 · 9/8 12:05'), findsOneWidget);
-      expect(find.text('센터 확인 기다리는 중'), findsOneWidget);
+      // 경과가 붙는다(P72) — 데스크 어드민만 시간을 세고 앱 화면은 1분째와 3일째가
+      // 글자 하나 다르지 않았다. 요청 시각이 2026-09-08이라 항상 '3일 넘음'이다.
+      expect(find.textContaining('센터 승인 기다리는 중'), findsOneWidget);
+      expect(find.text('센터 승인 기다리는 중 · 3일 넘음'), findsOneWidget);
       expect(find.text('연결'), findsOneWidget);
+    });
+
+    // **`find`는 화면 밖 위젯도 찾는다**(P72 · ram-verify-loop 함정 ⑩의 친척).
+    // 종전의 320×568 테스트는 `takeException == null`과 `findsOneWidget`만 봤고, 실제로는
+    // 주 CTA가 접힘 아래(y≈580 > 568)에 있어도 전부 초록이었다. 실기기에서는 "연결된 센터가
+    // 없어요 + 회색 카드"만 보이고 다음에 뭘 눌러야 하는지가 화면 밖이다.
+    testWidgets('320×568 — 주 CTA가 접힘 **안**에 있다 (find가 못 잡는 결함)', (tester) async {
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await pumpScreen(tester); // notFound
+
+      final cta = tester.getRect(find.text('가입 요청 보내기'));
+      expect(cta.bottom, lessThanOrEqualTo(568.0),
+          reason: '주 버튼이 접힘 아래로 내려갔다 — bottom=${cta.bottom}');
     });
 
     testWidgets('요청 시각을 모르면 시각 없이 "가입 요청 보냄" — 지어내지 않는다', (tester) async {
@@ -887,15 +943,54 @@ void main() {
       expect(find.textContaining('가입 요청 보냄 ·'), findsNothing);
     });
 
-    testWidgets('notFound·declined — "가입 요청"이 현재 단계, 확인 상태 줄은 없다(확인할 요청이 없다)', (tester) async {
+    // **종전 규약이 뒤집혔다**(P72 C1). 예전 이름은 "확인 상태 줄은 없다(확인할 요청이 없다)"
+    // 였고, 그 근거는 "요청을 안 보냈으니 확인할 것이 없다"였다. 틀린 전제다 — 이 단계에서
+    // 기다리는 것은 승인이 아니라 **데스크의 번호 등록·정정**이고, 화면의 힌트가 정확히 그
+    // 행동을 지시한다. 끝났는지 물어볼 버튼이 없어서, 데스크가 고쳐 줘도 회원 화면은 영영
+    // "찾지 못했어요"였고 유일한 길이 SMS 재인증이었다.
+    testWidgets('notFound — "가입 요청"이 현재 단계, 확인 줄은 **등록**을 기다린다', (tester) async {
       await pumpScreen(tester); // notFound
 
       expect(find.text('번호 인증'), findsOneWidget);
       expect(find.text('가입 요청'), findsOneWidget);
-      expect(find.text('센터 확인'), findsOneWidget);
+      expect(find.text('센터 승인'), findsOneWidget);
       expect(find.text('연결'), findsOneWidget);
-      expect(find.text('지금 확인'), findsNothing);
-      expect(find.text('아직 확인 전'), findsNothing);
+      expect(find.text('지금 확인'), findsOneWidget, reason: 'P72 C1 — 데스크가 고쳤는지 물어볼 수단');
+      expect(find.text('아직 확인 전'), findsOneWidget);
+    });
+
+    // **함수 시험은 배선을 안 잰다**(ram-verify-loop 함정 ⑩ — 실제로 여기서 걸렸다).
+    // `statusText(awaiting: registration)`만 직접 부르는 시험은, 화면이 그 값을 정말
+    // 넘기는지 한 글자도 보지 않는다. 실측: 화면의 `CheckAwaiting.registration`을
+    // `approval`로 되돌려도 순수 함수 시험은 전부 초록이었다. 그래서 **그려서** 잰다.
+    testWidgets('notFound의 확인 꼬리는 "아직 승인 전"이 아니다 — 보낸 적 없는 요청을 가리키지 않는다',
+        (tester) async {
+      await pumpScreen(tester); // notFound
+
+      await tester.tap(find.text('지금 확인'));
+      await tester.pumpAndSettle();
+
+      // '· 아직 등록 전'(가운뎃점 포함)이어야 확인 상태 줄이다 — 연락 카드 힌트에도
+      // "아직 등록 전이면"이 들어 있어 느슨한 finder는 배선을 안 재고 통과한다.
+      expect(find.textContaining('· 아직 등록 전'), findsOneWidget);
+      expect(find.text('아직 등록 전이에요'), findsOneWidget, reason: '수동 확인 스낵바도 같은 축');
+      expect(find.textContaining('· 아직 승인 전'), findsNothing,
+          reason: '보낸 적 없는 요청의 승인을 기다린다고 말하면 거짓이다');
+    });
+
+    testWidgets('pending의 확인 꼬리는 종전대로 "아직 승인 전"', (tester) async {
+      container.read(authViewModelProvider.notifier).applyServerJoinStatus('pending');
+      // 확인 뒤에도 pending이어야 한다 — 서버가 "요청 없음"을 답하면 stage가 notFound로
+      // 떨어지고(그게 P63이 만든 규약이다) 꼬리도 같이 바뀌는 게 맞다.
+      repo.sessionResult = const Err(MemberNotLinkedFailure(joinStatus: 'pending'));
+      await pumpScreen(tester);
+
+      await tester.tap(find.text('지금 확인'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('· 아직 승인 전'), findsOneWidget);
+      expect(find.text('아직 승인 전이에요'), findsOneWidget);
+      expect(find.textContaining('· 아직 등록 전'), findsNothing);
     });
 
     testWidgets('rejected — 스텝퍼 대신 결과 행(시각 있음)', (tester) async {
@@ -929,10 +1024,26 @@ void main() {
       expect(find.text('번호 인증'), findsNothing);
     });
 
-    test('세로 전환 규칙 — 폭 < 360 또는 배율 ≥ 1.2', () {
+    // 임계가 360 → **400**이다(P72). `availableWidth`는 기기 폭 − 좌우 패딩 40이므로
+    // 종전 경계는 기기 폭 **400dp**였다: 320·360·390(iPhone 14~16)·393(Pixel)은 이미
+    // 세로였고, **412(Pixel Pro)·430(Pro Max)만 가로**였다. 즉 가로 4점 배치는 큰 폰
+    // 두 종에서만 보였고 하필 그 배치의 라벨이 이 화면에서 가장 작았다 — "가장 작은 글자가
+    // 가장 큰 폰에만" 나오는 배치였다. 세로는 라벨 줄바꿈이 없고 트랙선으로 진행률도
+    // 보이므로 그쪽을 정본으로 굳힌다(가로는 태블릿 폭용으로 남긴다).
+    //
+    // 자를 두 번 고쳤다: 처음엔 350(=390dp 폰)으로 재려 했는데 **그 값은 옛 임계에서도
+    // 이미 세로**라 되돌림이 조용히 통과했다. 구간을 실제로 가르는 값은 372·390이다.
+    test('세로 전환 규칙 — 폭 < 400 또는 배율 ≥ 1.2', () {
       expect(LobbyProgress.isVertical(availableWidth: 280, textScale: 1.0), isTrue);
+      expect(LobbyProgress.isVertical(availableWidth: 350, textScale: 1.0), isTrue,
+          reason: 'iPhone 14/15/16(390dp) — 옛 임계에서도 세로였다');
+      expect(LobbyProgress.isVertical(availableWidth: 372, textScale: 1.0), isTrue,
+          reason: 'Pixel Pro(412dp) — 임계를 360으로 되돌리면 여기가 죽는다');
+      expect(LobbyProgress.isVertical(availableWidth: 390, textScale: 1.0), isTrue,
+          reason: 'iPhone Pro Max(430dp) — 같은 자리');
       expect(LobbyProgress.isVertical(availableWidth: 400, textScale: 1.2), isTrue);
-      expect(LobbyProgress.isVertical(availableWidth: 400, textScale: 1.0), isFalse);
+      expect(LobbyProgress.isVertical(availableWidth: 400, textScale: 1.0), isFalse,
+          reason: '태블릿 폭에서는 가로 4점이 남는다');
     });
   });
 
@@ -1050,7 +1161,7 @@ void main() {
       await tester.tap(find.text('가입 요청 보내기').last);
       await tester.pumpAndSettle();
 
-      expect(find.text('이미 보낸 요청이 있어요 — 센터가 확인하면 연결돼요'), findsOneWidget);
+      expect(find.text('이미 보낸 요청이 있어요'), findsOneWidget);
       expect(find.byType(TextField), findsNothing, reason: '시트가 닫혔다');
       expect(find.text('가입 요청을 보냈어요'), findsOneWidget, reason: '대기 화면으로');
       expect(find.textContaining('다시 요청'), findsNothing, reason: '서버 확답 pending');
@@ -1144,7 +1255,8 @@ void main() {
       expect(find.byType(InkWell), findsWidgets); // 다른 InkWell(미리보기 등)은 있어도 된다
       expect(find.text('라이즈 컨디셔닝 센터'), findsOneWidget);
       expect(find.text('센터에 등록된 번호가 다르거나 아직 등록 전이면 자동 연결이 안 돼요. '
-          '데스크에서 번호를 고치거나 등록한 뒤 같은 번호를 다시 인증하면 이름 확인 한 번으로 연결돼요.'), findsOneWidget);
+          '센터 데스크에 이 번호를 알려주면 등록·수정해 드려요 — 그 뒤 이 화면에서 [지금 확인]을 '
+          '누르면 이름 확인 한 번으로 연결돼요.'), findsOneWidget);
     });
 
     testWidgets('한쪽 시각만 온 응답은 시간 행을 그리지 않는다', (tester) async {
@@ -1241,6 +1353,7 @@ void main() {
 
       expect(find.text('연결되면 할 수 있는 것'), findsOneWidget);
       expect(find.text('연결되면 이 앱에서'), findsNothing);
+      expect(find.byType(RiseMark), findsNothing, reason: '빠듯하면 장식이 먼저 빠진다(P72)');
 
       await tester.tap(find.text('연결되면 할 수 있는 것'));
       await tester.pumpAndSettle();
@@ -1290,7 +1403,7 @@ void main() {
       await pumpNarrowLarge(tester);
 
       expect(tester.takeException(), isNull);
-      expect(find.text('센터 확인 기다리는 중'), findsOneWidget);
+      expect(find.text('센터 승인 기다리는 중'), findsOneWidget);
       expect(find.text('지금 확인'), findsOneWidget);
       expect(find.text('코치 5명'), findsOneWidget);
       expect(find.text('연결되면 할 수 있는 것'), findsOneWidget);

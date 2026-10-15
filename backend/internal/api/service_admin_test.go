@@ -235,6 +235,14 @@ func TestSuperadminPathBoundary(t *testing.T) {
 		"/v1/members":           false,
 		"/v1/staff":             false,
 		"/v1/payments":          false,
+		// v2.37(P73) — 경로 파라미터 값이 우연히 판정 문자열을 만드는 경우. 종전 부분일치
+		// 판정(Contains "/admin/" · HasSuffix "/me")은 아래 넷을 전부 통과시켰다.
+		"/v1/inbody/me":               false, // DELETE /v1/inbody/{id}, id=me
+		"/v1/body-photos/me":          false, // DELETE /v1/body-photos/{id}, id=me
+		"/v1/bookings/admin/complete": false, // POST /v1/bookings/{id}/complete, id=admin
+		"/api/v1/staff/admin/photo":   false, // POST /v1/staff/{uid}/photo, uid=admin
+		"/v1/me/":                     false, // 정확한 형태만 — 라우터도 이 경로를 모른다
+		"/v1/admin":                   false, // 관리 평면은 하위 경로뿐(라우터에 /admin 단독 라우트 없음)
 	} {
 		if got := superadminAllowedPath(path); got != want {
 			t.Errorf("superadminAllowedPath(%q) = %v, want %v", path, got, want)

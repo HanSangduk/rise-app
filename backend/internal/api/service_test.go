@@ -23,9 +23,15 @@ import (
 
 const testCenter = "rise"
 
+// testInitialPassword — 초대 계정의 최초 비밀번호(v2.36). 운영 기본값과 같은 값을 쓴다:
+// 화면·응답이 이 값을 그대로 노출하므로 테스트가 프로덕션과 다른 상수를 쓰면 "응답에 담긴다"는
+// 계약만 검증하고 **무엇이 담기는지**는 검증하지 못한다.
+const testInitialPassword = "123456"
+
 func newTestService() *Service {
 	return NewService(store.NewMemory(), config.Config{
-		DefaultCenterID: testCenter,
+		DefaultCenterID:      testCenter,
+		InitialStaffPassword: testInitialPassword,
 	}, nil) // users=nil → dev 합성 uid 프로비저너(Firebase SDK·네트워크 없이 스태프 생성 테스트)
 }
 
@@ -102,12 +108,15 @@ func slotKeyDaysAhead(days, hour int) string {
 func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
 	st := store.NewMemory()
-	cfg := config.Config{DefaultCenterID: testCenter}
+	// InitialStaffPassword를 채워야 HTTP 응답의 initial_password가 운영과 같은 값이 된다
+	// (newTestService와 같은 규약 — 테스트가 프로덕션과 다른 상수를 쓰면 "실린다"만 검증하고
+	// **무엇이 실리는지**는 검증하지 못한다).
+	cfg := config.Config{DefaultCenterID: testCenter, InitialStaffPassword: testInitialPassword}
 	auth, err := NewAuthenticator(context.Background(), cfg, st)
 	if err != nil {
 		t.Fatalf("NewAuthenticator: %v", err)
 	}
-	return NewRouter(NewHandlers(NewService(st, cfg, auth.Provisioner())), auth, nil)
+	return NewRouter(NewHandlers(NewService(st, cfg, auth.Provisioner(testInitialPassword))), auth, nil)
 }
 
 func postJSON(t *testing.T, r http.Handler, path, uid, role, body string) *httptest.ResponseRecorder {
@@ -271,6 +280,62 @@ func TestMemberSeesOwnProfileViaListMembers(t *testing.T) {
 }
 
 // v1.2: member 본인 consent 갱신(PUT 머지) — 전이 시각은 서버가 기록, 다른 필드는 못 건드림.
+// 등록 시 동의 시각은 서버가 찍는다(v2.37, P73). 어드민은 등록 폼에서 `signed_at`을 항상 실어
+// 보내는데(데스크 PC 시계), 종전 CreateMember는 nil일 때만 채워 그 값이 그대로 저장됐다 —
+// UpdateMember(v1.2)는 클라이언트 시각을 버리는데 최초 서명만 예외였다.
+func TestCreateMemberStampsConsentSignedAtOnServer(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	seedTrainerRecord(t, s, "t1", "정혜린")
+	clientClock := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC) // 틀린 PC 시계
+	revoked := clientClock.Add(time.Hour)
+
+	before := time.Now().UTC().Add(-time.Second)
+	got, err := s.CreateMember(ctx, ownerP(), &domain.Member{
+		Name: "김민지", Phone: "010-1234-5678", TrainerID: "t1", Status: domain.MemberStatusActive,
+		Consent: domain.Consent{General: true, Sensitive: true, SignedAt: &clientClock, RevokedAt: &revoked},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Consent.SignedAt == nil || got.Consent.SignedAt.Before(before) {
+		t.Errorf("signed_at = %v, want 서버 시각(≥ %v) — 클라이언트 시계값이 그대로 저장됐다", got.Consent.SignedAt, before)
+	}
+	if got.Consent.RevokedAt != nil {
+		t.Errorf("revoked_at = %v, want nil — 신규 레코드에 철회 시각이 있을 수 없다", got.Consent.RevokedAt)
+	}
+	saved, err := s.store.GetMember(ctx, testCenter, got.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Consent.SignedAt == nil || saved.Consent.SignedAt.Before(before) {
+		t.Errorf("저장본 signed_at = %v, want 서버 시각", saved.Consent.SignedAt)
+	}
+
+	// 일반 동의만 있고 클라이언트가 시각을 실은 경우 — "지금 동의했다"는 뜻만 취해 서버 시각으로.
+	general, err := s.CreateMember(ctx, ownerP(), &domain.Member{
+		Name: "박현우", Phone: "010-2345-6789", TrainerID: "t1", Status: domain.MemberStatusActive,
+		Consent: domain.Consent{General: true, SignedAt: &clientClock},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if general.Consent.SignedAt == nil || general.Consent.SignedAt.Before(before) {
+		t.Errorf("일반 동의 signed_at = %v, want 서버 시각", general.Consent.SignedAt)
+	}
+	// 아무 동의도 없으면 시각도 없다 — 클라이언트가 시각을 실어 보내도 마찬가지(동의 없는 서명 시각은 모순).
+	none, err := s.CreateMember(ctx, ownerP(), &domain.Member{
+		Name: "이서준", Phone: "010-3456-7890", TrainerID: "t1", Status: domain.MemberStatusActive,
+		Consent: domain.Consent{SignedAt: &clientClock},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if none.Consent.SignedAt != nil {
+		t.Errorf("무동의 signed_at = %v, want nil", none.Consent.SignedAt)
+	}
+}
+
 func TestMemberConsentUpdateTransitions(t *testing.T) {
 	s := newTestService()
 	ctx := context.Background()
@@ -2087,7 +2152,7 @@ func TestCreateStaffRejectsUIDAlreadyLinkedToMember(t *testing.T) {
 	s := newTestService()
 	ctx := context.Background()
 	email := "minji@rise.kr"
-	uid, err := devUserProvisioner{}.EnsureUser(ctx, email) // dev 합성 uid는 이메일에 결정적
+	uid, _, err := devUserProvisioner{}.EnsureUser(ctx, email) // dev 합성 uid는 이메일에 결정적
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2191,7 +2256,20 @@ func TestAPIPrefixMirror(t *testing.T) {
 	}
 }
 
-// HTTP 계약: 201/403/400/409 상태코드와 응답 필드(비밀번호 미노출)를 라우터까지 태워 고정한다.
+// HTTP 계약: 201/403/400/409 상태코드와 응답 필드를 라우터까지 태워 고정한다.
+//
+// v2.36에서 **응답 필드 규약이 바뀌었다**. 종전 이 테스트는 password·temp_password와 함께
+// email까지 금지 목록에 넣고 "초대는 재설정 메일로"라고 적었는데, 그 전제가 무너졌다:
+//
+//   - 재설정 메일만으로는 초대가 완결되지 않았다(센터 생성 화면엔 발송 코드가 아예 없었고,
+//     스팸함·도메인 메일 차단이면 트레이너 초대도 멈춘다). 그래서 initial_password를 싣는다.
+//   - email은 **요청자가 방금 자기가 타이핑한 값**이라 감출 비밀이 아니었고, 저장하지 않은 탓에
+//     "트레이너가 로그인이 안 돼요"에 대표가 등록 이메일을 확인할 방법이 제품 안에 없었다.
+//
+// 지금 금지되는 것은 비밀번호 **계열 중 난수 임시값**이다: password·temp_password는 여전히
+// 나가지 않는다. initial_password는 관리자가 전달하라고 **의도적으로** 싣는 값이라 다르다.
+// email은 마스킹 규약(owner 전체 / 그 외 본인만 / 회원은 없음)이 GET /v1/staff에 걸린다 —
+// 그쪽은 TestStaffEmailMaskedFromNonOwners가 지킨다.
 func TestCreateStaffHTTPContract(t *testing.T) {
 	r := newTestRouter(t)
 	body := `{"name":"정혜린","email":"hyerin@rise.kr","role":"trainer","payout":{"type":"rate","value":0.5}}`
@@ -2204,15 +2282,19 @@ func TestCreateStaffHTTPContract(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"uid", "role", "name", "color", "payout", "offdays", "profile"} {
+	for _, key := range []string{"uid", "role", "name", "color", "payout", "offdays", "profile", "email", "initial_password"} {
 		if _, ok := got[key]; !ok {
 			t.Errorf("응답에 %s 없음: %v", key, got)
 		}
 	}
-	for _, forbidden := range []string{"password", "temp_password", "email"} {
+	// 난수 임시 비밀번호는 여전히 나가지 않는다(그 값은 이제 존재하지도 않는다).
+	for _, forbidden := range []string{"password", "temp_password"} {
 		if _, ok := got[forbidden]; ok {
-			t.Errorf("응답에 %s가 실렸다(초대는 재설정 메일로): %v", forbidden, got)
+			t.Errorf("응답에 %s가 실렸다: %v", forbidden, got)
 		}
+	}
+	if got["email"] != "hyerin@rise.kr" {
+		t.Errorf("email = %v, want 요청에 적은 로그인 ID 그대로", got["email"])
 	}
 	if offdays, ok := got["offdays"].([]any); !ok || len(offdays) != 0 {
 		t.Errorf("offdays = %v, want [](null 금지)", got["offdays"])
@@ -2256,7 +2338,7 @@ func TestSensitiveWritesRespectScope(t *testing.T) {
 
 	photo := BodyPhotoCreateRequest{
 		MemberID: victim.ID, Pose: "stand", Direction: "front",
-		Date: "2026-08-22", StoragePath: "pending/x.jpg",
+		Date: "2026-08-22", StoragePath: "members/" + victim.ID + "/body/20260822-stand-front-1.jpg",
 	}
 	// v2.9부터 6지표가 모두 범위 검증을 받으므로 픽스처도 완전한 레코드여야 한다
 	// (스코프 위반은 값 검증보다 앞에서 막히지만, 마지막 "정상 경로" 확인이 값까지 통과해야 한다).
@@ -2570,5 +2652,59 @@ func TestContractSnapshotNeverExceedsCapEvenIfPolicySourceLies(t *testing.T) {
 	}
 	if want := int(float64(pass.PaidAmount) * rate); q.Penalty != want || q.Penalty != 100_000 {
 		t.Errorf("계약서 %.4f → 공제 %d원인데 실제 공제는 %d원", rate, want, q.Penalty)
+	}
+}
+
+// 스태프의 **로그인 ID(email)는 owner에게만** 보인다(v2.36).
+//
+// GET /v1/staff는 어드민 직원 표만 쓰는 응답이 아니다 — **회원 앱의 코치 소개**가 같은 목록을
+// 읽는다(P40). 그래서 이 필드는 payout과 같은 자리에서 같은 규칙으로 지워져야 한다:
+// 동료의 계정 식별자를 트레이너가 알 이유가 없고, 회원에게는 더더욱 나가면 안 된다.
+func TestStaffEmailMaskedFromNonOwners(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	self, err := s.CreateStaff(ctx, ownerP(), domain.StaffCreate{
+		Name: "정혜린", Email: "hyerin@rise.kr", Role: domain.RoleTrainer,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateStaff(ctx, ownerP(), domain.StaffCreate{
+		Name: "김태오", Email: "taeo@rise.kr", Role: domain.RoleTrainer,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	emails := func(p Principal) map[string]string {
+		t.Helper()
+		list, err := s.ListStaff(ctx, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]string{}
+		for _, st := range list {
+			out[st.Name] = st.Email
+		}
+		return out
+	}
+
+	// owner — 전원의 로그인 ID를 본다("로그인이 안 돼요"에 답할 수 있어야 한다).
+	if got := emails(ownerP()); got["정혜린"] != "hyerin@rise.kr" || got["김태오"] != "taeo@rise.kr" {
+		t.Errorf("owner가 본 email = %v, want 전원 노출", got)
+	}
+	// trainer — 자기 것만.
+	trainer := Principal{UID: self.UID, Role: domain.RoleTrainer, CenterID: testCenter}
+	got := emails(trainer)
+	if got["정혜린"] != "hyerin@rise.kr" {
+		t.Errorf("본인 email = %q, want 노출", got["정혜린"])
+	}
+	if got["김태오"] != "" {
+		t.Errorf("동료 email = %q, want 마스킹", got["김태오"])
+	}
+	// member — 아무것도 보지 않는다(코치 소개가 같은 응답을 읽는다).
+	for name, email := range emails(memberP("mem_x")) {
+		if email != "" {
+			t.Errorf("회원에게 %s의 email이 노출됐다: %q", name, email)
+		}
 	}
 }

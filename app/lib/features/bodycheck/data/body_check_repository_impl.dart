@@ -18,20 +18,29 @@ class BodyCheckRepositoryImpl implements BodyCheckRepository {
   Future<Result<List<BodyPhotoEntry>>> fetchPhotos(String memberId) {
     return guardApi(() async {
       final dtos = await _remote.fetchPhotos(memberId);
-      return dtos
-          .map((d) => BodyPhotoEntry(
-                id: d.id,
-                memberId: d.memberId,
-                pose: d.pose,  // key 원문 보존(미지 포즈도 사라지면 안 된다)
-                direction: BodyDirection.values.firstWhere(
-                  (e) => e.wireValue == d.direction,
-                  orElse: () => BodyDirection.front,
-                ),
-                date: DateTime.parse(d.date),
-                storagePath: d.storagePath,
-                blurred: d.blurred,
-              ))
-          .toList();
+      // 날짜는 tryParse + 그 건만 스킵 — 인바디·수업 기록·hw-check와 **같은 규칙**
+      // (records_repository_impl). 여기만 DateTime.parse(throw)였다: 형식이 깨진 레코드
+      // 하나가 guardApi에서 Err로 접혀 회원의 체형사진 타임라인 **전체**(수개월 치)를
+      // "불러오지 못했어요"로 숨겼다(P73). 서버 CreateBodyPhoto는 v2.37부터 date 형식을
+      // 검증하지만, 그 전에 들어간 레코드·수기 편집·마이그레이션은 여기서 막는 수밖에 없다.
+      final out = <BodyPhotoEntry>[];
+      for (final d in dtos) {
+        final date = DateTime.tryParse(d.date);
+        if (date == null) continue;
+        out.add(BodyPhotoEntry(
+          id: d.id,
+          memberId: d.memberId,
+          pose: d.pose, // key 원문 보존(미지 포즈도 사라지면 안 된다)
+          direction: BodyDirection.values.firstWhere(
+            (e) => e.wireValue == d.direction,
+            orElse: () => BodyDirection.front,
+          ),
+          date: date,
+          storagePath: d.storagePath,
+          blurred: d.blurred,
+        ));
+      }
+      return out;
     });
   }
 

@@ -115,6 +115,19 @@ void main() {
       expect(c.isValid, isFalse);
       expect(find.text('여기에 서명해 주세요'), findsOneWidget);
     });
+
+    testWidgets('[다시 쓰기]의 터치 영역은 44dp 이상(P73)', (tester) async {
+      // 오획을 지우는 유일한 길이다 — 글자 상자(≈36dp)만 누르면 서명 화면에서 가장 놓치기 쉬운
+      // 버튼이 된다(`touch_target_test`의 기준과 같은 44dp).
+      final c = SignaturePadController();
+      addTearDown(c.dispose);
+      await pumpPad(tester, c);
+
+      final hit = tester.getSize(
+        find.ancestor(of: find.text('다시 쓰기'), matching: find.byType(GestureDetector)).first,
+      );
+      expect(hit.height, greaterThanOrEqualTo(44));
+    });
   });
 
   group('PNG 내보내기(결정 2) — 투명 배경 · 밀도 상한 2x · 40KB 상한', () {

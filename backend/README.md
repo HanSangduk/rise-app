@@ -174,8 +174,9 @@ POST /v1/staff/{uid}/photo                           (v2.25 프로필 사진 업
 GET  /healthz  GET /health  ← Cloud Run(run.app)에서는 /health만 사용 — GFE가 /healthz를 가로챔(P06)
 ```
 
-라우터에 실제로 등록된 `/v1` 라우트는 **54개**이고, 전부 `/v1/*`과 `/api/v1/*` **양쪽에 미러
-마운트**된다(이유는 아래 "배포" 절). 위 목록은 그 미러를 접어서 적은 것이다.
+라우터에 실제로 등록된 `/v1` 라우트는 **71개**(2026-09-26, v2.37 기준 — 정확한 수는 `router.go`의
+`v1` 클로저가 진실이다)이고, 전부 `/v1/*`과 `/api/v1/*` **양쪽에 미러 마운트**된다(이유는 아래 "배포" 절).
+위 목록은 그 미러를 접어서 적은 것이다.
 
 **v1.4 기능 패치(2026-08-22, 기능 갭 리서치·UX 여정 검수 — 계약 문서 "## v1.4 기능 패치" 섹션)**:
 코어 루프의 마지막 구멍(수업기록)과 owner 여정 데드엔드 4곳을 채웠다 — WorkoutLog 엔티티+
@@ -475,14 +476,15 @@ law.go.kr 헤더 [시행 2026. 7. 1.] 확인)
 | 접속지 정보 | `remote_ip`(RealIP 결과: True-Client-IP → X-Real-IP → XFF **첫** 값 순 — **셋 다 클라이언트가 지정할 수 있어 위조 가능**) · `xff_last`(XFF **마지막** 값 = 프록시(GFE)가 덧붙인 값 → **신뢰 값**; Hosting 리라이트 경유는 끝값이 Hosting 프록시라 `x_forwarded_for`의 끝에서 둘째가 클라이언트) · `x_forwarded_for`(원 헤더 전체, 512자 클립) · `user_agent`(512자 클립) |
 | 처리한 정보주체 | `subject.member_id`(path `/members/{id}` · 쿼리 `member` · 핸들러 훅 `setAccessSubject`) · `subject.resource_id`(그 외 `{id}`) · `subject.staff_uid`(`{uid}`) |
 | 수행업무 | `method` · `route`(chi 패턴) · `path`(쿼리 제외) · `status`(헤더 미기록이면 타임아웃 504 / 그 외 500) · `aborted`(패닉으로 끊긴 요청만 true — 헤더가 이미 나갔으면 status는 나간 값 유지) · `latency_ms` · `bytes` |
-| 상관 | `request_id` · `logging.googleapis.com/trace`(Cloud Run 요청 로그와 연결, `GCP_PROJECT` 있을 때만) · `severity`(INFO / 401·403 WARNING / 5xx ERROR) · `message` |
+| 상관 | `request_id` · `logging.googleapis.com/trace`(Cloud Run 요청 로그와 연결, `GCP_PROJECT` 있을 때만) · `severity`(INFO / 401·403·429 WARNING / 5xx ERROR) · `message` |
 
 **무엇을 절대 남기지 않나**(`accesslog_test.go`가 못 박는다): 요청·응답 본문, `Authorization`·`X-Dev-*` 값,
 쿠키, **쿼리 문자열 원문**(`GET /v1/members?q=이름·번호`가 들어온다 — 화이트리스트 `member` 값만 subject로
 옮긴다), `Principal.Phone`, 이름.
 
-**기록 범위** — 스태프(owner/trainer/superadmin) 요청 **전부** + 역할 무관 **401·403**. 회원(member) 요청은
-**401·403 외에는 기록하지 않는다(400·404·5xx 포함)**(§8① "정보주체는 제외한다" + 회원 IP를 2년 쥐는 것은
+**기록 범위** — 스태프(owner/trainer/superadmin) 요청 **전부** + 역할 무관 **401·403·429**(429는 빈도 제한,
+v2.38 — 제한기가 무엇을 막았는지의 유일한 관측점). 회원(member) 요청은
+**401·403·429 외에는 기록하지 않는다(400·404·5xx 포함)**(§8① "정보주체는 제외한다" + 회원 IP를 2년 쥐는 것은
 최소수집에 역행 — Cloud Run 요청 로그 30일이 운영 목적을 덮는다). `/healthz`·`/health`·`/api/health`·`/v1/public/*`는 v1 클로저 밖이라
 지나지 않는다. 401은 라우팅 전 거부라 `route:"/v1/*"`로 남고 `path`가 단서다. 패닉도 500·ERROR 라인을
 남긴 뒤 같은 값으로 재패닉해 `recoverJSON`이 계약 포맷 500을 만든다.
@@ -529,6 +531,22 @@ law.go.kr 헤더 [시행 2026. 7. 1.] 확인)
 ②·③ 전에는 privacy.html의 "2년·위변조 방지·점검"이 아직 거짓이다(P56 L9 — 문서에서 의무를 지우는 것은
 답이 아니라 순서를 지키는 것이 답).
 
+### 요청 빈도 제한 — 프로세스 내 토큰 버킷 (v2.38, P74)
+
+| 대상 | 키 | 정상 속도 · 순간 |
+|---|---|---|
+| `POST /v1/join/match`·`join/confirm`·`join/request`·`consult-requests` | 회원 uid | 분당 30 · 15 |
+| `POST /v1/checkin`·`hw-checks`(한 버킷) | 회원 uid | 분당 120 · 40 |
+| `GET /v1/public/business`·`public/center`(+ `/api/v1` 미러) | IP(RealIP) | 분당 60 · 30 |
+| 스태프·superadmin 요청 | 세지 않음 | 어드민 원탭 체크인 포함 — 어드민은 429를 보지 않는다 |
+
+넘으면 `429 {error, code:"rate_limited"}` + `Retry-After`(초, 올림). 수치는 `router.go` 한 곳에서 바꾼다.
+**인스턴스마다 따로 센다** — Cloud Run 인스턴스가 n개면 상한도 n배로 느슨하다(정확한 분산 제한이 필요해지면
+Cloud Armor/Memorystore). 무인증 경로의 IP 키는 XFF로 위조할 수 있어 적대적 방어선이 아니다(App Check 후속).
+키 표는 인스턴스당 1만 개가 상한이고 가득 차면 새 키는 추적 없이 통과한다 — 그때 컨테이너 로그에
+`ratelimit: 키 표 상한(10000)에 걸려 N건을 추적 없이 통과시켰어요`가 분당 최대 한 줄 남는다(위조 IP 폭주 신호).
+회원의 429는 접속기록(v2.30)에 WARNING으로 남는다 — 상한 조정의 근거는 거기서 본다.
+
 ## 알려진 갭 / TODO(정직한 목록)
 
 이 절은 "무엇을 안 만들었는가"를 숨기지 않기 위한 목록이다. API계약_v1.md가 모든 세부사항을
@@ -557,6 +575,12 @@ law.go.kr 헤더 [시행 2026. 7. 1.] 확인)
   owner(계정·인덱스·레코드)를 한 번에 만든다(`POST /v1/admin/centers`). 남은 수작업은
   **최초 superadmin 1회 시딩**뿐 — Firestore 콘솔에서 `users/{uid}` = `{role:"superadmin",
   center_id:""}`.
+  - **초대 계정의 최초 비밀번호는 생성 응답에 실린다**(v2.36, P71): `POST /v1/admin/centers`와
+    `POST /v1/staff`가 `initial_password`를 돌려주고 어드민이 화면에 띄운다. 값은
+    `INITIAL_STAFF_PASSWORD`(기본 `123456` — Firebase 최저 길이가 6자라 4자리는 불가능하다).
+    **6자 미만이면 기동을 거부한다.** 종전엔 난수를 걸고 비밀번호 재설정 메일에 넘겼는데
+    센터 생성 화면에 그 메일을 보내는 코드가 없어, 새 센터 대표는 로그인할 방법이 0이었다.
+    메일도 이제 함께 나간다 — 이 값은 메일이 무너졌을 때의 경로다.
   - **관리 평면 목록에 1호점이 안 보이던 것은 v2.35(P70)에서 닫혔다** — `GET /v1/admin/centers`가
     기본 센터를 상호 없이도 항상 맨 앞에 싣는다(회원용 `GET /v1/join/centers`와 같은 집합).
   - **그 uid는 센터 owner 계정과 달라야 한다.** UserIndex는 uid당 역할 1개라, 기존 owner 계정을

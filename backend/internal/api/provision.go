@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -26,7 +25,13 @@ import (
 type UserProvisioner interface {
 	// EnsureUser — email 계정의 uid. 계정이 없으면 만들고, 이미 있으면 그 uid를 재사용한다
 	// (재초대 허용 — 기존 비밀번호·로그인 세션은 건드리지 않는다).
-	EnsureUser(ctx context.Context, email string) (uid string, err error)
+	//
+	// created — **이번 호출이 계정을 새로 만들었는가**(v2.36). 이 한 칸이 응답의 정직함을
+	// 가른다: 새로 만든 계정만 최초 비밀번호가 설정된 값이고, 재초대로 uid만 재사용한
+	// 계정은 **그 사람이 이미 바꿔 둔 비밀번호**를 그대로 쓴다. 구분하지 않고 화면에
+	// "비밀번호: 123456"을 띄우면 관리자가 틀린 값을 불러 주고, 상대는 로그인에 실패한 채
+	// 원인을 모른다.
+	EnsureUser(ctx context.Context, email string) (uid string, created bool, err error)
 	// DisableUser — 퇴사 처리의 **2차 방어선**(v2.0): 계정을 Disabled로 바꾸고 리프레시 토큰을
 	// 폐기해 재로그인·토큰 재발급을 막는다. 이미 발급된 ID 토큰은 검증이 폐기 확인을 하지 않아
 	// 최대 1시간 유효하다 — 즉시성은 UserIndex 강등이 담당한다(계약 v2.0).
@@ -179,11 +184,11 @@ func randomHex(n int) (string, error) {
 
 // Provisioner — 인증 모드에 맞는 구현. Firebase 모드면 Authenticator가 이미 초기화한 Admin SDK
 // 클라이언트를 그대로 재사용한다(SDK 중복 초기화 금지 — 자격증명 로딩이 두 번 일어나지 않게).
-func (a *Authenticator) Provisioner() UserProvisioner {
+func (a *Authenticator) Provisioner(initialPassword string) UserProvisioner {
 	if a.fbClient == nil {
 		return devUserProvisioner{}
 	}
-	return firebaseUserProvisioner{client: a.fbClient}
+	return firebaseUserProvisioner{client: a.fbClient, initialPassword: initialPassword}
 }
 
 // MediaPurger — 인증 모드에 맞는 파일 파기 구현. Firebase 모드라도 **버킷 이름이 없으면
@@ -223,11 +228,13 @@ func (a *Authenticator) MediaPurger(ctx context.Context, bucket string) MediaPur
 // 409가 로컬에서도 그대로 재현된다(랜덤 uid면 중복 초대가 조용히 통과해버린다).
 type devUserProvisioner struct{}
 
-func (devUserProvisioner) EnsureUser(_ context.Context, email string) (string, error) {
+// dev 모드는 **항상 created=true**다. 합성 uid라 "이미 있는 계정"이라는 상태 자체가 없고,
+// 로컬에서 초대 화면을 열면 운영과 같은 최초 비밀번호 안내가 떠야 화면을 검증할 수 있다.
+func (devUserProvisioner) EnsureUser(_ context.Context, email string) (string, bool, error) {
 	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(email))))
 	// 스토어의 ID 관례("{prefix}_{식별자}")를 따르되 순번 대신 해시를 쓴다 — 순번은 프로세스
 	// 재시작마다 초기화돼 결정성을 잃고, api 레이어는 스토어의 시퀀스를 알지 못한다.
-	return "staff_" + hex.EncodeToString(sum[:6]), nil
+	return "staff_" + hex.EncodeToString(sum[:6]), true, nil
 }
 
 // dev 모드엔 잠글 계정 자체가 없다(합성 uid) — no-op. 퇴사 처리의 즉시 차단은 UserIndex
@@ -273,30 +280,34 @@ func (unconfiguredPurger) DeleteObjects(_ context.Context, paths []string) (int,
 func (unconfiguredPurger) Configured() bool { return false }
 
 // firebaseUserProvisioner — Firebase Admin SDK 구현(프로덕션).
-type firebaseUserProvisioner struct{ client *fbauth.Client }
+//
+// initialPassword — 새로 만드는 계정에 걸 최초 비밀번호(config.InitialStaffPassword, v2.36).
+// 난수가 아니라 **관리자가 알고 있는 값**이라 초대받은 사람에게 그대로 불러 줄 수 있다.
+type firebaseUserProvisioner struct {
+	client          *fbauth.Client
+	initialPassword string
+}
 
-func (f firebaseUserProvisioner) EnsureUser(ctx context.Context, email string) (string, error) {
+func (f firebaseUserProvisioner) EnsureUser(ctx context.Context, email string) (string, bool, error) {
 	switch u, err := f.client.GetUserByEmail(ctx, email); {
 	case err == nil:
-		return u.UID, nil // 재초대 — 기존 계정 재사용
+		return u.UID, false, nil // 재초대 — 기존 계정 재사용(비밀번호는 그 사람 것이 그대로다)
 	case !fbauth.IsUserNotFound(err):
-		return "", err
+		return "", false, err
 	}
-	pw, err := tempPassword()
-	if err != nil {
-		return "", err
-	}
-	u, err := f.client.CreateUser(ctx, (&fbauth.UserToCreate{}).Email(email).Password(pw).EmailVerified(false))
+	u, err := f.client.CreateUser(ctx, (&fbauth.UserToCreate{}).Email(email).Password(f.initialPassword).EmailVerified(false))
 	if err != nil {
 		// 동시 초대 경합으로 그 사이 생성됐으면 조회로 되돌아가 uid를 재사용한다.
+		// **created=false**로 돌려준다 — 이 호출은 만들지 않았고, 먼저 만든 쪽이 건 비밀번호가
+		// 무엇인지 여기서는 알 수 없다(같은 값일 가능성이 높아도 단언하지 않는다).
 		if fbauth.IsEmailAlreadyExists(err) {
 			if existing, gerr := f.client.GetUserByEmail(ctx, email); gerr == nil {
-				return existing.UID, nil
+				return existing.UID, false, nil
 			}
 		}
-		return "", err
+		return "", false, err
 	}
-	return u.UID, nil
+	return u.UID, true, nil
 }
 
 // DisableUser — Disabled(true) + RevokeRefreshTokens. 순서가 중요하다: 먼저 계정을 잠가
@@ -384,14 +395,13 @@ func (p firebaseMediaPurger) ListObjects(ctx context.Context, prefix string) ([]
 	}
 }
 
-// tempPassword — 초대 계정의 임시 비밀번호(crypto/rand 32바이트 → base64url 43자).
-// **아무에게도 알려주지 않는 값**이다: 응답·로그에 남기지 않고, 트레이너는 어드민이 생성 직후
-// 보내는 비밀번호 재설정 메일(클라이언트 SDK sendPasswordResetEmail)로 자기 비밀번호를 정한다.
-// 계정에 비밀번호를 아예 안 걸면 이메일/비밀번호 공급자가 붙지 않아 재설정 메일이 나가지 않는다.
-func tempPassword() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
-}
+// tempPassword — **v2.36에서 사용을 멈춘 난수 비밀번호 생성기**(crypto/rand 32바이트 → base64url).
+//
+// 왜 지웠는지 남겨 둔다: 이 값은 아무에게도 알려주지 않는 설계였고, 초대받은 사람은 비밀번호
+// 재설정 메일로 스스로 정하게 되어 있었다. 그런데 **센터 생성 경로에는 그 메일을 보내는 코드가
+// 없었다** — 새 센터 대표는 메일도 못 받고 비밀번호도 모르는 계정만 받았다(람 보고, P71).
+// 지금은 config.InitialStaffPassword를 걸고 그 값을 생성 응답에 담아 화면이 보여 준다.
+//
+// 되살릴 조건: 초대 메일 발송이 **서버 책임**이 되면(현재는 어드민 프론트의 클라이언트 SDK가
+// 보낸다) 난수 비밀번호 + 서버 발송이 다시 더 안전한 조합이 된다. 그때까지는 죽은 코드로 두지
+// 않고 지운다 — 아래 함수는 삭제됐고 이 주석만 이유로 남는다.

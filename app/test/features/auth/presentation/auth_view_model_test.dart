@@ -446,6 +446,66 @@ void main() {
       expect(read().busy, isFalse);
     });
 
+    // ── P72 C1: 대기실이 보던 문과 연결이 실제로 만들어지는 문이 달랐다 ──
+    //
+    // `GET /v1/me`는 uid→UserIndex만 본다. 데스크가 그 사이 이 번호를 회원으로 등록하거나
+    // 잘못 적힌 번호를 고쳐도 그 조회는 영원히 "아직"이라 답하고, 대표는 큐에서 승인할 수도
+    // 없다(JoinApprove의 중복 번호 409 — "같은 번호로 등록된 회원이 이미 있어요"). 화면은
+    // "센터가 승인하면 연결돼요"라고 약속한 채 30초마다 같은 답을 받는다. 연결을 만드는
+    // 유일한 호출(POST /v1/join/match)은 코드 인증 직후 1회만 돌았다 = 그 창을 놓치면
+    // **SMS 재인증 말고는 구조적으로 연결 불가**.
+    //
+    // 뮤테이션: `checkConnection`의 notYet 분기에서 `_rematchInLobby()` 호출을 지우고
+    // `ConnectionCheck.notYet`을 그대로 돌려주면 아래 두 건이 죽는다.
+    test('C1 — 아직이라도 데스크가 등록했으면 매칭을 다시 찾아 nowMatched', () async {
+      await waitPending();
+      // 데스크가 지금 막 이 번호를 회원으로 등록했다.
+      repo.match = const JoinMatch(
+        member: MatchedMember(id: 'm9', name: '김라이즈', status: 'active'),
+        needsConfirm: true,
+      );
+
+      expect(await notifier().checkConnection(), ConnectionCheck.nowMatched);
+
+      // 화면이 스스로 `matched`로 넘어간다 — 이름 확인 1탭이 남고, 그 확인이
+      // JoinConfirm으로 좀비 pending까지 파기한다.
+      expect(read().centerConfirmStage, CenterConfirmStage.matched);
+      expect(read().match?.member?.name, '김라이즈');
+      // **홈으로 보내지 않는다** — 남의 계정에 붙지 않게 막는 유일한 장치가 그 1탭이다.
+      expect(container.read(sessionProvider), isNull);
+      expect(read().busy, isFalse);
+    });
+
+    test('C1 — 보조 매칭이 넘어져도 "아직"이라는 성공한 답을 덮지 않는다', () async {
+      await waitPending();
+      repo.matchResult = const Err(NetworkFailure());
+
+      expect(await notifier().checkConnection(), ConnectionCheck.notYet);
+
+      // 방금 GET /v1/me가 성공적으로 답했다 — 빨간 문구를 띄우면 "마지막 확인 12:14"가 거짓이 된다.
+      expect(read().error, isNull);
+      expect(read().lastCheckedAt, isNotNull);
+      expect(read().lastCheckFailedAt, isNull);
+      expect(read().centerConfirmStage, CenterConfirmStage.pendingApproval);
+    });
+
+    test('C1 — 이미 매칭이 살아 있으면 다시 묻지 않는다', () async {
+      notifier().setPhone('010-1234-5678');
+      repo.match = const JoinMatch(
+        member: MatchedMember(id: 'm1', name: '김라이즈', status: 'active'),
+        needsConfirm: true,
+      );
+      // 즉시 인증 경로 — 코드 없이 로그인이 끝나 그 자리에서 매칭까지 마친다.
+      repo.sendResult = const Ok(PhoneVerificationSession(verificationId: ''));
+      await notifier().sendCode();
+      expect(read().centerConfirmStage, CenterConfirmStage.matched);
+      final before = repo.matchJoinCount;
+
+      await notifier().checkConnection();
+
+      expect(repo.matchJoinCount, before, reason: '답이 바뀔 이유가 없는 조회를 30초마다 반복하지 않는다');
+    });
+
     test('아직이면 notYet — 대기 상태도 로컬 기록도 그대로 둔다', () async {
       await waitPending();
 

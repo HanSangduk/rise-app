@@ -299,7 +299,7 @@ final class BookingViewModelProvider
   BookingViewModel create() => BookingViewModel();
 }
 
-String _$bookingViewModelHash() => r'ff2a6dc570636f1aa5dcd9c879138ffacae444a8';
+String _$bookingViewModelHash() => r'1f2b11281724378ba62a1e6105cd81940d728e4a';
 
 /// 예약 탭 — 홈의 패스 스위처에서 선택된 패스를 "내 코치" 기준으로 재사용.
 

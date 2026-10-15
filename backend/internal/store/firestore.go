@@ -836,6 +836,19 @@ func (f *Firestore) BookAtomic(ctx context.Context, centerID, slotKey string, ca
 		if len(slot.Teams) == 0 {
 			slot.Capacity = capacity // 비어 있는 슬롯은 현재 정책 용량으로 갱신(v1.5)
 		}
+		// 슬롯 규칙(정원·코치 중복·회원 중복). **이 호출이 통째로 빠져 있었다**(P71 발견):
+		// 이 함수의 머리 주석은 처음부터 "슬롯 읽기 → CanBook 판정 → 예약 생성"이라고 적고
+		// 있었는데 판정만 없었고, Memory 구현(memory.go)에만 있었다. 테스트는 전부 Memory를
+		// 타므로 **프로덕션에서만** 정원이 무제한이었다: 3팀 슬롯에 4팀·5팀이 들어가고, 같은
+		// 코치가 같은 시간에 두 수업을 받고, 같은 회원이 같은 슬롯을 두 번 예약했다(예약 확정
+		// 중 네트워크가 끊겨 재시도하면 실제로 일어난다 — 세션도 두 번 차감된다).
+		// 어드민·앱이 그리는 "3/3 만석"은 그동안 참이 아니었다.
+		//
+		// 위치가 규칙이다: 트랜잭션 안, 슬롯을 **읽은 뒤**, 쓰기 **전**. 서비스 계층에서 미리
+		// 보는 것으로는 못 막는다 — 읽고 판정하는 사이에 남이 커밋하면 그대로 초과한다.
+		if err := domain.CanBook(*slot, booking.TrainerID, booking.MemberID); err != nil {
+			return err
+		}
 
 		// 잔여 청구권 재판정(P13 H1). 패스 문서를 **읽고 또 쓰기** 때문에 같은 패스에 대한 동시
 		// 예약 트랜잭션끼리 충돌이 감지돼 직렬화된다 — 쿼리 결과만 읽으면 상대가 방금 만든 예약
@@ -1424,6 +1437,38 @@ func (f *Firestore) ListPayments(ctx context.Context, centerID string) ([]domain
 	return out, nil
 }
 
+// ListPaymentsByMember — 단일 필드 등호 조건이라 복합 인덱스가 필요 없다(자동 인덱스).
+func (f *Firestore) ListPaymentsByMember(ctx context.Context, centerID, memberID string) ([]domain.Payment, error) {
+	return f.listPaymentsWhere(ctx, centerID, "member_id", memberID)
+}
+
+// ListPaymentsByPass — 단일 필드 등호 조건이라 복합 인덱스가 필요 없다(자동 인덱스).
+func (f *Firestore) ListPaymentsByPass(ctx context.Context, centerID, passID string) ([]domain.Payment, error) {
+	return f.listPaymentsWhere(ctx, centerID, "pass_id", passID)
+}
+
+func (f *Firestore) listPaymentsWhere(ctx context.Context, centerID, field, value string) ([]domain.Payment, error) {
+	iter := f.center(centerID).Collection("payments").Where(field, "==", value).Documents(ctx)
+	defer iter.Stop()
+	out := []domain.Payment{}
+	for {
+		snap, err := iter.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		p, err := fromDoc[domain.Payment](snap.Data())
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *p)
+	}
+	sortByDocID(out, paymentDocID) // order.go — Memory와 같은 규칙
+	return out, nil
+}
+
 // ---- 전자계약(Contract, v1.1 정합 패치) ----
 
 func (f *Firestore) CreateContract(ctx context.Context, centerID string, c *domain.Contract) (string, error) {
@@ -1595,7 +1640,14 @@ func (f *Firestore) CreateBodyPhoto(ctx context.Context, centerID string, bp *do
 	return bp.ID, nil
 }
 
+// GetBodyPhoto / SaveBodyPhoto / DeleteBodyPhoto — 빈 id는 다른 단건 조회와 같은 규칙으로
+// ErrNotFound(errors.go checkDocID). 체형사진 셋만 이 가드가 빠져 있었다(v2.37, P73): 같은 호출이
+// Memory에선 404, 운영에선 InvalidArgument 500이던 그 클래스가 형제 8종은 막히고 여기만 열려 있었다.
+// 회귀는 conformance_test.go testEmptyIDReads가 잡는다.
 func (f *Firestore) GetBodyPhoto(ctx context.Context, centerID, id string) (*domain.BodyPhoto, error) {
+	if err := checkDocID(id); err != nil {
+		return nil, err
+	}
 	snap, err := f.center(centerID).Collection("bodyPhotos").Doc(id).Get(ctx)
 	if status.Code(err) == codes.NotFound {
 		return nil, ErrNotFound
@@ -1607,11 +1659,17 @@ func (f *Firestore) GetBodyPhoto(ctx context.Context, centerID, id string) (*dom
 }
 
 func (f *Firestore) SaveBodyPhoto(ctx context.Context, centerID string, bp *domain.BodyPhoto) error {
+	if err := checkDocID(bp.ID); err != nil {
+		return err
+	}
 	_, err := f.center(centerID).Collection("bodyPhotos").Doc(bp.ID).Set(ctx, toDoc(bp))
 	return err
 }
 
 func (f *Firestore) DeleteBodyPhoto(ctx context.Context, centerID, id string) error {
+	if err := checkDocID(id); err != nil {
+		return err
+	}
 	_, err := f.center(centerID).Collection("bodyPhotos").Doc(id).Delete(ctx)
 	return err
 }

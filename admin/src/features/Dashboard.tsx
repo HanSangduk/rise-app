@@ -585,8 +585,17 @@ export function Dashboard({
                 )}
                 {todo.expiringSoon.length > 0 && (
                   <div>
-                    회원권 만료 임박 <b>{todo.expiringSoon.length}명</b> (D-{expiringDays}) — 연장
-                    제안
+                    회원권 만료 임박 <b>{todo.expiringSoon.length}명</b> (D-{expiringDays}) (
+                    {/* 형제 버킷과 같은 이름 링크 — 이 줄만 숫자뿐이라 "누구에게 연장을 제안하나"를
+                        회원 상세를 하나씩 열어 확인해야 했다(P73). 회원 목록에 만료일 열이 없어
+                        이 링크가 대상자에 닿는 유일한 길이다. */}
+                    {todo.expiringSoon.slice(0, 3).map((m, i) => (
+                      <span key={m.id}>
+                        {i > 0 && "·"}
+                        <NameLink name={m.name} onClick={onOpenMember && (() => onOpenMember(m.id))} />
+                      </span>
+                    ))}
+                    {todo.expiringSoon.length > 3 && ` 외 ${todo.expiringSoon.length - 3}명`}) — 연장 제안
                   </div>
                 )}
                 {todo.lowRemaining.length > 0 && (

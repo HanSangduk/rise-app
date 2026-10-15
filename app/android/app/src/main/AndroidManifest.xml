@@ -69,6 +69,14 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            <!-- Flutter 딥링크 끔(P75): 이 앱은 딥링크가 없다(app_router.dart). 엔진 기본값(켜짐)이면 이
+                 액티비티에 data를 실은 명시적 인텐트가 오는 순간 실행 중에도 onNewIntent → 라우터로 들어가
+                 go_router "Page Not Found"가 뜬다(exported + singleTop). iOS에서 Firebase reCAPTCHA 복귀 URL로
+                 실제로 터진 결함 클래스다. 엔진은 **액티비티** 메타데이터만 읽는다 — application 단에 두면 무효.
+                 test/core/router/platform_deeplink_gate_test.dart가 지킨다. -->
+            <meta-data
+              android:name="flutter_deeplinking_enabled"
+              android:value="false" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>

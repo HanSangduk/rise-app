@@ -6,6 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rise_member/core/config/app_config.dart';
 import 'package:rise_member/core/network/dio_client.dart';
+import 'package:rise_member/core/session/app_session.dart';
+import 'package:rise_member/core/session/session_provider.dart';
+import 'package:rise_member/core/session/session_store.dart';
 import 'package:rise_member/features/auth/presentation/center_contact_provider.dart';
 
 // 센터 상호의 출처 단일화(P56 L10).
@@ -149,6 +152,36 @@ void main() {
       expect(sub.read(), AppConfig.centerFullName);
       sub.close();
     });
+
+    // P65 후속 3(P73): 로그인 뒤에는 세션의 센터를 묻는다 — 종전엔 항상 기본 센터라 2호점 회원의
+    // 홈 헤더·마이 탭이 1호점 상호를 찍었다.
+    test('세션이 있으면 그 센터를 ?center= 로 묻는다', () async {
+      adapter.body = {'name': '라이즈 2호점', 'phone': '', 'address': ''};
+      final local = ProviderContainer.test(
+        overrides: [
+          dioProvider.overrideWithValue(_dio(adapter)),
+          sessionStoreProvider.overrideWithValue(_NoopSessionStore()),
+        ],
+      );
+      local.read(sessionProvider.notifier).set(
+            const AppSession(uid: 'u2', role: 'member', centerId: 'branch2', memberId: 'm2'),
+          );
+      final sub = local.listen(centerDisplayNameProvider, (_, __) {});
+      await local.read(centerContactProvider('branch2').future);
+
+      expect(sub.read(), '라이즈 2호점');
+      expect(adapter.queries.single['center'], 'branch2', reason: '기본 센터를 물었다');
+      sub.close();
+    });
+
+    test('세션이 없으면(대기실) 종전대로 기본 센터 — 파라미터 없음', () async {
+      adapter.body = {'name': '라이즈 컨디셔닝 센터', 'phone': '', 'address': ''};
+      final sub = container.listen(centerDisplayNameProvider, (_, __) {});
+      await container.read(centerContactProvider(null).future);
+
+      expect(adapter.queries.single.containsKey('center'), isFalse);
+      sub.close();
+    });
   });
 
   test('임시 상수에 지점명이 없다 — 검증 못 한 사실("강남")을 회원에게 찍지 않는다', () {
@@ -187,4 +220,15 @@ class _CannedAdapter implements HttpClientAdapter {
 
   @override
   void close({bool force = false}) {}
+}
+
+class _NoopSessionStore implements SessionStore {
+  @override
+  Future<AppSession?> read(String uid) async => null;
+
+  @override
+  Future<void> write(AppSession session) async {}
+
+  @override
+  Future<void> clear() async {}
 }

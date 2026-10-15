@@ -16,7 +16,7 @@ import 'package:rise_member/features/bodycheck/domain/bodycheck_models.dart';
 ///   allow create, update: if isSignedIn()
 ///     && myMemberId() == memberId          // Firestore users/{uid}.member_id
 ///     && hasSensitiveConsent(memberId)
-///     && isImageUnder10MB();               // size < 10MB && contentType ~ image/*
+///     && isImageUnder10MB();               // size < 10MB && contentType ∈ image/(jpeg|png|webp)
 /// }
 /// ```
 ///
@@ -27,7 +27,9 @@ import 'package:rise_member/features/bodycheck/domain/bodycheck_models.dart';
 ///    폴더가 아니라 **파일명 앞머리**에 붙인다(이름순 정렬 = 시간순이라는 이득도 있다).
 /// 2. 경로 키는 **memberId**다. uid가 아니다 — 규칙이 uid를 Firestore에서
 ///    member_id로 옮겨 심고 그 값과 경로를 대조한다.
-/// 3. contentType은 `image/*`, 크기는 10MB 미만([maxUploadBytes]).
+/// 3. contentType은 `image/jpeg`·`image/png`·`image/webp` 중 하나(P74 — 종전 `image/*`에는
+///    `image/svg+xml`처럼 스크립트를 품는 형식이 들어갔다), 크기는 10MB 미만([maxUploadBytes]).
+///    업로더는 `image/jpeg`를 **명시**한다(body_photo_uploader.dart).
 ///
 /// 파일명 끝의 epochMillis는 같은 날 같은 포즈를 다시 찍었을 때 앞 사진을 덮지
 /// 않기 위한 것이다. 반대로 **업로드 재시도는 같은 경로를 재사용해야** 실패한

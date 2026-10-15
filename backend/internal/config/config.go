@@ -38,6 +38,23 @@ type Config struct {
 	// 요약: 프로필 사진 업로드를 쓰려면 이 값이 **필수**다.
 	StorageBucket string
 	DevSeed       bool // true면 인메모리 스토어에 데모 데이터 시딩(v1.4 — 어드민·앱 데모/영업용. Firestore 모드에선 무시)
+	// InitialStaffPassword — 초대로 **새로 만들어지는** 스태프 계정의 최초 비밀번호(v2.36).
+	//
+	// 종전엔 아무도 모르는 난수였다(tempPassword). 설계상 초대받은 사람은 비밀번호 재설정
+	// 메일로 스스로 정하게 되어 있었는데, **센터 생성 경로에는 그 메일을 보내는 코드가 아예
+	// 없었다**(어드민 Centers.tsx는 안내 문구만 그린다) — 새 센터 대표는 아무것도 못 받고
+	// 아무 비밀번호도 모르는 계정만 생긴다. 람의 보고가 정확히 이것이다.
+	//
+	// 그래서 **관리자가 말해 줄 수 있는 값**으로 만든다. 서버가 이 값으로 계정을 만들고,
+	// 생성 응답에 담아 화면이 그대로 보여 준다(초대장 대신 구두 전달).
+	//
+	// **Firebase는 6자 미만을 거부한다**(Admin SDK가 요청 전 로컬 검증 — auth/user_mgt.go
+	// "password must be a string at least 6 characters long"). 그래서 4자리는 물리적으로
+	// 불가능하고 기본값이 6자리다. 6자 미만을 넣으면 기동이 거부된다(Validate).
+	//
+	// 보안 상충: 이 값은 공개 저장소에 적힌 상수다. 최초 로그인 후 바꾸는 것이 전제이고,
+	// 어드민 화면이 그 사실을 함께 띄운다. 운영에서 강화하려면 이 환경변수를 덮어써라.
+	InitialStaffPassword string
 }
 
 // Load — 환경변수에서 설정을 읽고 합리적 기본값을 채운다.
@@ -51,6 +68,8 @@ func Load() Config {
 		CORSOrigins:     splitCSV(env("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174")), // 5174=어드민 vite dev 포트
 		StorageBucket:   env("STORAGE_BUCKET", ""),
 		DevSeed:         env("DEV_SEED", "false") == "true",
+		// 6자 = Firebase 최저 길이. 람 요청("1234")을 그 바닥에 맞춰 늘린 값이다.
+		InitialStaffPassword: env("INITIAL_STAFF_PASSWORD", "123456"),
 	}
 }
 
@@ -74,6 +93,14 @@ func (c Config) Validate() error {
 	// 것이었고, 토큰이 DB로 옮겨가면서 승격될 기본값 자체가 사라졌다. 미발급 센터는 조용히
 	// 열리는 대신 self_qr 체크인을 **거부**한다(api.Service.Checkin) — fail-closed가 기동
 	// 검증이 아니라 요청 경로로 내려갔다.
+	//
+	// 최초 비밀번호는 **기동에서 막는다**(v2.36). 요청 경로로 내리면 센터 생성이 계정 생성
+	// 단계에서 실패하는데, 그 시점엔 정책·센터 신원이 이미 저장돼 있어 "센터는 생겼는데
+	// 대표가 없는" 반쪽 상태가 남는다. 설정 오류는 첫 요청이 아니라 기동에서 드러나야 한다.
+	if len([]rune(c.InitialStaffPassword)) < 6 {
+		return errors.New("INITIAL_STAFF_PASSWORD가 6자 미만입니다 — Firebase가 6자 미만 비밀번호로는 계정을 만들지 못해 " +
+			"직원·센터 대표 초대가 전부 실패합니다. 6자 이상으로 설정하세요")
+	}
 	return nil
 }
 

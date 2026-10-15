@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:rise_member/core/result/failure.dart';
 import 'package:rise_member/core/result/result.dart';
@@ -61,10 +62,48 @@ class FirebaseBodyPhotoLoader implements BodyPhotoLoader {
   ///
   /// **디스크에 쓰지 않는다** — 업로드가 `no-store`로 올린 민감정보를 앱이 디스크에
   /// 남기면 그 의도가 무의미해진다. 프로세스가 죽으면 같이 사라지는 게 맞다.
+  ///
+  /// **개수 상한이 있다**([maxEntries], P74). 종전엔 로그아웃 전까지 본 사진의 원본 바이트가 전부
+  /// 쌓였다 — 타임라인을 오가며 포즈 4종 × 촬영 수십 회를 보면 수십 MB가 세션 내내 남는다. Dart의
+  /// `Map`은 삽입 순서를 지키므로 "가장 오래 전에 넣은 것"을 첫 키로 지우는 단순 LRU-ish로 충분하다
+  /// (읽기 히트 시 뒤로 옮겨 최근 사용을 살린다 — 비교 화면이 두 장을 번갈아 읽는다).
   static final _cache = <String, Uint8List>{};
+  static const maxEntries = 40;
+
+  /// 비운 횟수 — [load]가 받는 **도중에** 세션이 끝나면(로그아웃·401 → [clear]) 그 뒤에 도착한
+  /// 바이트를 넣지 않기 위한 표식(P74). 맵만 비우면 느린 망에서 이전 회원의 사진이 다음 회원의
+  /// 세션 캐시로 다시 들어온다. 오르는 것은 세션 경계뿐이라 같은 세션 안의 동시 로드끼리는 서로를
+  /// 무효화하지 않는다.
+  static int _epoch = 0;
 
   /// 회원이 바뀌면 남의 사진이 캐시에 남아 있으면 안 된다.
-  static void clearCache() => _cache.clear();
+  static void clearCache() {
+    _epoch++;
+    _cache.clear();
+  }
+
+  static void _put(String storagePath, Uint8List bytes) {
+    _cache.remove(storagePath); // 있던 항목은 뒤로 옮긴다(삽입 순서 = 최근 사용 순서)
+    _cache[storagePath] = bytes;
+    while (_cache.length > maxEntries) {
+      _cache.remove(_cache.keys.first);
+    }
+  }
+
+  static Uint8List? _hit(String storagePath) {
+    final bytes = _cache.remove(storagePath);
+    if (bytes != null) _cache[storagePath] = bytes; // 최근 사용으로 갱신
+    return bytes;
+  }
+
+  /// 시험 전용 — Firebase 없이 캐시를 채운다(상한·최근 사용 순서). 읽기 히트·받아 온 바이트의 배선은
+  /// 실제 [peek]·[load]로 잰다(시험이 이 static만 부르면 `load`가 캐시를 우회해도 초록이었다).
+  @visibleForTesting
+  static void debugPut(String storagePath, Uint8List bytes) => _put(storagePath, bytes);
+
+  /// 시험 전용 — 지금 캐시에 든 경로를 오래된 순으로.
+  @visibleForTesting
+  static List<String> debugCachedPaths() => List.unmodifiable(_cache.keys);
 
   @override
   void clear() => clearCache();
@@ -76,7 +115,7 @@ class FirebaseBodyPhotoLoader implements BodyPhotoLoader {
   void evict(String storagePath) => _cache.remove(storagePath);
 
   @override
-  Uint8List? peek(String storagePath) => _cache[storagePath];
+  Uint8List? peek(String storagePath) => _hit(storagePath);
 
   @override
   Future<Result<Uint8List>> load(String storagePath) async {
@@ -84,9 +123,10 @@ class FirebaseBodyPhotoLoader implements BodyPhotoLoader {
       // 서버가 v2.10부터 빈 경로를 400으로 막지만, 그 이전에 저장된 레코드가 남아 있다.
       return const Err(RejectedFailure('사진 파일 정보가 없어요 — 다시 촬영해주세요'));
     }
-    final hit = _cache[storagePath];
+    final hit = _hit(storagePath);
     if (hit != null) return Ok(hit);
 
+    final epoch = _epoch;
     try {
       // maxSize를 명시한다 — 규칙의 10MB 상한과 같은 값. 기본값(10MB)에 기대지 않는 이유는
       // 그 기본이 바뀌면 조용히 동작이 달라지기 때문이고, 무엇보다 **의도를 코드에 남기려는**
@@ -95,7 +135,7 @@ class FirebaseBodyPhotoLoader implements BodyPhotoLoader {
       if (bytes == null || bytes.isEmpty) {
         return const Err(UnknownFailure('사진을 불러오지 못했어요 — 다시 시도해주세요'));
       }
-      _cache[storagePath] = bytes;
+      if (epoch == _epoch) _put(storagePath, bytes); // 받는 사이 세션이 끝났으면 캐시에 남기지 않는다
       return Ok(bytes);
     } on FirebaseException catch (e) {
       return Err(_mapFirebase(e));

@@ -169,7 +169,7 @@ final class StaffMapProvider
   }
 }
 
-String _$staffMapHash() => r'6c1d3ccf91046193a389486f91d95718288c9f99';
+String _$staffMapHash() => r'0e7885443aa1c05a939b79c0711442acbf4cbe86';
 
 /// [StaffMapReader]의 실제 구현 — 실패를 **삼킨다**(best-effort).
 ///

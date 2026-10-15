@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:rise_member/core/session/session_provider.dart';
 
 /// 앱의 모든 모달 바텀시트는 이 함수로 연다(P54).
 ///
@@ -77,6 +79,21 @@ import 'package:flutter/material.dart';
 ///
 /// 잠금은 **닫는 제스처만** 막는다. 시트 본문의 `Navigator.pop`(성공 후 닫기)은
 /// `pop`이라 PopScope를 거치지 않으므로 그대로 동작한다.
+///
+/// ## 세션이 끊기면 시트를 자동으로 내린다
+///
+/// 세션 종료의 착지는 `app.dart`의 리스너가 go_router의 **선언적** `go()`로 처리하는데,
+/// 이 시트들은 `useRootNavigator: true`로 **명령형** push된 라우트다. 그래서 아래 화면만
+/// 로그인으로 바뀌고 시트는 그 위에 그대로 남는다 — 회원이 보는 건 "로그인이 만료됐어요"
+/// 인라인 문구 하나뿐이고, 로그인으로 갈 버튼은 없다. 시트를 손으로 쓸어 내려야만 이미
+/// 뒤에 가 있는 로그인 화면을 본다(일시정지 신청·인바디 입력·동의 관리에서 확인).
+///
+/// **개별 시트에서 pop하지 않고 여기서 한다.** 실패 분기는 시트마다 여럿이고, 한 곳만
+/// 빠뜨려도 그 경로에서만 조용히 갇힌다 — 래퍼가 강제하는 다른 규약들과 같은 이유로
+/// 단일 지점에 둔다. 시트 본문은 종전처럼 인라인 문구만 세우면 된다.
+///
+/// 잠금(`submitting`) 중에도 내려간다: `Navigator.pop`은 `maybePop`이 아니라 PopScope를
+/// 거치지 않는다. 세션이 없으면 그 제출은 어차피 끝나지 않는다.
 Future<T?> showRiseSheet<T>(
   BuildContext context, {
   required WidgetBuilder builder,
@@ -105,6 +122,9 @@ Future<T?> showRiseSheet<T>(
       if (submitting != null) {
         body = _SubmitLock(submitting: submitting, child: body);
       }
+      // 세션 감시는 잠금 **바깥**이다 — 잠긴 시트도 내려야 하고, `submitting`을
+      // 넘기지 않은 시트에도 똑같이 걸려야 한다(위 "세션이 끊기면" 절).
+      body = _SessionSheetGuard(child: body);
       return MediaQuery(
         data: mq.copyWith(
           viewInsets: mq.viewInsets.copyWith(
@@ -115,6 +135,37 @@ Future<T?> showRiseSheet<T>(
       );
     },
   );
+}
+
+/// 세션이 사라지면 자기 라우트를 내리는 감시자 — 파일 헤더 "세션이 끊기면" 절 참조.
+///
+/// `prev != null && next == null`만 본다(`sessionListenerRoute`와 같은 판정): 앱 기동
+/// 시점의 `null → null`이나 로그인 성공(`→ 채워짐`)은 시트를 닫을 사건이 아니다.
+///
+/// **닫는 대상을 `Navigator.pop()`로 단정하지 않는다.** 시트 위에 확인 대화상자가
+/// 떠 있으면 pop이 그쪽을 닫아 시트는 그대로 남는다. 자기 라우트를 직접 집어 맨 위일
+/// 때만 pop(닫히는 애니메이션 유지)하고, 아니면 스택에서 들어낸다. 이미 비활성이면
+/// (go_router가 먼저 걷어냈거나 닫히는 중) 아무 일도 하지 않는다.
+class _SessionSheetGuard extends ConsumerWidget {
+  const _SessionSheetGuard({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.listen(sessionProvider, (prev, next) {
+      if (prev == null || next != null) return;
+      final route = ModalRoute.of(context);
+      if (route == null || !route.isActive) return;
+      final navigator = Navigator.of(context);
+      if (route.isCurrent) {
+        navigator.pop();
+      } else {
+        navigator.removeRoute(route);
+      }
+    });
+    return child;
+  }
 }
 
 /// [showRiseSheet]의 `submitting` 잠금 본체 — 파일 헤더 "`submitting`" 절 참조.

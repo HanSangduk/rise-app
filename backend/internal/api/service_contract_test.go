@@ -229,7 +229,7 @@ func TestCreateContractScopeAndValidation(t *testing.T) {
 		t.Errorf("member 생성 = %v, want ErrForbidden", err)
 	}
 	other, err := s.CreateMember(ctx, ownerP(), &domain.Member{
-		Name: "이서준", Phone: "010-9999-0000", TrainerID: "t1", Status: domain.MemberStatusActive,
+		Name: "이서준", Phone: "010-1234-5678", TrainerID: "t1", Status: domain.MemberStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -85,10 +85,17 @@ enum JoinRequestOutcome {
   failed,
 }
 
-/// [AuthViewModel.checkConnection]의 결과 — "연결됐는지 확인" 버튼의 3갈래.
+/// [AuthViewModel.checkConnection]의 결과 — "연결됐는지 확인" 버튼의 4갈래.
 enum ConnectionCheck {
   /// 연결 완료 — 세션까지 세웠다. 호출부는 홈으로.
   connected,
+
+  /// 서버는 "아직 연결 전"이라 답했지만, **같은 번호로 회원 레코드를 새로 찾았다**(P72 C1).
+  /// 데스크가 그 사이 회원을 등록했거나 번호를 고친 경우다 — 이름 확인 한 번이면 연결된다.
+  /// 화면은 그대로 머물되(`centerConfirmStage`가 이미 `matched`로 바뀌었다) 무슨 일이
+  /// 일어났는지 알려야 한다. [connected]와 달리 **홈으로 보내지 않는다** — 남의 계정에
+  /// 붙지 않게 막는 이름 확인 1탭을 건너뛸 수 없다.
+  nowMatched,
 
   /// 서버가 "아직 연결 전"이라고 확답 — 대기 상태를 그대로 유지한다.
   notYet,
@@ -258,6 +265,30 @@ class AuthViewModel extends _$AuthViewModel {
     }
   }
 
+  /// 대기실에서 번호 매칭만 다시 묻는다 — 회원을 새로 찾았으면 true(P72 C1).
+  ///
+  /// [_matchAfterSignIn]을 재사용하지 **않는** 이유: 그쪽은 `joinRequestedAt`를 로컬 기록으로
+  /// 덮어쓰고 `submitting`을 내린다. 대기실에서는 방금 서버가 준 가입 요청 상태가 로컬 기록을
+  /// 이겨야 하고(`centerConfirmStage` 규약), 진행 플래그의 주인도 [checkConnection]이다.
+  /// 여기서 만지는 칸은 **`match` 하나**다.
+  ///
+  /// 실패는 **삼킨다**. 방금 `GET /v1/me`가 "아직"이라고 성공적으로 답한 참이라, 보조 조회가
+  /// 넘어졌다고 그 답을 빨간 에러로 덮으면 확인 상태 줄의 "마지막 확인 12:14"가 거짓이 된다.
+  ///
+  /// 이미 매칭이 살아 있으면 묻지 않는다 — 화면은 이미 `matched`이고 답이 바뀔 이유가 없다.
+  Future<bool> _rematchInLobby() async {
+    if (state.match?.member != null) return false;
+    if (state.phone.isEmpty) return false; // 신원을 모르는 경로(복원 실패) — 물을 번호가 없다.
+    final result = await ref.read(authRepositoryProvider).matchJoin(state.phone);
+    if (result case Ok(:final value) when value.member != null) {
+      state = state.copyWith(match: value, matchDeclined: false);
+      final trainerId = value.member?.trainerId;
+      if (trainerId != null) _resolveTrainerName(trainerId);
+      return true;
+    }
+    return false;
+  }
+
   /// 로컬에 남은 가입 요청 중 [phone]의 것만 돌려준다(번호 대조 필수 —
   /// 대기는 기기가 아니라 번호의 상태다).
   Future<JoinRequestRecord?> _pendingFor(String phone) async {
@@ -413,12 +444,16 @@ class AuthViewModel extends _$AuthViewModel {
   ///
   /// 실패해도 대기 상태([AuthState.joinRequestedAt])는 건드리지 않는다 —
   /// 확인에 실패했다고 대기 사실이 사라지면 사용자는 또 요청을 보낸다.
-  Future<ConnectionCheck> checkConnection() async {
+  /// [auto]면 **화면 컨트롤을 잠그지 않는다**(P72 C10) — 자동 틱은 사용자가 시작한 동작이
+  /// 아니므로 그 30초 주기가 탈출구 링크를 함께 회색으로 만들면 안 된다.
+  Future<ConnectionCheck> checkConnection({bool auto = false}) async {
     // 연타 방지 — 버튼도 busy로 잠그지만, 진행 중 재진입이 세션을 두 번 세우는
-    // 일이 없도록 뷰모델에서도 막는다.
-    if (state.busy) return ConnectionCheck.failed;
+    // 일이 없도록 뷰모델에서도 막는다. 자동·수동 어느 쪽이 날아가는 중이든 막는다.
+    if (state.busy || state.anyCheckInFlight) return ConnectionCheck.failed;
 
-    state = state.copyWith(checkingConnection: true, clearError: true);
+    state = auto
+        ? state.copyWith(autoChecking: true)
+        : state.copyWith(checkingConnection: true, clearError: true);
     final result = await ref.read(authRepositoryProvider).loadSession();
 
     // 확인 상태 줄의 시각 — **성공(connected/notYet)에만** lastCheckedAt, 실패엔 lastCheckFailedAt.
@@ -429,6 +464,7 @@ class AuthViewModel extends _$AuthViewModel {
         ref.read(sessionProvider.notifier).set(_withDisplayName(value));
         state = state.copyWith(
           checkingConnection: false,
+          autoChecking: false,
           connectionUnknown: false,
           lastCheckedAt: now,
         );
@@ -448,6 +484,7 @@ class AuthViewModel extends _$AuthViewModel {
         // 요청 (이름·전화번호)"로 남는다. 로컬 대기 기록(joinRequestedAt)은 종전대로 둔다.
         state = state.copyWith(
           checkingConnection: false,
+          autoChecking: false,
           connectionUnknown: false,
           serverJoinStatus: f.joinStatus,
           clearServerJoinStatus: f.joinStatus == null,
@@ -456,14 +493,29 @@ class AuthViewModel extends _$AuthViewModel {
           joinCenterId: f.joinCenterId,
           lastCheckedAt: now,
         );
-        return ConnectionCheck.notYet;
+        // **여기서 번호 매칭을 한 번 더 묻는다**(P72 C1). `GET /v1/me`는 uid→UserIndex만
+        // 보므로(`service.go` Me), 데스크가 그 사이 이 번호를 등록하거나 고쳐도 영원히
+        // "아직"이라고 답한다. 연결을 만드는 유일한 호출은 `POST /v1/join/match`인데
+        // 종전엔 **코드 인증 직후 1회**만 돌았다 — 그 창을 놓친 사람은 SMS 재인증 전까지
+        // 구조적으로 연결될 수 없었고, 대표가 큐에서 승인하려 해도 "같은 번호로 등록된
+        // 회원이 이미 있어요" 409에 막혔다(`JoinApprove` 중복 가드). 화면은 "센터가
+        // 승인하면 연결돼요"라고 약속하며 30초마다 폴링만 했다.
+        //
+        // JoinMatch는 **읽기 전용·멱등**이고(조회만 한다) 프로덕션에선 번호를 토큰에서
+        // 강제로 가져오므로(`joinPhone`) 재호출에 새 표면이 없다. 대표 큐에 줄을 쌓지도
+        // 않는다(그건 `join/request`다).
+        return await _rematchInLobby() ? ConnectionCheck.nowMatched : ConnectionCheck.notYet;
 
       case Err(:final failure):
         // 확인 실패 — 연결됐는지 여전히 모른다. connectionUnknown은 그대로 둔다
         // (대기 화면에서 눌렀다면 대기 화면 그대로, 재확인 화면이었다면 그대로).
         state = state.copyWith(
           checkingConnection: false,
-          error: failure,
+          autoChecking: false,
+          // 자동 틱의 실패로는 빨간 문구를 띄우지 않는다(P72) — 30초마다 에러가 나타났다
+          // 사라지기를 반복한다. 실패 사실은 확인 상태 줄의 "HH:mm 확인 못 함"이 말한다.
+          error: auto ? null : failure,
+          clearError: auto,
           lastCheckFailedAt: now,
         );
         return ConnectionCheck.failed;

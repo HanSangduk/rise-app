@@ -52,6 +52,20 @@ func NewRouter(h *Handlers, auth *Authenticator, corsOrigins []string) http.Hand
 	// 진입 경로(web.app/api/health)를 감시하려면 이 경로가 컨테이너에 실재해야 한다.
 	r.Get("/api/health", h.Health)
 
+	// 요청 빈도 제한(v2.38, P74 — ratelimit.go). 두 마운트(/v1·/api/v1)가 **같은** 제한기를 나눠 쓴다.
+	// 키는 회원 uid(인증 뒤)이고 **스태프·superadmin 요청은 세지 않는다**(rateKeyMember — 어드민의
+	// 원탭 체크인이 ②의 /checkin을 쓴다).
+	// ① 회원발 요청 큐(가입 매칭/확인/요청·상담 요청): 분당 30, 순간 15. 사람이 한 번 누르는 일이고
+	//    대기실 자동 확인은 30초 간격이라 정상 사용은 한 자릿수/분이다.
+	// ② 회원의 상호작용 쓰기(체크인·hw-check): 분당 120, 순간 40. 홈워크 체크는 **탭 하나가
+	//    POST 하나**라 하루치 항목(개인+담당+공지 합쳐 15개 안팎)을 한 번에 훑으면 ①의 burst에 닿는다 —
+	//    그래서 따로 둔다. 목적은 폭주 루프(스크립트·앱 버그)의 상한이지 사람 손의 제한이 아니다.
+	// ③ 무인증 공개 경로: 분당 60, 순간 30 — 키는 IP. 센터 와이파이 뒤 회원 수십 명이 동시에 앱을
+	//    켜는 경우를 burst가 흡수한다(공유 IP라 한 사람 기준보다 후하게 잡았다).
+	queueLimit := newRateLimiter(30, 15).middleware(rateKeyMember)
+	toggleLimit := newRateLimiter(120, 40).middleware(rateKeyMember)
+	publicLimit := newRateLimiter(60, 30).middleware(rateKeyIP)
+
 	// v1 라우트 정의 — 아래에서 두 경로에 마운트한다(정의는 여기 한 곳뿐).
 	v1 := func(r chi.Router) {
 		// 접속기록은 auth보다 **앞**에 선다 — 401(토큰 없음/무효)과 superadmin 경계 403을 기록하기
@@ -64,9 +78,9 @@ func NewRouter(h *Handlers, auth *Authenticator, corsOrigins []string) http.Hand
 		// 회원탈퇴(v2.11) — 앱 안의 계정 삭제(App Store Guideline 5.1.1(v)). 회원 본인 전용.
 		r.Delete("/me", h.DeleteMe)
 
-		r.Post("/join/match", h.JoinMatch)
-		r.Post("/join/confirm", h.JoinConfirm)
-		r.Post("/join/request", h.JoinRequest)
+		r.With(queueLimit).Post("/join/match", h.JoinMatch)
+		r.With(queueLimit).Post("/join/confirm", h.JoinConfirm)
+		r.With(queueLimit).Post("/join/request", h.JoinRequest)
 		// 회원용 센터 목록(v2.33) — 가입 요청에서 고를 대상. superadmin 전용 관리 평면과 다른 경로다.
 		r.Get("/join/centers", h.JoinCenters)
 		r.Get("/join/requests", h.JoinRequests) // v1.1 정합 패치(어드민 가정 승인)
@@ -76,7 +90,7 @@ func NewRouter(h *Handlers, auth *Authenticator, corsOrigins []string) http.Hand
 		r.Post("/join/reject", h.JoinReject)
 
 		// ---- 재등록/상담 요청(v2.20) — 가입 요청과 같은 "회원발 요청 큐" 패턴 ----
-		r.Post("/consult-requests", h.CreateConsultRequest)
+		r.With(queueLimit).Post("/consult-requests", h.CreateConsultRequest)
 		r.Get("/consult-requests", h.ListConsultRequests)
 		r.Post("/consult-requests/{id}/done", h.DoneConsultRequest)
 
@@ -103,11 +117,11 @@ func NewRouter(h *Handlers, auth *Authenticator, corsOrigins []string) http.Hand
 		r.Get("/recurrings", h.ListRecurrings) // v1.4 고정 스케줄 관리
 		r.Delete("/recurrings/{id}", h.DeleteRecurring)
 
-		r.Post("/checkin", h.Checkin)
+		r.With(toggleLimit).Post("/checkin", h.Checkin)
 
 		r.Get("/homeworks", h.ListHomeworks)
 		r.Post("/homeworks", h.CreateHomework)
-		r.Post("/hw-checks", h.CreateHwCheck)
+		r.With(toggleLimit).Post("/hw-checks", h.CreateHwCheck)
 		r.Get("/hw-checks", h.ListHwChecks) // v1.1 정합 패치(어드민·앱 가정 승인)
 
 		r.Get("/stats", h.Stats)
@@ -188,11 +202,11 @@ func NewRouter(h *Handlers, auth *Authenticator, corsOrigins []string) http.Hand
 	// **무인증 표면 전체**라는 사실이 파일에서 눈에 보인다(/healthz·/health 제외).
 	// 노출 범위는 service.PublicBusiness·PublicCenter가 전용 응답 타입으로 잠근다 — 정책·센터 ID는
 	// 나가지 않는다. 공개 경로를 더할 때는 service_public_center_test.go의 키 집합 잠금을 함께 늘린다.
-	r.Get("/v1/public/business", h.PublicBusiness)
-	r.Get("/api/v1/public/business", h.PublicBusiness) // Hosting 리라이트가 접두사를 안 벗긴다(P07)
+	r.With(publicLimit).Get("/v1/public/business", h.PublicBusiness)
+	r.With(publicLimit).Get("/api/v1/public/business", h.PublicBusiness) // Hosting 리라이트가 접두사를 안 벗긴다(P07)
 	// v2.29 — 회원 앱 대기실(미연결 사용자, Principal에 센터 없음)이 읽는 센터 상호·전화·주소.
-	r.Get("/v1/public/center", h.PublicCenter)
-	r.Get("/api/v1/public/center", h.PublicCenter)
+	r.With(publicLimit).Get("/v1/public/center", h.PublicCenter)
+	r.With(publicLimit).Get("/api/v1/public/center", h.PublicCenter)
 
 	return r
 }

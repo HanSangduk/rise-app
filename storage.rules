@@ -64,9 +64,14 @@ service firebase.storage {
         /databases/(default)/documents/centers/$(myCenterId())/members/$(memberId)
       ).data.consent.sensitive == true;
     }
+    // 콘텐츠 타입은 **래스터 3종만**(P74). `image/.*`는 image/svg+xml도 통과시켰다 — 스크립트를 품은
+    // SVG가 "이미지"로 올라올 수 있었고, 지금은 뷰어가 <img>로만 그려 실행되지 않지만 "원본 열기"
+    // 같은 기능이 blob URL을 새 탭으로 여는 순간 방어선이 사라진다. 앱은 image/jpeg로 명시해 올린다
+    // (body_photo_uploader.dart). 규칙은 선언된 타입만 보므로 바이트 검사는 아니다 — 서버 경유
+    // 업로드(스태프 사진)의 매직바이트 검사와 같은 수준은 후속(work_log P74).
     function isImageUnder10MB() {
       return request.resource.size < 10 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
     }
 
     // ── 체형사진(P8 민감정보) ─────────────────────────────────────────────

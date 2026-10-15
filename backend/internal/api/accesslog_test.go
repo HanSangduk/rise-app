@@ -36,7 +36,7 @@ func newAccessLogRouter(t *testing.T, cfg config.Config) (http.Handler, *bytes.B
 		t.Fatalf("NewAuthenticator: %v", err)
 	}
 	var buf bytes.Buffer
-	h := NewHandlers(NewService(st, cfg, auth.Provisioner())).WithAccessLogWriter(&buf)
+	h := NewHandlers(NewService(st, cfg, auth.Provisioner(testInitialPassword))).WithAccessLogWriter(&buf)
 	return NewRouter(h, auth, nil), &buf, st
 }
 
@@ -213,6 +213,32 @@ func TestAccessLogOmitsMemberSelfAccess(t *testing.T) {
 	}
 }
 
+// 회원의 429(빈도 제한, v2.38)는 403과 같은 오·남용 신호라 기록한다 — 앞선 15번(400/403)은 회원
+// 규칙대로 빠지고, 제한에 걸린 16번째 한 줄만 WARNING으로 남는다.
+func TestAccessLogRecordsMemberRateLimited(t *testing.T) {
+	r, buf, st := newAccessLogRouter(t, config.Config{})
+	if err := st.SaveUserIndex(context.Background(), &store.UserIndex{
+		UID: "u-member1", Role: domain.RoleMember, CenterID: testCenter, MemberID: "member1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var last int
+	for i := 0; i < 16; i++ {
+		last = alReq(r, http.MethodPost, "/v1/consult-requests", "u-member1", domain.RoleMember, "", nil).Code
+	}
+	if last != http.StatusTooManyRequests {
+		t.Fatalf("16번째 = %d, want 429(burst 15)", last)
+	}
+	lines := accessLines(t, buf)
+	if len(lines) != 1 {
+		t.Fatalf("라인 수 = %d, want 1(429 한 줄만 — 앞선 400/403은 회원 규칙대로 제외): %s", len(lines), buf.String())
+	}
+	l := lines[0]
+	if l["status"].(float64) != 429 || l["severity"] != "WARNING" || l["uid"] != "u-member1" || l["role"] != domain.RoleMember {
+		t.Errorf("429 라인: %v — uid·role과 함께 WARNING으로 남아야 한다", l)
+	}
+}
+
 // /api/v1 미러 마운트(P07)가 기록 우회 뒷문이 되지 않는다(TestAPIPrefixMirror 계열).
 func TestAccessLogMirrorPaths(t *testing.T) {
 	r, buf, _ := newAccessLogRouter(t, config.Config{})
@@ -354,7 +380,7 @@ func TestAccessLogSeverityByStatus(t *testing.T) {
 	cases := []struct {
 		status int
 		want   string
-	}{{200, "INFO"}, {404, "INFO"}, {401, "WARNING"}, {403, "WARNING"}, {500, "ERROR"}, {503, "ERROR"}}
+	}{{200, "INFO"}, {404, "INFO"}, {401, "WARNING"}, {403, "WARNING"}, {429, "WARNING"}, {500, "ERROR"}, {503, "ERROR"}}
 	for _, tc := range cases {
 		var buf bytes.Buffer
 		h := accessLog("", &buf)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

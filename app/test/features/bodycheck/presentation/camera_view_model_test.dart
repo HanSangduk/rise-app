@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -442,6 +443,28 @@ void main() {
       expect(uploader.calls.length, callsBefore, reason: '세션 없이 다시 올렸다');
     });
 
+    // 저장 왕복(스피너)이 도는 동안 화면이 내려가는 경로가 실재한다: 세션 리스너가
+    // 전체화면 라우트째 내리거나, 회원이 확인 대화상자에서 "나가기"를 고른다. 그때
+    // await 뒤의 `state =`는 상태를 갱신하는 게 아니라 **던진다** — 업로드 실패가
+    // 화면에 닿지도 못한 채 zone error로 샌다.
+    //
+    // 뮤테이션: `_persist`의 `if (!ref.mounted) return;`을 지우면 이 테스트가 죽는다.
+    test('저장 왕복 중 화면이 내려가도 조용히 끝난다 — 폐기된 ref에 쓰지 않는다', () async {
+      final container = make(captured: bytes);
+      final vm = container.read(cameraViewModelProvider.notifier);
+      await vm.capture();
+
+      final gate = Completer<void>();
+      uploader.gate = gate;
+      final saving = vm.confirmReview();
+      await Future<void>.value();
+
+      container.dispose();
+      gate.complete();
+
+      await expectLater(saving, completes);
+    });
+
     test('세션 없이 셔터를 누르면 찍지 않고 SessionGoneFailure를 세운다', () async {
       final container = make(captured: bytes);
       // 뷰모델은 `myProfileProvider`를 watch한다 — 프로필 future가 **이 테스트 도중**
@@ -472,12 +495,17 @@ class _FakeUploader implements BodyPhotoUploader {
   final calls = <_UploadCall>[];
   Failure? failure;
 
+  /// 업로드를 **왕복 중간에 붙잡아 두는** 문. 화면이 내려가는 순간을 그 사이에
+  /// 끼워 넣으려면 실제 네트워크처럼 아직 안 끝난 구간이 있어야 한다.
+  Completer<void>? gate;
+
   @override
   Future<Result<String>> upload({
     required String storagePath,
     required Uint8List bytes,
   }) async {
     calls.add(_UploadCall(storagePath, bytes));
+    await gate?.future;
     final f = failure;
     return f == null ? Ok(storagePath) : Err(f);
   }

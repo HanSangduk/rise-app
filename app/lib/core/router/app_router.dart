@@ -41,6 +41,15 @@ GoRouter createRouter({Future<String?> Function()? restoreLanding}) {
     // 딥링크(예: 데스크 QR로 예약 열기)를 넣는 날 이 플래그를 풀어야 하는데, 그때는
     // redirect에 "복원 결과가 null이면 셸 경로를 /login으로" 가드를 넣어야 한다 —
     // `test/core/router/shell_gate_test.dart`가 그 회귀를 잡는다.
+    //
+    // **실행 중 들어오는 URL은 여기가 아니라 네이티브 스위치가 막는다**(P75). 위 플래그는 시작
+    // 라우트만 본다 — OS가 실행 중에 넘기는 URL(iOS openURL · Android onNewIntent의 data)은
+    // 엔진이 곧장 라우터로 밀어 넣는다(Flutter 3.27+ 기본값). iOS `Info.plist`의
+    // `FlutterDeepLinkingEnabled`와 Android `MainActivity`의 `flutter_deeplinking_enabled`를
+    // false로 둔 이유다. 켜져 있던 동안 Firebase 전화 인증의 reCAPTCHA 복귀 URL
+    // (`app-1-…://firebaseauth/link`)이 여기로 새어 화면 전체가 "Page Not Found"가 됐다.
+    // 딥링크를 넣는 날엔 그 URL을 라우터가 무시하게 만든 뒤 스위치를 켠다 —
+    // `test/core/router/platform_deeplink_gate_test.dart`가 스위치를 지킨다.
     overridePlatformDefaultLocation: true,
     initialLocation: '/login',
     redirect: (context, state) async {

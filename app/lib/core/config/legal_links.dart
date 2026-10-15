@@ -25,6 +25,11 @@ abstract final class LegalLinks {
   /// **센터 파라미터를 붙이지 않는다** — 운영자는 하나뿐이라 센터에 따라 달라지지 않는다.
   static const appPrivacy = '$_host/app-privacy.html';
 
+  /// 지원·자주 묻는 질문(P72). **이 화면을 정확히 지목해 설명하는 유일한 문서**인데
+  /// 앱에서 닿는 경로가 스토어 상세 페이지의 지원 URL 하나뿐이었다 — 이미 설치해서
+  /// 화면을 보고 있는 사람이 가장 안 가는 곳이다. 대기실 하단 링크가 이것을 연다.
+  static const support = '$_host/support.html';
+
   static const terms = '$_host/terms.html';
   static const privacy = '$_host/privacy.html';
   static const sensitiveConsent = '$_host/sensitive-consent.html';

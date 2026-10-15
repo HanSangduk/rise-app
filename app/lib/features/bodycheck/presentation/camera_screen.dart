@@ -34,6 +34,13 @@ import 'package:rise_member/features/bodycheck/presentation/widgets/pose_sequenc
 ///
 /// 남은 수명주기 조건은 **포그라운드 하나**다 — 홈 버튼·전화 수신에 카메라를 놓는다.
 /// watch를 놓으면 카메라·가속도계 provider 모두 autoDispose라 구독 0이 되어 정리된다.
+/// 그러려면 build()가 **하나도 빠짐없이** `active`로 게이팅해야 한다 — 프레임 비율
+/// 하나를 게이팅 없이 watch하는 것만으로 구독이 0이 되지 않아, 주석과 달리 홈 버튼을
+/// 눌러도 카메라가 계속 열려 있었다(배터리·발열).
+///
+/// 포그라운드로 **돌아올 때는 권한을 다시 확인한다**(`didChangeAppLifecycleState`).
+/// 영구 거부 안내에서 설정으로 나갔다 켜고 돌아오는 게 이 화면의 유일한 복구 경로인데,
+/// 옛 판정을 들고 있으면 같은 안내가 그대로 남아 회원이 갇힌다.
 ///
 /// 프리뷰는 화면을 꽉 채우지 **않는다**. 3:4 원본을 cover로 늘리면 좌우가 잘려 화면에서
 /// 맞춘 자세와 저장본이 어긋난다(WYSIWYG 붕괴) — 전폭 + 원본 비율을 유지하고 남는 위아래를
@@ -68,6 +75,16 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
     final foreground = state == AppLifecycleState.resumed;
     if (foreground == _foreground) return;
     setState(() => _foreground = foreground);
+    if (!foreground) return;
+    // **돌아오는 것만으로 화면이 복구돼야 한다.** 권한을 영구 거부하면 이 화면이
+    // 주는 유일한 다음 행동이 "설정 열기"인데, 설정에서 켜고 돌아와도 provider가
+    // 옛 판정(`BodyCameraBlocked`)을 그대로 들고 있으면 같은 안내가 남는다 —
+    // 누를 수 있는 건 이미 켠 설정을 또 여는 버튼뿐이라 회원이 갇힌다.
+    //
+    // 그래서 복귀마다 권한 판정을 버린다. 이어지는 rebuild가 다시 watch하면서
+    // `ensureGranted()`가 새로 돌고 카메라도 함께 열린다. 백그라운드 동안 구독이
+    // 0이 되어 이미 폐기됐다면 이 호출은 아무 일도 하지 않는다(element 없음).
+    ref.invalidate(bodyCameraProvider);
   }
 
   @override
@@ -113,18 +130,30 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
 
     // **프레임 비율을 카메라에서 받아온다.** 하드코딩하면 프리뷰와 저장본이 갈리고,
     // 회원은 화면에 없던 영역이 파일에 들어 있는 걸 나중에야 알게 된다.
-    final previewAspect = ref
-        .watch(bodyCameraProvider)
-        .maybeWhen(
-          data: (s) =>
-              s is BodyCameraReady ? s.captureAspect : BodyCameraReady.defaultCaptureAspect,
-          orElse: () => BodyCameraReady.defaultCaptureAspect,
-        );
+    //
+    // **`active`일 때만 watch한다.** 프리뷰(`CameraPreviewLayer`)는 이미 게이팅돼
+    // 있었는데 이 한 줄이 게이팅 없이 watch해서, 백그라운드로 가도 구독이 0이 되지
+    // 않아 카메라가 안 꺼졌다 — 위 머리 주석("포그라운드를 잃으면 정리된다")이
+    // 실제 동작과 어긋난 지점이다. 비활성 구간에는 어차피 프리뷰를 그리지 않으므로
+    // 기본 비율로 두면 되고, 돌아오면 재구독이 실제 값을 다시 채운다.
+    final previewAspect = active
+        ? ref.watch(bodyCameraProvider).maybeWhen(
+            data: (s) =>
+                s is BodyCameraReady ? s.captureAspect : BodyCameraReady.defaultCaptureAspect,
+            orElse: () => BodyCameraReady.defaultCaptureAspect,
+          )
+        : BodyCameraReady.defaultCaptureAspect;
 
     return PopScope(
       // 손에 남은 사진이 있으면 나가는 순간 사라진다(메모리에만 있다).
       // 검토 중인 사진도 나가는 순간 사라진다 — 아직 아무 데도 올라가지 않았다.
-      canPop: state.pendingRetry == null && state.review == null,
+      //
+      // **저장 왕복 중(`submitting`)도 막는다.** "이 사진으로 저장" 직후 스피너가
+      // 도는 동안은 `review`가 이미 비워져 있고 `pendingRetry`는 아직 안 세워진
+      // 틈이라, 이 조건이 없으면 뒤로가기가 확인 없이 화면을 닫는다. 그러면 실패해도
+      // 재시도 배너를 띄울 화면이 없고(뷰모델은 autoDispose로 사라진다) 민감한 체형
+      // 사진이 흔적 없이 유실된다 — 이 화면에서 가장 조용한 실패다.
+      canPop: state.pendingRetry == null && state.review == null && !state.submitting,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         _confirmExit(context);
@@ -432,9 +461,14 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
     );
   }
 
-  /// AppBar 닫기 — PopScope와 같은 판정을 거치게 한다(둘이 갈리면 X로는 유실된다).
+  /// AppBar 닫기 — PopScope와 **같은 판정**을 거치게 한다(둘이 갈리면 X로는 유실된다).
+  ///
+  /// 판정 하나를 빠뜨리면 그 경로로만 조용히 사라진다: 종전엔 `pendingRetry`만 봐서
+  /// 저장 왕복 중(`submitting`)에 X를 누르면 확인 없이 닫혔다. 조건은 위 `canPop`과
+  /// 한 글자도 다르지 않아야 한다.
   void _handleClose(BuildContext context) {
-    if (ref.read(cameraViewModelProvider).pendingRetry == null) {
+    final state = ref.read(cameraViewModelProvider);
+    if (state.pendingRetry == null && state.review == null && !state.submitting) {
       Navigator.of(context).pop();
       return;
     }
@@ -443,11 +477,18 @@ class _CameraScreenState extends ConsumerState<CameraScreen> with WidgetsBinding
 
   /// 저장 못 한 사진을 들고 나가려 할 때. 바이트는 메모리에만 있어 나가면 사라진다.
   Future<void> _confirmExit(BuildContext context) async {
+    // 저장 왕복 중과 "찍어만 둔" 상태는 회원이 방금 한 행동이 다르다 — 저장을 누른
+    // 사람에게 "저장하지 않고"라고 물으면 자기가 뭘 눌렀는지 의심하게 된다.
+    final submitting = ref.read(cameraViewModelProvider).submitting;
     final leave = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('저장하지 않고 나갈까요?'),
-        content: const Text('방금 찍은 사진이 아직 저장되지 않았어요 — 나가면 사라져요.'),
+        title: Text(submitting ? '저장 중이에요 — 나갈까요?' : '저장하지 않고 나갈까요?'),
+        content: Text(
+          submitting
+              ? '사진을 올리는 중이에요. 지금 나가면 저장이 끝나지 않고 사진도 사라져요.'
+              : '방금 찍은 사진이 아직 저장되지 않았어요 — 나가면 사라져요.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),

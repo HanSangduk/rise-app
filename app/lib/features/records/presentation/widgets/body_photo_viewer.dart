@@ -172,20 +172,26 @@ class _BodyPhotoViewerState extends ConsumerState<_BodyPhotoViewer> {
     );
     if (ok != true || !mounted) return;
 
+    // 왕복 전에 붙잡아 둔다 — 서버가 지운 뒤 이 State가 이미 내려가 있어도(아래 mounted 분기)
+    // 목록 갱신은 **반드시** 걸어야 한다. 콜백은 타임라인(부모)의 ref를 쓰므로 뷰어가 닫힌
+    // 뒤에도 유효하다. 종전엔 `if (!mounted) return;`이 갱신까지 삼켜, 삭제 중 닫으면 서버는
+    // 지웠는데 타임라인엔 그 사진이 남았다(P73).
+    final onDeleted = widget.onDeleted!;
     setState(() => _deleting = true);
     final result = await ref
         .read(bodyCheckRepositoryProvider)
         .deletePhoto(id: widget.entry.id, storagePath: widget.entry.storagePath);
-    if (!mounted) return;
 
     switch (result) {
       case Ok():
         // 목록 갱신을 **먼저** 건다 — pop 뒤에는 이 State가 사라져 호출할 자리가 없다.
-        widget.onDeleted!();
+        onDeleted();
+        if (!mounted) return;
         final messenger = ScaffoldMessenger.of(context);
         Navigator.of(context).pop();
         messenger.showSnackBar(riseSnackBar('사진을 삭제했어요'));
       case Err(:final failure):
+        if (!mounted) return;
         setState(() => _deleting = false);
         showFailureSnackBar(context, failure);
     }
@@ -195,52 +201,58 @@ class _BodyPhotoViewerState extends ConsumerState<_BodyPhotoViewer> {
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: Stack(
-          children: [
-            // 아래로 쓸어 닫기. 확대 중엔 끈다(위 [_zoomed] 주석).
-            GestureDetector(
-              onVerticalDragEnd: _zoomed
-                  ? null
-                  : (d) {
-                      if ((d.primaryVelocity ?? 0) > 300) Navigator.of(context).pop();
-                    },
-              onDoubleTapDown: _toggleZoom,
-              onDoubleTap: () {},
-              child: Center(
-                child: Hero(
-                  tag: widget.heroTag,
-                  child: InteractiveViewer(
-                    transformationController: _zoom,
-                    minScale: 1,
-                    maxScale: 4,
-                    // 격자를 **InteractiveViewer 안**에 둔다 — 밖에 두면 확대·이동할 때
-                    // 눈금만 제자리에 남아 사진과 어긋난다(그 순간 눈금은 거짓말이 된다).
-                    child: MeasureGridPhoto(
-                      bytes: widget.bytes,
-                      showGrid: widget.showGrid,
-                      density: widget.gridDensity,
-                      refLine: widget.refLine,
-                      // 타임라인 타일과 달리 여기선 원본 해상도로 그린다 —
-                      // 확대해서 보는 게 이 화면의 존재 이유라 `cacheWidth`를 걸면
-                      // 확대할수록 뭉개진다.
+      // 삭제 왕복 중엔 닫히지 않는다 — 닫기 버튼·쓸어 닫기·시스템 백 셋 다(P73). 삭제 버튼은
+      // 스피너로 잠겼는데 옆의 X는 열려 있어, 헬스장에서 한 손으로 급히 닫는 손짓이 정확히
+      // 그 창에 들어갔다. 촬영 화면(`camera_screen`)·계정 삭제와 같은 규약.
+      child: PopScope(
+        canPop: !_deleting,
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: Stack(
+            children: [
+              // 아래로 쓸어 닫기. 확대 중·삭제 중엔 끈다(위 [_zoomed] 주석).
+              GestureDetector(
+                onVerticalDragEnd: _zoomed || _deleting
+                    ? null
+                    : (d) {
+                        if ((d.primaryVelocity ?? 0) > 300) Navigator.of(context).pop();
+                      },
+                onDoubleTapDown: _toggleZoom,
+                onDoubleTap: () {},
+                child: Center(
+                  child: Hero(
+                    tag: widget.heroTag,
+                    child: InteractiveViewer(
+                      transformationController: _zoom,
+                      minScale: 1,
+                      maxScale: 4,
+                      // 격자를 **InteractiveViewer 안**에 둔다 — 밖에 두면 확대·이동할 때
+                      // 눈금만 제자리에 남아 사진과 어긋난다(그 순간 눈금은 거짓말이 된다).
+                      child: MeasureGridPhoto(
+                        bytes: widget.bytes,
+                        showGrid: widget.showGrid,
+                        density: widget.gridDensity,
+                        refLine: widget.refLine,
+                        // 타임라인 타일과 달리 여기선 원본 해상도로 그린다 —
+                        // 확대해서 보는 게 이 화면의 존재 이유라 `cacheWidth`를 걸면
+                        // 확대할수록 뭉개진다.
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            _TopBar(
-              date: _fullDate(widget.entry.date),
-              pose: widget.poseLabel,
-              deleting: _deleting,
-              onClose: () => Navigator.of(context).pop(),
-              // 목록을 갱신할 방법이 없으면 삭제 버튼을 띄우지 않는다 — 지웠는데
-              // 화면이 그대로면 삭제가 거짓말이 된다.
-              onDelete: widget.onDeleted == null ? null : _confirmDelete,
-            ),
-            const _ScopeNote(),
-          ],
+              _TopBar(
+                date: _fullDate(widget.entry.date),
+                pose: widget.poseLabel,
+                deleting: _deleting,
+                onClose: _deleting ? null : () => Navigator.of(context).pop(),
+                // 목록을 갱신할 방법이 없으면 삭제 버튼을 띄우지 않는다 — 지웠는데
+                // 화면이 그대로면 삭제가 거짓말이 된다.
+                onDelete: widget.onDeleted == null ? null : _confirmDelete,
+              ),
+              const _ScopeNote(),
+            ],
+          ),
         ),
       ),
     );
@@ -262,7 +274,9 @@ class _TopBar extends StatelessWidget {
   final String date;
   final String pose;
   final bool deleting;
-  final VoidCallback onClose;
+
+  /// null이면 닫기가 잠긴 상태(삭제 왕복 중) — IconButton이 비활성으로 그려진다.
+  final VoidCallback? onClose;
   final VoidCallback? onDelete;
 
   @override

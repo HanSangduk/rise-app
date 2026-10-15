@@ -57,7 +57,13 @@ class RecordsScreen extends ConsumerWidget {
                     ),
               data: (data) => RefreshIndicator(
                 color: AppColors.brand,
-                onRefresh: () async => ref.read(recordsViewModelProvider.notifier).refresh(),
+                onRefresh: () async {
+                  // 포즈 칩(체형 탭)은 myProfileProvider의 시퀀스를 그린다 — 당겨서 새로고침이
+                  // 기록만 다시 받고 시퀀스는 그대로 두면, 대표가 어드민에서 포즈를 바꿔도 이
+                  // 탭은 앱을 껐다 켜기 전까지 옛 칩을 보인다(P73).
+                  ref.invalidate(myProfileProvider);
+                  ref.read(recordsViewModelProvider.notifier).refresh();
+                },
                 child: ListView(
                   // 콘텐츠가 화면보다 짧아도 pull-to-refresh 당김이 동작하게.
                   physics: const AlwaysScrollableScrollPhysics(),

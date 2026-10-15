@@ -70,6 +70,18 @@ cam_ok=0
 if cam_bin_ok "$APP_DIR/Runner" || cam_bin_ok "$APP_DIR/Frameworks/permission_handler_apple.framework/permission_handler_apple"; then cam_ok=1; fi
 if [ "$cam_ok" -eq 1 ]; then ok "permission_handler 카메라 구현 링크됨(PERMISSION_CAMERA=1)"; else bad "permission_handler 카메라 구현이 바이너리에 없다 — Podfile post_install의 PERMISSION_CAMERA=1 · pod install 확인(iOS 권한 프롬프트가 안 뜬다, P67)"; fi
 
+# 전화 인증 reCAPTCHA 복귀 경로(P46·P75). APNs 사일런트 검증이 없으면(푸시 엔타이틀먼트 없음 — 현재 iOS 기본)
+# Firebase가 reCAPTCHA를 띄우고 `app-<GOOGLE_APP_ID의 ':'→'-'>://firebaseauth/link`로 앱에 돌아온다.
+# 스킴이 없으면 PhoneAuthProvider가 크래시하고(P46 — 앱 ID가 바뀌면 스킴도 바뀐다), Flutter 딥링크
+# 스위치가 켜져 있으면 그 URL이 go_router로 새어 화면 전체가 "Page Not Found"가 된다(P75 — 2026-10-14
+# 실사용자, iOS 신규 가입 전면 불가). 둘 다 디버그 빌드에선 앱 검증을 꺼서 안 보이므로 산출물에서 본다.
+# 파일이 없을 때 PlistBuddy는 "File Doesn't Exist, Will Create…"를 표준출력에 내므로 존재부터 본다(하네스 실측).
+gid=""; [ -f "$APP_DIR/GoogleService-Info.plist" ] && gid=$(/usr/libexec/PlistBuddy -c 'Print :GOOGLE_APP_ID' "$APP_DIR/GoogleService-Info.plist" 2>/dev/null || true)
+scheme="app-$(printf '%s' "$gid" | tr ':' '-')"
+if [ -n "$gid" ] && /usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes' "$APP_DIR/Info.plist" 2>/dev/null | grep -qx "[[:space:]]*$scheme"; then ok "reCAPTCHA 복귀 스킴 등록($scheme)"; else bad "reCAPTCHA 복귀 스킴이 없다(GOOGLE_APP_ID=${gid:-없음}) — iOS 전화 인증이 reCAPTCHA 폴백에서 크래시한다(P46)"; fi
+dl=$(/usr/libexec/PlistBuddy -c 'Print :FlutterDeepLinkingEnabled' "$APP_DIR/Info.plist" 2>/dev/null || echo 없음)
+if [ "$dl" = "false" ]; then ok "Flutter 딥링크 꺼짐(reCAPTCHA 복귀 URL이 라우터로 새지 않는다)"; else bad "FlutterDeepLinkingEnabled=$dl — reCAPTCHA 복귀 URL이 go_router로 새어 'Page Not Found'가 된다(P75, Info.plist)"; fi
+
 n=$(grep -c -- "$REVIEW_PHONE" "$STR" || true)
 if [ "$n" -ge 1 ]; then ok "심사 계정 번호 포함(APNs/reCAPTCHA 우회 스위치 살아 있음)"; else bad "심사 계정 번호($REVIEW_PHONE)가 없다 — 심사자 로그인이 앱 검증에 걸릴 수 있다"; fi
 

@@ -35,6 +35,11 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<!-- Flutter 딥링크 끔(P75): 이 앱은 딥링크가 없다(app_router.dart). 엔진 기본값(켜짐)이면 Firebase 전화 인증의
+	     reCAPTCHA 복귀 URL(app-1-…://firebaseauth/link)이 go_router로 새어 화면 전체가 "Page Not Found"가 된다.
+	     Firebase는 이 스위치와 무관하게 URL을 네이티브에서 먼저 받는다. test/core/router/platform_deeplink_gate_test.dart가 지킨다. -->
+	<key>FlutterDeepLinkingEnabled</key>
+	<false/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>

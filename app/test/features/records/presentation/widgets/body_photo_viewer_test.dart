@@ -7,6 +7,7 @@
 //
 // 삭제도 여기 붙는다 — 지울지 말지는 **크게 보고 나서** 정해진다.
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -217,6 +218,36 @@ void main() {
       );
     });
 
+    testWidgets('삭제 왕복 중엔 닫기가 잠기고, 어떻게든 닫혀도 목록 갱신은 건다(P73)', (tester) async {
+      // 종전엔 삭제 버튼만 스피너로 잠기고 옆의 X는 열려 있었다 — 왕복 중 X를 누르면 State가
+      // 내려가고 `if (!mounted) return;`이 onDeleted까지 삼켜, 서버는 지웠는데 타임라인엔
+      // 그 사진이 남았다.
+      await pump(tester, [photo('stand', 1), photo('stand', 14)]);
+      final gate = Completer<void>();
+      repo.gate = gate.future;
+      await openViewer(tester);
+      await tester.tap(find.byTooltip('삭제'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('삭제'));
+      await tester.pump(); // 요청이 나가고 스피너가 뜬 상태 — 아직 응답 전
+
+      // ① 닫기 버튼은 비활성이다 — 눌러도 뷰어가 남는다.
+      await tester.tap(find.byTooltip('닫기'), warnIfMissed: false);
+      await tester.pump();
+      expect(find.text('2026년 8월 14일'), findsOneWidget, reason: '삭제 중 X가 살아 있다');
+      // ② 시스템 백도 막힌다.
+      final popped = await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(popped, isTrue, reason: 'PopScope가 백을 처리하지 않았다');
+      expect(find.text('2026년 8월 14일'), findsOneWidget, reason: '삭제 중 백으로 닫혔다');
+
+      // ③ 응답이 오면 갱신 + 닫힘.
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(refreshes, 1);
+      expect(find.text('2026년 8월 14일'), findsNothing);
+    });
+
     testWidgets('삭제 요청에 storagePath를 함께 보낸다 — 캐시를 비울 열쇠다', (tester) async {
       // **캐시가 실제로 비워지는지는 여기서 검사하지 않는다** — 가짜 리포지토리를
       // 쓰므로 진짜 evict 호출을 지워도 이 테스트는 통과한다(뮤테이션으로 확인했다).
@@ -272,8 +303,12 @@ class _FakeRepo implements BodyCheckRepository {
   final evicted = <String>[];
   Failure? failure;
 
+  /// 응답을 붙잡아 두는 문 — "왕복 중" 상태를 결정적으로 만든다(P73 닫기 잠금 테스트).
+  Future<void>? gate;
+
   @override
   Future<Result<void>> deletePhoto({required String id, String? storagePath}) async {
+    if (gate != null) await gate;
     if (failure != null) return Err(failure!);
     deleted.add(id);
     if (storagePath != null) evicted.add(storagePath);

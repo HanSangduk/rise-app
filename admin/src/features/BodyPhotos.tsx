@@ -219,7 +219,17 @@ export function BodyPhotos() {
               ) : photosQ.isError ? (
                 <ErrorState error={photosQ.error} onRetry={() => void photosQ.refetch()} />
               ) : !posePhotos.length ? (
-                <EmptyState>이 포즈로 촬영된 사진이 없습니다.</EmptyState>
+                <EmptyState>
+                  {/* "없습니다"로 끝내면 대표는 이 화면에서 업로드 버튼을 찾아 헤맨다 —
+                      촬영은 **회원 앱 카메라(그리드·수평계)에서만** 되고 어드민에는 올리는
+                      경로가 없다(이 파일 헤더 규약). 원인과 다음 행동을 같이 적는다. */}
+                  {poseLabel(activePose, sequence)} 포즈로 촬영된 사진이 아직 없어요.
+                  <div className="mt-1 text-[11.5px]">
+                    체형사진은 <b className="text-ink">회원 앱의 촬영 화면</b>에서만 찍을 수
+                    있어요(어드민에서 올리는 방법은 없습니다) — 회원에게 앱에서 촬영을 부탁하거나,
+                    아래 "포즈 시퀀스"에서 이 센터가 쓰는 포즈 순서를 먼저 정해주세요.
+                  </div>
+                </EmptyState>
               ) : (
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   {posePhotos.map((p) => (
@@ -273,7 +283,13 @@ export function BodyPhotos() {
                 ) : inbodyQ.isError ? (
                   <ErrorState error={inbodyQ.error} onRetry={() => void inbodyQ.refetch()} />
                 ) : !inbodyQ.data?.length ? (
-                  <EmptyState>인바디 기록이 없습니다.</EmptyState>
+                  <EmptyState>
+                    {/* 다음 행동이 동의 상태에 따라 다르다 — 폼이 없는 회원에게 "위 6칸을
+                        채우세요"라고 하면 존재하지 않는 칸을 찾게 된다. */}
+                    {consentValid
+                      ? '인바디 기록이 아직 없어요 — 위 6칸을 채우고 "기록 추가"를 누르면 첫 기록이 남습니다.'
+                      : "인바디 기록이 아직 없어요 — 민감정보 동의가 없거나 철회돼 새 기록도 저장할 수 없어요(회원이 앱에서 다시 동의하면 열립니다)."}
+                  </EmptyState>
                 ) : (
                   <InbodyList records={inbodyQ.data} />
                 )}
@@ -953,8 +969,11 @@ function InbodyForm({ memberId }: { memberId: string }) {
 
   return (
     <div>
-      <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
-        <div className="col-span-3 sm:col-span-4">
+      {/* 폰 폭(375px)에서 3열은 각 칸이 100px 아래로 눌려 "1000~4000kcal" 같은 placeholder가
+          잘려 나갔다 — 무엇을 넣는 칸인지 화면이 말하지 못하는 상태다. 좁을 땐 2열로 접고
+          sm(640px) 이상에서만 종전의 4열로 편다(측정일은 언제나 전폭). */}
+      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+        <div className="col-span-2 sm:col-span-4">
           <Label>측정일</Label>
           <Input
             type="date"

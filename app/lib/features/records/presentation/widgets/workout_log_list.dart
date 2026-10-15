@@ -8,7 +8,12 @@ import 'package:rise_member/features/records/domain/records_models.dart';
 
 /// 목업 "운동" 탭 — 세션별 세트/무게 + 코치 코멘트 + Home Work 주간 기록.
 /// v1.4: GET /v1/workout-logs·/v1/hw-checks 실데이터 렌더.
-class WorkoutLogList extends StatelessWidget {
+///
+/// 수업 기록은 **최근 [initialCount]건만 먼저** 그리고 "이전 수업 n건 더 보기"로 [pageSize]건씩 편다
+/// (P74). 서버는 회원의 수업 기록 전체를 한 번에 주는데(계약에 페이지네이션이 없다), 주 2~3회 회원이
+/// 1년만 다녀도 100건이 넘고 카드마다 운동 행이 또 반복된다 — 화면엔 몇 장만 보이는데 탭을 열 때마다
+/// 전부 빌드했다. 원장(`LedgerList`)이 같은 문제를 "최근 3건 + 전체"로 이미 풀어 둔 규약을 따른다.
+class WorkoutLogList extends StatefulWidget {
   const WorkoutLogList({
     super.key,
     required this.logs,
@@ -22,8 +27,24 @@ class WorkoutLogList extends StatelessWidget {
   /// hw-checks 조회 실패 — 빈 목록(기록 없음)과 구분해 실패 문구를 보여준다.
   final bool homeworkWeeksFailed;
 
+  /// 처음에 그리는 최근 수업 수 / 더 보기 한 번에 펴는 수.
+  static const initialCount = 10;
+  static const pageSize = 20;
+
+  @override
+  State<WorkoutLogList> createState() => _WorkoutLogListState();
+}
+
+class _WorkoutLogListState extends State<WorkoutLogList> {
+  int _shown = WorkoutLogList.initialCount;
+
   @override
   Widget build(BuildContext context) {
+    final logs = widget.logs;
+    final homeworkWeeks = widget.homeworkWeeks;
+    final homeworkWeeksFailed = widget.homeworkWeeksFailed;
+    final visible = logs.length <= _shown ? logs : logs.sublist(0, _shown);
+    final rest = logs.length - visible.length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -44,8 +65,27 @@ class WorkoutLogList extends StatelessWidget {
               ],
             ),
           )
-        else
-          for (final log in logs) _WorkoutLogCard(log: log),
+        else ...[
+          for (final log in visible) _WorkoutLogCard(log: log),
+          if (rest > 0)
+            // 원장의 "… 이전 내역 n건 · 전체"와 같은 44dp 행 — 단, 한 번에 전부가 아니라 pageSize씩.
+            RiseCard(
+              // 스크린리더가 "버튼"으로 읽게 — InkWell만으로는 탭 동작만 있고 역할이 없다(머티리얼 버튼과 같은 구성).
+              child: Semantics(
+                container: true,
+                button: true,
+                child: InkWell(
+                  onTap: () => setState(() => _shown += WorkoutLogList.pageSize),
+                  child: RiseRow(
+                    showDivider: false,
+                    minHeight: 44,
+                    child: Text('… 이전 수업 $rest건', style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+                    trailing: const Text('더 보기', style: TextStyle(color: AppColors.muted, fontSize: 11)),
+                  ),
+                ),
+              ),
+            ),
+        ],
         RiseCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

@@ -18,6 +18,7 @@ import {
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "firebase/auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
+import { clearBodyPhotoBlobs } from "./bodyPhotoBlob";
 import { auth } from "./firebase";
 import type { Me, Role } from "./types";
 
@@ -99,6 +100,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const explicitLoginRef = useRef(false);
   // 첫 콜백(부팅 복원)과 이후 상태 변화(외부 로그아웃 등)를 구분한다.
   const bootedRef = useRef(false);
+  // 직전 콜백의 Firebase uid — 다른 탭이 **다른 계정으로 곧장** 로그인하면(signOut 없이) 이 탭은
+  // null을 거치지 않고 새 사용자를 받는다. 그 전환을 알아보는 데만 쓴다(P74).
+  const lastUidRef = useRef<string | null>(null);
   // 401 인터셉터가 부를 최신 logout — 등록은 마운트 1회뿐이라 콜백을 ref로 우회한다
   // (logout을 의존성에 넣으면 매 렌더 재등록되고, 넣지 않으면 stale closure가 된다).
   const logoutRef = useRef<() => void>(() => {});
@@ -161,9 +165,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsub = onAuthStateChanged(auth, (user) => {
       const isBoot = !bootedRef.current;
       bootedRef.current = true;
+      const prevUid = lastUidRef.current;
+      lastUidRef.current = user?.uid ?? null;
       setFbEmail(user?.email ?? null);
 
       if (user) {
+        // 계정이 **바뀌었다**(다른 탭에서 다른 계정으로 바로 로그인 — Firebase가 탭 사이에 동기화한다).
+        // 아래 로그아웃 정리를 거치지 않으므로 여기서 같은 정리를 한다: 쿼리 키에 uid·센터가 없어
+        // 이전 계정의 목록(staleTime 60초)과 체형사진 blob이 새 계정 화면에 그대로 보인다. me도 내려
+        // 이전 계정의 역할로 그린 화면이 새 계정 데이터와 섞이지 않게 한다(fetchMe가 로딩부터 다시).
+        if (prevUid && prevUid !== user.uid) {
+          setMe(null);
+          qc.clear();
+          clearBodyPhotoBlobs();
+        }
         // Firebase 로그인 확인 — 데모 identity는 해제(우선순위: Firebase > 데모).
         applyIdentity(null);
         // 리스너 주도 케이스(새로고침 복원·다른 탭 로그인)만 여기서 조회 —
@@ -191,6 +206,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setError(null);
         setIsLoading(false);
         qc.clear();
+        clearBodyPhotoBlobs();
       }
     });
     return unsub;
@@ -208,6 +224,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // 역할이 바뀌면 서버 스코프(담당 회원·본인 정산 등)도 바뀌므로 캐시를 통째로 비워
       // 이전 역할 데이터가 화면에 잔류하는 걸 막는다(권한 경계 데모의 핵심).
       qc.clear();
+      clearBodyPhotoBlobs();
       await fetchMe();
     },
     [applyIdentity, fetchMe, qc],
@@ -224,6 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem(STORAGE_KEY);
         applyIdentity(null);
         qc.clear();
+        clearBodyPhotoBlobs();
         // 이제 api.req()가 currentUser의 ID 토큰을 Bearer로 첨부한다. /v1/me 실패는
         // error 상태로 흘러 로그인 화면에 표시된다(Firebase 세션은 유지 — 재시도 가능).
         await fetchMe();
@@ -243,7 +261,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setFbEmail(null);
     setMe(null);
     setError(null);
+    // 세션이 바뀌면 React Query 캐시(qc.clear)만으로는 부족하다 — 체형사진 blob은 모듈 전역 Map에
+    // 따로 산다(bodyPhotoBlob.ts). 로그아웃은 페이지 리로드가 아니라 SPA 상태 전환이라, 비우지
+    // 않으면 데스크 공용 브라우저에서 다음 사람 세션까지 이전 사람이 본 민감 사진 바이너리가
+    // 탭 메모리에 남는다(P74 — 함수는 그 목적으로 이미 있었는데 호출부가 0곳이었다).
     qc.clear();
+    clearBodyPhotoBlobs();
   }, [applyIdentity, qc]);
   // 렌더 본문에서 갱신 — 위 마운트 1회 effect가 실행될 시점엔 이미 최신 함수가 들어 있다.
   logoutRef.current = logout;

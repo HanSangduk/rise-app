@@ -64,40 +64,52 @@ class _PoseChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final on = done || current;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.pill),
-      // RiseChip을 90% 베껴 만들면서 상하 히트 패딩만 빠져 있었다(P54).
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 9),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: on ? AppColors.brandLight : AppColors.chipBg,
-            borderRadius: BorderRadius.circular(AppRadius.pill),
-            border: Border.all(color: on ? AppColors.brandBorder : Colors.transparent),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '${index + 1} ${pose.label}',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: on ? FontWeight.w800 : FontWeight.w500,
-                  color: on ? AppColors.brand : AppColors.chipFg,
+    // 완료·진행 상태가 체크 아이콘·점으로만 전달되고 있었다(P73) — RiseChip이 P54에서
+    // `Semantics(selected:)`로 고친 결함이 이 자매 위젯에선 반복됐다. 스크린리더는
+    // "1 차렷"만 듣고 어느 포즈를 이미 찍었는지 알 수 없었다. 라벨에 상태를 말로 붙인다.
+    return Semantics(
+      selected: current,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        // RiseChip을 90% 베껴 만들면서 상하 히트 패딩만 빠져 있었다(P54).
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: on ? AppColors.brandLight : AppColors.chipBg,
+              borderRadius: BorderRadius.circular(AppRadius.pill),
+              border: Border.all(color: on ? AppColors.brandBorder : Colors.transparent),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${index + 1} ${pose.label}',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: on ? FontWeight.w800 : FontWeight.w500,
+                    color: on ? AppColors.brand : AppColors.chipFg,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 4),
-              if (done)
-                const RiseIcon(RiseIcons.check, size: 11, color: AppColors.brand)
-              else if (current)
-                Container(
-                  width: 6,
-                  height: 6,
-                  decoration: const BoxDecoration(color: AppColors.brand, shape: BoxShape.circle),
-                ),
-            ],
+                const SizedBox(width: 4),
+                if (done)
+                  Semantics(
+                    label: '촬영 완료',
+                    child: const RiseIcon(RiseIcons.check, size: 11, color: AppColors.brand),
+                  )
+                else if (current)
+                  Semantics(
+                    label: '지금 찍을 포즈',
+                    child: Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(color: AppColors.brand, shape: BoxShape.circle),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

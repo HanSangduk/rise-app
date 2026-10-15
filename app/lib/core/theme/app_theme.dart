@@ -129,6 +129,17 @@ ThemeData buildAppTheme() {
         borderRadius: BorderRadius.circular(AppRadius.card),
       ),
     ),
+    // 바텀시트도 같은 사각지대에 있었다(P72) — `bottomSheetTheme`이 없어 M3 기본
+    // `surfaceContainerLow`(neutral tone 96)로 떴고, 그 면 위에서 `muted`·`danger` 본문이
+    // **4.37:1**로 WCAG AA(4.5:1)에 미달했다. 하필 대기실에서 유일하게 글자를 입력하는
+    // 화면(가입 요청 시트)이고, 미달 문장 중 하나가 "왜 요청이 안 나갔는지"를 말하는
+    // 유일한 줄이다. 흰 면으로 내리면 4.83:1. 위 dialogTheme과 같은 이유·같은 방식으로
+    // 앱의 모든 시트를 한 블록이 정렬한다.
+    bottomSheetTheme: const BottomSheetThemeData(
+      backgroundColor: AppColors.surface,
+      modalBackgroundColor: AppColors.surface,
+      surfaceTintColor: Colors.transparent,
+    ),
     dividerTheme: const DividerThemeData(color: AppColors.line, thickness: 1),
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.resolveWith(

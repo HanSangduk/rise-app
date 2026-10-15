@@ -21,12 +21,13 @@ abstract final class CheckinRules {
 
   /// 지금 셀프 체크인이 열려 있는가 — 양끝 포함(서버와 동일).
   ///
-  /// **초 단위로 비교한다.** `inMinutes`는 절삭이라 30분 0~59초 구간이 "30분"으로
-  /// 읽혀 서버가 이미 거부하는 시각에 버튼이 열려 보인다.
+  /// **`Duration`을 그대로 비교한다 — 어떤 단위로도 절삭하지 않는다.** `inMinutes`는
+  /// 30분 0~59초를, `inSeconds`는 30분 0.0~0.999초를 "30분"으로 읽어 서버(`time.Time`
+  /// 정확 비교)가 이미 거부하는 시각에 버튼이 열려 보였다(P44 → P73에서 초 절삭도 제거).
   ///
   /// [startAt]·[now] 모두 센터(KST) 벽시계 표현이어야 한다(`DateFmt` 시간축 규약).
   static bool isOpen({required DateTime startAt, required DateTime now}) =>
-      startAt.difference(now).inSeconds.abs() <= window.inSeconds;
+      startAt.difference(now).abs() <= window;
 
   /// 창이 열리는 시각(= 시작 −30분).
   static DateTime opensAt(DateTime startAt) => startAt.subtract(window);

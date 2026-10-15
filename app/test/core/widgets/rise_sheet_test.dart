@@ -11,7 +11,11 @@
 // 래퍼를 걷어내면 여기서 터진다.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rise_member/core/session/app_session.dart';
+import 'package:rise_member/core/session/session_provider.dart';
+import 'package:rise_member/core/session/session_store.dart';
 import 'package:rise_member/core/widgets/rise_sheet.dart';
 
 /// 3버튼 내비(48) · 제스처(24) · iOS 홈 인디케이터(34).
@@ -33,13 +37,16 @@ void _setInsets(WidgetTester tester, {double bottomPadding = 0, double keyboard 
 
 Future<void> _openSheet(WidgetTester tester, WidgetBuilder builder) async {
   await tester.pumpWidget(
-    MaterialApp(
-      home: Builder(
-        builder: (context) => Scaffold(
-          body: Center(
-            child: ElevatedButton(
-              onPressed: () => showRiseSheet<void>(context, builder: builder),
-              child: const Text('열기'),
+    // showRiseSheet는 세션 감시자(_SessionSheetGuard)를 달아 연다 — 앱과 같은 DI 루트가 필요하다.
+    ProviderScope(
+      child: MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: ElevatedButton(
+                onPressed: () => showRiseSheet<void>(context, builder: builder),
+                child: const Text('열기'),
+              ),
             ),
           ),
         ),
@@ -171,4 +178,77 @@ void main() {
       expect(gap, lessThan(96), reason: '48dp가 두 번 들어갔다 — 이중 계상');
     });
   });
+
+  // 세션이 끊기는 순간 열려 있던 시트가 남는 문제(사용성 검수).
+  //
+  // 세션 종료의 착지는 `app.dart`가 go_router의 **선언적** `go()`로 처리하는데, 시트는
+  // `useRootNavigator: true`로 **명령형** push된 라우트다. 그래서 아래 화면만 로그인으로
+  // 바뀌고 시트는 그 위에 남았다 — 회원이 보는 건 "로그인이 만료됐어요" 인라인 문구뿐이고
+  // 로그인으로 갈 버튼은 없다. 직접 쓸어 내려야만 이미 뒤에 가 있는 로그인 화면을 본다.
+  //
+  // 개별 시트가 아니라 래퍼가 닫는다 — 실패 분기는 시트마다 여럿이고, 한 곳만 빠뜨려도
+  // 그 경로에서만 갇힌다. 뮤테이션: `_SessionSheetGuard`를 빼면 첫 테스트가 죽는다.
+  group('세션이 끊기면 시트가 스스로 내려간다', () {
+    const me = AppSession(uid: 'u1', role: 'member', centerId: 'c1', memberId: 'm1');
+
+    Future<ProviderContainer> openWithSession(WidgetTester tester) async {
+      final container = ProviderContainer.test(
+        overrides: [sessionStoreProvider.overrideWithValue(_NoopStore())],
+      );
+      container.read(sessionProvider.notifier).set(me);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: ElevatedButton(
+                    onPressed: () => showRiseSheet<void>(
+                      context,
+                      builder: (_) => const SizedBox(height: 200, child: Text('본문')),
+                    ),
+                    child: const Text('열기'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('열기'));
+      await tester.pumpAndSettle();
+      expect(find.text('본문'), findsOneWidget);
+      return container;
+    }
+
+    testWidgets('세션이 사라지면 닫힌다 — 쓸어 내려야만 로그인 화면을 보는 일이 없다', (tester) async {
+      final container = await openWithSession(tester);
+
+      container.read(sessionProvider.notifier).clear(reason: SessionEndReason.unauthorized);
+      await tester.pumpAndSettle();
+
+      expect(find.text('본문'), findsNothing);
+    });
+
+    testWidgets('세션이 살아 있으면 그대로 열려 있다 — 과잉 반응 금지', (tester) async {
+      final container = await openWithSession(tester);
+
+      // 같은 회원으로 세션을 다시 세우는 경우(재검증 성공) — 닫을 이유가 없다.
+      container.read(sessionProvider.notifier).set(me);
+      await tester.pumpAndSettle();
+
+      expect(find.text('본문'), findsOneWidget);
+    });
+  });
+}
+
+class _NoopStore implements SessionStore {
+  @override
+  Future<AppSession?> read(String uid) async => null;
+  @override
+  Future<void> write(AppSession session) async {}
+  @override
+  Future<void> clear() async {}
 }

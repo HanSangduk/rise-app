@@ -7,6 +7,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -94,12 +95,79 @@ func TestRefundBasisCappedAtContractPrice(t *testing.T) {
 	if quote.PaidSum != 1_000_000 || quote.Refund != 550_000 {
 		t.Fatalf("견적 = %+v, want paid_sum 1,000,000 / refund 550,000(중복 합산 시 1,550,000)", quote)
 	}
-	_, settled, err := s.RefundPass(ctx, ownerP(), pass.ID, 7)
+	refundedPass, settled, err := s.RefundPass(ctx, ownerP(), pass.ID, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if settled.Refund != 550_000 || settled.PaidSum != 1_000_000 {
 		t.Fatalf("실행 정산 = %+v, want 견적과 동일(550,000)", settled)
+	}
+	// v2.37(P73) — 환불액은 응답에만 있지 않고 패스에 **남는다**(마감 트랜잭션과 같은 쓰기).
+	// 종전엔 이 숫자가 응답 창을 닫는 순간 어디에도 없었다.
+	if refundedPass.RefundedAmount == nil || *refundedPass.RefundedAmount != 550_000 || refundedPass.RefundedAt == nil {
+		t.Fatalf("응답 패스 refunded_amount=%v refunded_at=%v, want 550,000 / 시각", refundedPass.RefundedAmount, refundedPass.RefundedAt)
+	}
+	saved, err := s.store.GetPass(ctx, testCenter, pass.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.RefundedAmount == nil || *saved.RefundedAmount != settled.Refund || saved.RefundedAt == nil || saved.Status != domain.PassStatusRefunded {
+		t.Fatalf("저장본 = status %s / refunded_amount %v / refunded_at %v, want refunded / %d / 시각",
+			saved.Status, saved.RefundedAmount, saved.RefundedAt, settled.Refund)
+	}
+}
+
+// 환불 전 패스에는 환불 필드가 **없다**(omitempty) — 와이어에 0원/1970년이 새 필드로 새면
+// 어드민이 "환불 0원"을 그린다. 라우터를 태워 JSON 키 부재까지 본다(계약 v2.1 검증 규약).
+func TestPassWireOmitsRefundFieldsBeforeRefund(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	mem, pass := seedMemberWithPass(t, s, 10)
+	raw, err := json.Marshal(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"refunded_amount", "refunded_at"} {
+		if _, ok := m[key]; ok {
+			t.Errorf("환불 전 패스 JSON에 %q가 있다: %s", key, raw)
+		}
+	}
+	// 진짜 0원 환불을 만든다: 결제는 **기록돼 있지만 아직 한 회차도 납부 전**(paid_at 없음)이라
+	// 실수납 0 → 0 - 위약금 → 0원. 주의 — "결제 기록이 아예 없는" 패스는 0원이 **아니다**:
+	// refundBasis가 레거시 폴백으로 계약가 전액을 실수납으로 간주해 900,000원이 나온다
+	// (TestSplitPaymentRecordsWithinContractPriceAllowed의 golden 값과 같은 경로).
+	if _, err := s.CreatePayment(ctx, ownerP(), PaymentCreateRequest{
+		MemberID: mem.ID, PassID: pass.ID, Method: "card", Total: 1_000_000,
+		Installments: []domain.Installment{{Due: "2099-01-01", Amount: 1_000_000}},
+	}); err != nil {
+		t.Fatalf("미납 분할 결제 기록 실패: %v", err)
+	}
+	_, settled, err := s.RefundPass(ctx, ownerP(), pass.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settled.PaidSum != 0 || settled.Refund != 0 {
+		t.Fatalf("미납 패스 정산 = paid_sum %d / refund %d, want 0 / 0 (셋업이 0원 환불을 만들지 못했다)",
+			settled.PaidSum, settled.Refund)
+	}
+	after, err := s.store.GetPass(ctx, testCenter, pass.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = json.Marshal(after)
+	m = map[string]any{}
+	_ = json.Unmarshal(raw, &m)
+	if _, ok := m["refunded_at"]; !ok {
+		t.Errorf("환불 후 패스 JSON에 refunded_at이 없다: %s", raw)
+	}
+	// **0원도 키가 있어야 한다**(포인터 + omitempty의 이유) — 없으면 어드민이 "환불 전"과
+	// 구별하지 못한다.
+	if v, ok := m["refunded_amount"]; !ok || v != float64(0) {
+		t.Errorf("0원 환불의 refunded_amount = %v(있음=%v), want 0 키 존재: %s", v, ok, raw)
 	}
 }
 

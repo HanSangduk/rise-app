@@ -103,6 +103,45 @@ void main() {
       expect(find.textContaining('불러오지 못했어요'), findsOneWidget);
     });
 
+    // 문구가 "탭해서 다시 시도"라고 약속하면 탭은 실제로 다시 읽어야 한다. 종전엔
+    // 캐시가 없어도 프로필 시트를 열었고, 그 시트는 같은 실패 캐시로 만들어져
+    // "새로고침 후 다시 시도해주세요"라며 회원을 홈으로 되돌렸다 — 약속한 행동과
+    // 실제 동작이 갈려, 회원은 같은 실패를 한 겹 더 보고 돌아왔다.
+    //
+    // 뮤테이션: 탭 핸들러의 invalidate를 지우면 로드 수가 1에 멈춘다.
+    testWidgets('"탭해서 다시 시도"는 진짜로 다시 읽는다 — 실패 시트로 보내지 않는다', (tester) async {
+      var loads = 0;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            staffMapProvider.overrideWith((ref) async {
+              loads++;
+              return const <String, StaffDto>{};
+            }),
+          ],
+          child: MaterialApp(
+            theme: buildAppTheme(),
+            home: const Scaffold(
+              body: HomeCoachCard(trainerId: 't1', trainerName: '정혜린'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(loads, 1);
+
+      await tester.tap(find.textContaining('탭해서 다시 시도'));
+      await tester.pump();
+
+      expect(loads, 2, reason: '재조회 없이 같은 실패 캐시를 다시 보여줬다');
+      expect(find.text('프로필을 불러오는 중이에요'), findsOneWidget,
+          reason: '탭이 먹혔다는 유일한 피드백');
+
+      await tester.pumpAndSettle();
+      expect(find.textContaining('새로고침 후 다시 시도'), findsNothing,
+          reason: '실패 캐시로 만든 프로필 시트가 열렸다 — 회원을 홈으로 되돌리는 그 경로');
+    });
+
     testWidgets('현직인데 소개 미등록이면 빈 줄을 만들지 않는다', (tester) async {
       await pump(tester, staffMap: {
         't1': const StaffDto(uid: 't1', name: '정혜린'),

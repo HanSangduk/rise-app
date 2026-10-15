@@ -19,6 +19,7 @@ import type {
   CheckinQrToken,
   Contract,
   CreateStaffRequest,
+  StaffCreated,
   Exercise,
   Homework,
   HomeworkCreateRequest,
@@ -490,11 +491,13 @@ export const api = {
   // ── 직원 · 설정 ─────────────────────────────────────────────────────
   staff: () => req<Staff[]>("/v1/staff"),
   // [v1.8] 트레이너 초대 = 신규 스태프 생성(owner 전용). 서버가 Firebase 계정을 임시 비밀번호로
-  // 만들되 응답에 담지 않으므로, 화면이 곧바로 비밀번호 설정 메일을 보내 초대를 완결한다.
+  // v2.36: 응답이 **최초 비밀번호(initial_password)를 함께** 싣는다(StaffCreated). 화면은 그 값을
+  // 보여 주고, 비밀번호 설정 메일도 종전대로 보낸다 — 메일이 스팸함으로 가거나 도메인 메일이
+  // 막힌 헬스장에서 초대가 통째로 멈추던 문제를 구두 전달 경로로 연다.
   // 400(이름·이메일·role·payout 범위) / 403(owner 아님) / 409(이미 스태프·이미 회원 계정)는
   // ApiError.status로 구분해 화면에서 한국어 카피로 매핑한다.
   createStaff: (body: CreateStaffRequest) =>
-    req<Staff>("/v1/staff", { method: "POST", body: JSON.stringify(body) }),
+    req<StaffCreated>("/v1/staff", { method: "POST", body: JSON.stringify(body) }),
   setOffdays: (uid: string, offdays: string[]) =>
     req<Staff>(`/v1/staff/${uid}/offdays`, { method: "POST", body: JSON.stringify({ offdays }) }),
 

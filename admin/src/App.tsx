@@ -1,6 +1,6 @@
 // 어드민 셸 — 인증 게이트 → 사이드바 레이아웃(반응형: <880px 상단 가로 네비) → 역할별 메뉴.
 // 라우팅은 wodshot web과 동일하게 상태 기반 탭(딥링크 불필요 규모 — TanStack Router 승격은 보류).
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   CalendarDays,
@@ -24,15 +24,21 @@ import { useCenter, useJoinRequests, useStaff } from "@/lib/queries";
 import { centerDisplayName, isJoinPending } from "@/lib/types";
 import { Login } from "@/features/Login";
 import { NoAccess } from "@/features/NoAccess";
-import { Dashboard } from "@/features/Dashboard";
-import { Schedule } from "@/features/Schedule";
-import { Members } from "@/features/Members";
-import { Sales } from "@/features/Sales";
-import { Homework } from "@/features/Homework";
-import { BodyPhotos } from "@/features/BodyPhotos";
-import { MyProfile } from "@/features/MyProfile";
-import { Settings } from "@/features/Settings";
-import { Centers } from "@/features/Centers";
+
+// 기능 화면은 **지연 로드**한다(P74). 종전엔 9개 화면이 전부 정적 import라 로그인 화면부터 전 화면
+// 코드(8,600줄+)를 받았고, 트레이너는 서버가 403으로 막아 **절대 열 수 없는** 설정·매출 화면까지
+// 내려받았다(빌드 경고: 500kB 초과 청크). 렌더 분기(`section === …`)는 런타임 조건일 뿐 번들을
+// 나누지 않는다 — import를 동적으로 바꿔야 Vite가 화면별 청크를 만든다. 로그인·권한 화면은 첫
+// 화면이라 정적으로 둔다. named export를 default로 감싸는 이유: React.lazy는 default만 받는다.
+const Dashboard = lazy(() => import("@/features/Dashboard").then((m) => ({ default: m.Dashboard })));
+const Schedule = lazy(() => import("@/features/Schedule").then((m) => ({ default: m.Schedule })));
+const Members = lazy(() => import("@/features/Members").then((m) => ({ default: m.Members })));
+const Sales = lazy(() => import("@/features/Sales").then((m) => ({ default: m.Sales })));
+const Homework = lazy(() => import("@/features/Homework").then((m) => ({ default: m.Homework })));
+const BodyPhotos = lazy(() => import("@/features/BodyPhotos").then((m) => ({ default: m.BodyPhotos })));
+const MyProfile = lazy(() => import("@/features/MyProfile").then((m) => ({ default: m.MyProfile })));
+const Settings = lazy(() => import("@/features/Settings").then((m) => ({ default: m.Settings })));
+const Centers = lazy(() => import("@/features/Centers").then((m) => ({ default: m.Centers })));
 
 type Section = "dash" | "cal" | "members" | "sales" | "hw" | "body" | "me" | "set" | "centers";
 
@@ -240,27 +246,30 @@ function AdminShell() {
           </div>
         </header>
         <div className="max-w-[1200px] p-4 md:p-5">
-          {section === "dash" && (
-            <Dashboard
-              onOpenMember={openMember}
-              onOpenMembers={() => openSection("members")}
-              // 가입 요청 큐는 대표 전용(회원 관리 상단, owner 게이트) — 트레이너에겐 콜백을 주지 않는다.
-              onOpenJoinRequest={isOwner ? openJoinRequest : undefined}
-              // 설정 탭은 대표 전용이라 트레이너에겐 콜백 자체를 주지 않는다 — 화면에서
-              // 눌러봐야 되돌려지는 데드 링크를 만들지 않는다(대시보드도 owner 게이트를 건다).
-              onOpenSettings={isOwner ? () => openSection("set") : undefined}
-            />
-          )}
-          {section === "cal" && <Schedule />}
-          {section === "members" && (
-            <Members focusMemberId={memberFocusId} focusJoinRequestId={joinFocusId} />
-          )}
-          {section === "sales" && isOwner && <Sales />}
-          {section === "hw" && <Homework />}
-          {section === "body" && <BodyPhotos />}
-          {section === "me" && !isOwner && <MyProfile />}
-          {section === "set" && isOwner && <Settings onOpenMembers={() => openSection("members")} />}
-          {section === "centers" && isSuperadmin && <Centers />}
+          {/* 청크가 아직 안 왔을 때만 스피너 — 이미 받은 화면은 즉시 그려진다(Suspense는 첫 로드에만 걸린다). */}
+          <Suspense fallback={<Spinner />}>
+            {section === "dash" && (
+              <Dashboard
+                onOpenMember={openMember}
+                onOpenMembers={() => openSection("members")}
+                // 가입 요청 큐는 대표 전용(회원 관리 상단, owner 게이트) — 트레이너에겐 콜백을 주지 않는다.
+                onOpenJoinRequest={isOwner ? openJoinRequest : undefined}
+                // 설정 탭은 대표 전용이라 트레이너에겐 콜백 자체를 주지 않는다 — 화면에서
+                // 눌러봐야 되돌려지는 데드 링크를 만들지 않는다(대시보드도 owner 게이트를 건다).
+                onOpenSettings={isOwner ? () => openSection("set") : undefined}
+              />
+            )}
+            {section === "cal" && <Schedule />}
+            {section === "members" && (
+              <Members focusMemberId={memberFocusId} focusJoinRequestId={joinFocusId} />
+            )}
+            {section === "sales" && isOwner && <Sales />}
+            {section === "hw" && <Homework />}
+            {section === "body" && <BodyPhotos />}
+            {section === "me" && !isOwner && <MyProfile />}
+            {section === "set" && isOwner && <Settings onOpenMembers={() => openSection("members")} />}
+            {section === "centers" && isSuperadmin && <Centers />}
+          </Suspense>
         </div>
       </main>
     </div>

@@ -547,7 +547,7 @@ func TestRehireDoesNotRestorePhoto(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want, _ := (devUserProvisioner{}).EnsureUser(ctx, email); first.UID != want {
+	if want, _, _ := (devUserProvisioner{}).EnsureUser(ctx, email); first.UID != want {
 		t.Fatalf("uid = %q, want %q(이메일 해시 — 재초대가 같은 uid로 돌아와야 재고용 경로를 탄다)", first.UID, want)
 	}
 	path := uploadStaffPhotoFixture(t, s, up, first.UID)

@@ -183,6 +183,8 @@ Google Play·App Store 제출에 필요한 것 전부를 `store/`에 실물로: 
 - **iOS teamId 미설정** → `ZG9DP757ZM`로 등록 완료.
 - **iOS APNs 인증 키 미업로드**(권장) — 없으면 전화 인증이 reCAPTCHA 웹뷰로 떨어진다.
   URL 스킴은 이미 넣어 뒀으므로 동작은 하고, 심사에는 지장 없다.
+  > **정정(P75, 2026-10-16)**: "동작은 하고"는 틀렸다 — 복귀 URL이 go_router로 새어 "Page Not Found"가 됐고 iOS 실번호
+  > 가입이 전부 막혀 있었다. 근본 원인·수리는 work_log/P75.
 
 ## 패키지 이름 변경 `ai.stra.rize` → `com.han.rise` (람 요청)
 이전 회사(stra) 네임스페이스가 스토어에 영구히 박히는 걸 막기 위해 **첫 제출 전에** 바꿨다.

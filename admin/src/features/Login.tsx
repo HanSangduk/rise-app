@@ -8,43 +8,10 @@ import { BrandMark } from "@/components/BrandMark";
 import { Button, Input } from "@/components/ui";
 import { DEMO_OWNER, DEMO_TRAINER, useAuth } from "@/lib/auth";
 import { auth } from "@/lib/firebase";
+import { loginErrorKo } from "@/lib/firebaseErrorKo";
 
-// Firebase Auth 오류 코드 → 한국어. invalid-credential은 이메일 열거 보호(기본 ON)로
-// "없는 계정"과 "비번 틀림"을 구분해주지 않는다 — 메시지도 묶어서 안내한다.
-//
-// 이 표의 원칙: "관리자에게 문의하세요"라고 쓰지 않는다. 이 제품에 관리자는 없다 —
-// 최상위 사용자가 센터 대표 본인이라, 문의하라는 말은 아무 데도 가지 않는 막다른 길이다.
-// 제품 안에 해결 경로가 있으면 그 경로를, 없으면 없다는 사실을 그대로 쓴다.
-const FB_ERROR_KO: Record<string, string> = {
-  "auth/invalid-credential": "이메일 또는 비밀번호가 맞지 않아요",
-  "auth/user-not-found": "이메일 또는 비밀번호가 맞지 않아요",
-  "auth/wrong-password": "이메일 또는 비밀번호가 맞지 않아요",
-  "auth/invalid-email": "이메일 형식이 올바르지 않아요",
-  // 퇴사 처리가 Firebase 계정을 잠그므로 일상적으로 도달하는 상태다(설정·직원 → 퇴사).
-  // 되돌리는 실물 버튼이 제품 안에 있다: [설정 · 직원] 직원 표의 "재입사" → 재입사 처리.
-  "auth/user-disabled": "퇴사 처리된 계정이에요 — 센터 대표가 [설정 · 직원]에서 재입사 처리하면 다시 로그인할 수 있어요",
-  "auth/too-many-requests": "로그인 시도가 너무 많았어요 — 잠시 후 다시 시도해주세요",
-  // api.ts의 오프라인 문구와 같은 말로 맞춘다 — 같은 사고(와이파이 끊김)를 화면마다
-  // 다른 말로 부르면 대표는 서로 다른 문제로 읽는다.
-  "auth/network-request-failed": "인터넷 연결이 끊긴 것 같아요 — 연결을 확인하고 다시 시도해주세요",
-  // 이건 센터에서 손댈 수 있는 스위치가 아니다(Firebase 콘솔 설정). 고칠 수 없는 일을
-  // "문의하세요"로 떠넘기지 말고, 센터 밖 문제라는 사실을 그대로 알린다.
-  "auth/operation-not-allowed": "이메일 로그인이 꺼져 있어요 — 센터에서 켤 수 있는 설정이 아니라 PT데스크에 알려야 해요",
-};
-
-function toKoMessage(e: unknown): string {
-  // 표에 없는 코드(auth/internal-error 등)와 Firebase 밖 예외(브라우저 영문 메시지)를
-  // 그대로 흘리면 로그인 카드에 생 enum·영문이 찍힌다 — 대표에게는 읽을 수 없는 글자다.
-  // 화면에는 고정 한국어 한 줄만, 원문은 콘솔로.
-  if (e instanceof FirebaseError) {
-    const known = FB_ERROR_KO[e.code];
-    if (known) return known;
-    console.error("[login] 매핑되지 않은 Firebase 오류:", e.code, e);
-  } else {
-    console.error("[login] 로그인 중 예외:", e);
-  }
-  return "로그인에 실패했어요 — 잠시 후 다시 시도해주세요";
-}
+// Firebase Auth 오류 코드 → 한국어 표는 lib/firebaseErrorKo.ts로 공용화했다(P73) — 트레이너
+// 초대·센터 등록의 메일 발송 실패 안내가 같은 표를 쓴다. 원칙("문의하세요"라고 쓰지 않는다)은 거기.
 
 export function Login() {
   const { loginDev, loginEmail, logout, isLoading, error } = useAuth();
@@ -76,7 +43,7 @@ export function Login() {
       if (err instanceof FirebaseError && err.code === "auth/user-not-found") {
         setResetSent(true);
       } else {
-        setFbError(toKoMessage(err));
+        setFbError(loginErrorKo(err));
       }
     } finally {
       setIsPending(false);
@@ -96,7 +63,7 @@ export function Login() {
       // 성공 시 loginEmail이 /v1/me까지 세팅 → isAuthed 전환으로 이 화면이 닫힌다.
       await loginEmail(email.trim(), password);
     } catch (err) {
-      setFbError(toKoMessage(err));
+      setFbError(loginErrorKo(err));
     } finally {
       setIsPending(false);
     }

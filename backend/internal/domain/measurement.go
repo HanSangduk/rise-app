@@ -3,8 +3,25 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
+
+// BodyPhotoPathOwnedBy — storage_path가 그 회원의 체형사진 폴더 안인가(v2.38, P74).
+// 규약은 storage.rules(`match /members/{memberId}/body/{fileName}`)와 앱의 BodyPhotoStoragePath가 공유한다:
+// **정확히** `members/{memberId}/body/{fileName}` 세 단계 + 파일명 하나, 파일명은 비어 있지 않고
+// `/`·`..`를 담지 않는다. memberId가 비면 어떤 경로도 소유할 수 없다(빈 접두사가 모든 경로를 통과시킨다).
+func BodyPhotoPathOwnedBy(storagePath, memberID string) bool {
+	if memberID == "" || strings.ContainsAny(memberID, "/") {
+		return false
+	}
+	prefix := "members/" + memberID + "/body/"
+	if !strings.HasPrefix(storagePath, prefix) {
+		return false
+	}
+	name := storagePath[len(prefix):]
+	return name != "" && !strings.Contains(name, "/") && name != "." && name != ".."
+}
 
 // BodyPhoto — 체형 분석 사진 메타(API계약 v1). 실제 이미지는 Storage에, 여기는 메타만 보관한다.
 // 저장 전 Consent.SensitiveConsentValid()가 참이어야 한다(P8 불변식5) — 강제는 서비스 레이어의 몫.

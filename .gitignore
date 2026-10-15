@@ -25,3 +25,8 @@ app/android/build/
 
 # store/screenshots/frame.py 용 로컬 파이썬 환경(README 지시로 생성)
 .venv/
+
+# Firestore 에뮬레이터가 실행 디렉토리에 남기는 로그(컨포먼스 테스트 산출물)
+firestore-debug.log
+# firebase CLI(emulators:exec)가 같은 자리에 남기는 로그(P74)
+firebase-debug.log

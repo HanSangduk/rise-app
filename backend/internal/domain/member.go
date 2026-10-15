@@ -155,6 +155,62 @@ const WithdrawnMemberName = "탈퇴한 회원"
 // IsWithdrawn — 탈퇴 처리된 회원인지.
 func (m Member) IsWithdrawn() bool { return m.Status == MemberStatusWithdrawn }
 
+// Normalize — 저장 전 표기 정리(StaffCreate·Center와 같은 규약).
+//
+// **번호의 표기는 건드리지 않는다.** 처음엔 NormalizePhone 결과(숫자만)로 저장하려 했는데,
+// 두 스토어의 FindMemberByPhone과 가입 매칭이 **비교 시점에 양쪽을 정규화**하므로(memory.go·
+// firestore.go의 normalizePhone(mem.Phone) != target) 저장 형식은 매칭에 아무 영향이 없다.
+// 반면 바꾸면 기존 문서("010-1234-5678")와 새 문서("01012345678")가 섞이고, 데스크가 입력한
+// 표기를 서버가 임의로 고쳐 되돌려 주는 것이 된다 — 얻는 것 없이 잃는 변경이다.
+// 자릿수 검증만 정규화 값으로 한다(Validate).
+func (m *Member) Normalize() {
+	m.Name = strings.TrimSpace(m.Name)
+	m.Phone = strings.TrimSpace(m.Phone)
+	m.Channel = strings.TrimSpace(m.Channel)
+	m.TrainerID = strings.TrimSpace(m.TrainerID)
+	if m.Status == "" {
+		m.Status = MemberStatusActive
+	}
+}
+
+// Validate — 회원 레코드가 **앱과 만날 수 있는 상태**인가.
+//
+// v2.36에서 신설했다. 종전엔 회원만 도메인 검증이 없어(Staff·Center·Business·Facility·Policy는
+// 전부 갖고 있었다) 이름도 번호도 빈 회원이 200으로 저장됐다. v2.32부터 **번호가 센터를 정하므로**
+// 번호가 비거나 자릿수가 틀리면 그 회원은 앱 매칭·확인이 영원히 실패한다 — 그런데 데스크에는
+// 등록 성공만 보이고, 회원은 "미연결" 화면에 갇힌 채 아무도 원인을 못 짚는다. 그 사고를 등록
+// 시점에 막는다.
+//
+// withdrawn을 허용 목록에 넣는 이유: 탈퇴 레코드는 Anonymized()가 이름·번호를 지운 상태로
+// 저장되므로(보존의무 5년) 여기 규칙을 그대로 적용하면 **탈퇴 처리 자체가 실패한다**. 탈퇴는
+// 이 검증을 지나는 경로가 아니지만, 나중에 지나게 되더라도 막히지 않도록 상태를 함께 본다.
+func (m Member) Validate() error {
+	if m.Status == MemberStatusWithdrawn {
+		return nil // 파기된 레코드 — 이름·번호가 비어 있는 것이 정상이다
+	}
+	name := strings.TrimSpace(m.Name)
+	if name == "" {
+		return errors.New("회원 이름을 입력해주세요")
+	}
+	if utf8.RuneCountInString(name) > 40 {
+		return errors.New("회원 이름이 너무 길어요(40자 이내)")
+	}
+	// 번호는 이미 Normalize를 지난 값이어야 한다(숫자만). 국내 이동전화·지역번호가 10~11자리다.
+	digits := NormalizePhone(m.Phone)
+	if digits == "" {
+		return errors.New("휴대폰 번호를 입력해주세요 — 회원이 앱에서 연결될 때 쓰는 유일한 열쇠예요")
+	}
+	if len(digits) < 10 || len(digits) > 11 {
+		return errors.New("휴대폰 번호 자릿수가 맞지 않아요(10~11자리) — 앱 연결에 쓰는 번호라 정확해야 해요")
+	}
+	switch m.Status {
+	case MemberStatusActive, MemberStatusDormant:
+	default:
+		return errors.New("회원 상태가 올바르지 않아요(active 또는 dormant)")
+	}
+	return nil
+}
+
 // Anonymized — 탈퇴 시 **남길** 회원 문서를 만든다(순수 함수 — 원본은 건드리지 않는다).
 //
 // 파기·보존의 경계를 코드로 못박는 자리다. 두 법이 반대 방향으로 당긴다:

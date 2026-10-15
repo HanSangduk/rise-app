@@ -80,7 +80,7 @@ final class RecordsViewModelProvider
   RecordsViewModel create() => RecordsViewModel();
 }
 
-String _$recordsViewModelHash() => r'57c93852c1d5ee65d8a6e834a11a65377439a066';
+String _$recordsViewModelHash() => r'69b937f0039ff83cf16912f9e8dd93c352b66128';
 
 abstract class _$RecordsViewModel extends $AsyncNotifier<RecordsData> {
   FutureOr<RecordsData> build();

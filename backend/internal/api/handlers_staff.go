@@ -11,8 +11,11 @@ import (
 )
 
 // CreateStaff — POST /v1/staff(owner 전용, 트레이너 온보딩). 201 — 로그인 계정·Staff 레코드·
-// UserIndex가 새로 생겼다는 뜻이다. 응답에 임시 비밀번호는 없다: 어드민이 이어서 클라이언트
-// SDK의 sendPasswordResetEmail로 초대 메일을 보낸다(service.CreateStaff 주석 참고).
+// UserIndex가 새로 생겼다는 뜻이다. 응답은 Staff 필드 평면 + **새 계정일 때만**
+// `initial_password`(v2.36, service.CreateStaff·StaffCreated 참고). 재초대(기존 계정·복직)는 그
+// 필드가 비고, 어드민은 그 유무로 안내 문구를 가른다. 비밀번호 설정 메일(sendPasswordResetEmail)은
+// 어드민 프론트가 이어서 보내되 보조 수단이다 — 메일이 막힌 곳에서도 초대가 완결되게 하려는
+// 것이 v2.36의 설계다(P71).
 func (h *Handlers) CreateStaff(w http.ResponseWriter, r *http.Request) {
 	p, _ := principalFrom(r.Context())
 	var req domain.StaffCreate

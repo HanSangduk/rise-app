@@ -174,7 +174,39 @@ class HomeViewModel extends _$HomeViewModel {
     ];
     state = AsyncData(current.copyWith(homeworkItems: updatedItems));
 
-    final siblings = updatedItems.where((i) => i.hwId == item.hwId).toList()
+    // **같은 hwId의 제출은 직렬로 보낸다**(P73). 형제 항목을 훑듯 연달아 체크하면 종전엔
+    // POST 두 건이 서로 다른 배열([T,F,F] → [T,T,F])로 **동시에** 나갔다. 서버는 문서를
+    // 통째로 교체하므로 나중에 도착한 쪽이 이기고, 네트워크에서 순서가 뒤집히면 방금 체크한
+    // 칸이 서버에서 사라진다 — 둘 다 Ok라 롤백도 토스트도 없는 조용한 손실이다. 앞 요청이
+    // 끝난 뒤에 보내고, 보내는 시점의 **최신 상태**로 배열을 다시 만들면(뒤 토글이 앞 요청에
+    // 흡수된다) 마지막으로 도착하는 배열은 언제나 화면과 같다.
+    final prev = _hwSubmitTail[item.hwId] ?? Future<void>.value();
+    final mine = prev
+        .catchError((Object _) {})
+        .then((_) => _submitHomeworkSiblings(item, memberId: memberId, date: current.homeworkDate));
+    _hwSubmitTail[item.hwId] = mine;
+    await mine;
+    if (identical(_hwSubmitTail[item.hwId], mine)) _hwSubmitTail.remove(item.hwId);
+  }
+
+  /// hwId별 제출 꼬리 — 같은 hwId의 다음 제출은 이 Future 뒤에 붙는다([toggleHomework]).
+  final _hwSubmitTail = <String, Future<void>>{};
+
+  /// [item]이 속한 hwId의 형제 done 배열을 **지금 상태**로 만들어 보낸다.
+  Future<void> _submitHomeworkSiblings(
+    HomeworkItem item, {
+    required String memberId,
+    required DateTime date,
+  }) async {
+    // 앞 요청을 기다리는 사이 provider가 폐기됐을 수 있다(로그아웃·셸 종료 — 홈 탭은 indexedStack
+    // 상주라 평소엔 일어나지 않는다). 상태도 화면도 없으니 보내지 않는다(auth·camera 뷰모델과 같은 규약).
+    if (!ref.mounted) return;
+    final latest = state.value;
+    // 기다리는 사이 목록이 다른 날짜로 바뀌었으면(자정 재조회) 보내지 않는다 — 옛 날짜의
+    // 배열로 새 문서를 덮는 것이 정확히 위 날짜 가드가 막는 사고다. 낙관적 체크는 재조회가
+    // 이미 서버 값으로 갈아 끼웠다.
+    if (latest == null || latest.homeworkDate != date) return;
+    final siblings = latest.homeworkItems.where((i) => i.hwId == item.hwId).toList()
       ..sort((a, b) => a.index.compareTo(b.index));
     final doneArray = siblings.map((i) => i.done).toList();
 
@@ -188,9 +220,11 @@ class HomeViewModel extends _$HomeViewModel {
       // 그게 어제 목록으로 오늘 문서를 덮던 경로였다(위 날짜 가드 · homeworkDate 주석).
       // 위 가드를 통과했으므로 이 값은 오늘과 같다 — 그래도 "읽은 날짜"를 보내는
       // 쪽이 불변식을 코드로 드러낸다.
-      date: current.homeworkDate,
+      date: date,
       done: doneArray,
     );
+    // 왕복 중 폐기됐으면 갱신할 상태가 없다(요청은 이미 서버에 닿았다).
+    if (!ref.mounted) return;
     if (result case Ok()) {
       // 기록 탭의 "Home Work 주간 기록"은 같은 hw-checks를 읽는다. 5개 탭이
       // StatefulShellRoute.indexedStack으로 **동시에 mount된 채 유지**되므로
@@ -202,10 +236,10 @@ class HomeViewModel extends _$HomeViewModel {
     if (result case Err(:final failure)) {
       // "토글 시점 스냅샷" 복원은 그 사이 성공한 다른 토글까지 되돌린다 →
       // 최신 상태에서 실패한 항목 하나만 원래 값(item.done)으로 역토글.
-      final latest = state.value;
-      if (latest != null) {
-        state = AsyncData(latest.copyWith(homeworkItems: [
-          for (final i in latest.homeworkItems)
+      final now = state.value;
+      if (now != null) {
+        state = AsyncData(now.copyWith(homeworkItems: [
+          for (final i in now.homeworkItems)
             if (i.hwId == item.hwId && i.index == item.index) i.copyWith(done: item.done) else i,
         ]));
       }

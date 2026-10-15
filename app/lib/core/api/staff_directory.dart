@@ -1,9 +1,12 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+// `select`(ProviderListenableSelect)는 riverpod_annotation이 재수출하지 않는다 — flutter_riverpod에서 가져온다.
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:rise_member/core/api/dto/staff_dto.dart';
 import 'package:rise_member/core/network/dio_client.dart';
+import 'package:rise_member/core/session/session_provider.dart';
 
 part 'staff_directory.g.dart';
 
@@ -68,6 +71,17 @@ const _staffCacheTtl = Duration(minutes: 15);
 ///      함께 새로고침하므로, 이제 라벨(도메인 플래그)까지 같은 새 데이터로 바뀐다.
 @riverpod
 Future<Map<String, StaffDto>> staffMap(Ref ref) async {
+  // **캐시는 세션 신원에 묶인다**(P73). keepAlive는 "화면이 사라져도 지킨다"는 뜻이라 로그아웃으로
+  // 셸이 통째로 내려가도 이 맵은 살아남았고, 같은 기기의 다음 로그인(센터 태블릿·가족 공용폰)이
+  // **이전 계정이 속한 센터의 스태프 명단**(이름·역할·프로필·휴무)을 최대 15분 이어받았다 —
+  // 멀티센터(P65) 뒤로는 옛 데이터가 아니라 다른 테넌트의 직원 명부다. `_logout()`이
+  // authViewModel의 잔류를 정확히 같은 시나리오로 고친 선례가 있는데 이 provider엔 없었다.
+  //
+  // 신원(memberId)이 바뀌면 재빌드해 **지금 신원으로** 다시 받는다 — 로그아웃(→ null)과
+  // 다른 계정 로그인 둘 다 잡힌다. 대기실(세션 null, Firebase 신원만 있음)의 조회도 그대로
+  // 동작한다. Session.clear()에서 invalidate하지 않는 이유: session_provider → 이 파일 →
+  // dio_client → session_provider 순환 import를 만들지 않기 위해서다.
+  ref.watch(sessionProvider.select((s) => s?.memberId));
   final link = ref.keepAlive();
 
   final Map<String, StaffDto> map;

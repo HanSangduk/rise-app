@@ -10,6 +10,9 @@ import 'package:rise_member/core/api/dto/staff_dto.dart';
 import 'package:rise_member/core/api/staff_directory.dart';
 import 'package:rise_member/core/network/dio_client.dart';
 import 'package:rise_member/core/result/result.dart';
+import 'package:rise_member/core/session/app_session.dart';
+import 'package:rise_member/core/session/session_provider.dart';
+import 'package:rise_member/core/session/session_store.dart';
 import 'package:rise_member/features/booking/data/booking_remote_data_source.dart';
 import 'package:rise_member/features/booking/data/booking_repository_impl.dart';
 import 'package:rise_member/features/home/data/home_remote_data_source.dart';
@@ -197,6 +200,69 @@ void main() {
     });
   });
 
+  group('세션 경계 — 캐시가 계정을 넘어 살아남지 않는다(P73)', () {
+    const first = AppSession(uid: 'u1', role: 'member', centerId: 'rise', memberId: 'm1');
+    const second = AppSession(uid: 'u2', role: 'member', centerId: 'branch2', memberId: 'm2');
+
+    ProviderContainer sessionAware() => ProviderContainer.test(
+          overrides: [
+            dioProvider.overrideWithValue(_dio(adapter)),
+            sessionStoreProvider.overrideWithValue(_NoopSessionStore()),
+          ],
+        );
+
+    test('로그아웃 → 다른 계정 로그인이면 이전 센터의 명단을 재사용하지 않는다', () async {
+      final local = sessionAware();
+      local.read(sessionProvider.notifier).set(first);
+      // 예약 탭처럼 살아 있는 구독자 + 로그인 사용자의 조회.
+      final sub = local.listen(staffMapProvider, (_, __) {});
+      expect((await local.read(staffMapProvider.future)).keys.toList(), ['t1']);
+
+      // 같은 기기에서 로그아웃 → 셸이 내려가며 구독도 끊긴다 — keepAlive는 정확히 이 순간
+      // 캐시를 지키도록 만들어진 장치라, 종전엔 't1'(1호점 코치)이 그대로 살아남았다.
+      local.read(sessionProvider.notifier).clear(reason: SessionEndReason.signedOut);
+      sub.close();
+      await pumpEventQueue();
+
+      // 다른 센터 회원이 로그인한다(센터 태블릿·가족 공용폰).
+      adapter.staffBody = '[{"uid":"t9","name":"2호점코치","status":"active"}]';
+      local.read(sessionProvider.notifier).set(second);
+      final map = await local.read(staffMapProvider.future);
+      expect(map.keys.toList(), ['t9']);
+      expect(map.containsKey('t1'), isFalse, reason: '1호점 코치가 2호점 회원에게 보인다');
+    });
+
+    test('구독이 살아 있는 채로 계정이 바뀌어도 새 계정 기준으로 다시 받는다', () async {
+      final local = sessionAware();
+      local.read(sessionProvider.notifier).set(first);
+      local.listen(staffMapProvider, (_, __) {});
+      expect((await local.read(staffMapProvider.future)).keys.toList(), ['t1']);
+
+      adapter.staffBody = '[{"uid":"t9","name":"2호점코치","status":"active"}]';
+      local.read(sessionProvider.notifier).clear(reason: SessionEndReason.unauthorized);
+      local.read(sessionProvider.notifier).set(second);
+      await pumpEventQueue();
+
+      final map = await local.read(staffMapProvider.future);
+      expect(map.containsKey('t1'), isFalse);
+      expect(map.containsKey('t9'), isTrue);
+    });
+
+    test('같은 신원 안에서는 세션 객체가 갈아 끼워져도 재조회하지 않는다(select memberId)', () async {
+      final local = sessionAware();
+      local.read(sessionProvider.notifier).set(first);
+      local.listen(staffMapProvider, (_, __) {});
+      await local.read(staffMapProvider.future);
+      expect(adapter.countOf('/v1/staff'), 1);
+
+      // 표시 이름만 바뀐 같은 사람(로그인 경로가 /v1/me의 빈 이름을 매칭 응답으로 메우는 자리).
+      local.read(sessionProvider.notifier).set(first.withMemberName('김민지'));
+      await pumpEventQueue();
+      await local.read(staffMapProvider.future);
+      expect(adapter.countOf('/v1/staff'), 1, reason: '신원이 같은데 캐시를 버렸다');
+    });
+  });
+
   group('staffMapReader — 예외를 밖으로 내보내지 않는다', () {
     test('서버 오류든 무엇이든 빈 맵으로 떨어진다', () async {
       adapter.staffStatus = 503;
@@ -256,4 +322,16 @@ class _RecordingAdapter implements HttpClientAdapter {
 
   @override
   void close({bool force = false}) {}
+}
+
+/// 세션 경계 테스트용 — 캐시 저장소(SharedPreferences)를 건드리지 않는다.
+class _NoopSessionStore implements SessionStore {
+  @override
+  Future<AppSession?> read(String uid) async => null;
+
+  @override
+  Future<void> write(AppSession session) async {}
+
+  @override
+  Future<void> clear() async {}
 }

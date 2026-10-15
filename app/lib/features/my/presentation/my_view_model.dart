@@ -80,7 +80,15 @@ class MyViewModel extends _$MyViewModel {
     if (memberId == null) return const Err(SessionGoneFailure());
     final repo = ref.read(myRepositoryProvider);
     final result = await repo.updateConsent(memberId: memberId, general: general, sensitive: sensitive);
-    if (result case Ok()) refresh();
+    if (result case Ok()) {
+      // 동의 상태의 출처가 둘이다: 이 뷰모델의 MySummary.consent(마이 탭 토글)와
+      // [myProfileProvider](체형 촬영 셔터의 동의 게이트·기록 탭 포즈 칩). 종전엔 자기 것만
+      // 새로고침해서, 기록 탭이 그 provider를 붙들고 있으면(indexedStack이라 떠나도 산다)
+      // 마이 탭에서 동의를 켜도 셔터가 **앱을 껐다 켜기 전까지** "마이 탭에서 동의해주세요"를
+      // 냈다 — 안내대로 했는데 풀리지 않는 문(P73). 두 출처를 같은 사건에 함께 비운다.
+      ref.invalidate(myProfileProvider);
+      refresh();
+    }
     return result;
   }
 

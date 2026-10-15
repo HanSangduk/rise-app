@@ -14,7 +14,12 @@ abstract final class HomeworkWeekRules {
     required List<HomeworkCheckDay> checks,
     int weeks = 4,
   }) {
-    final today = DateTime(now.year, now.month, now.day);
+    // 주 경계 산술은 **UTC 생성자**로 한다(P73). 로컬 플래그 `DateTime`의 `subtract(days: 7)`은
+    // 절대 시각 −168시간이라, 기기가 서머타임 지역이면 전환 주의 월요일 자정이 1시간 밀려
+    // 그 경계에 놓인 체크(전환일 당일)가 어느 주에도 들지 않았다. 여기서 필요한 건 달력
+    // 날짜뿐이므로 필드만 UTC로 옮기면 기기 타임존 규칙이 개입할 자리가 없다(비교 대상
+    // `d`도 같은 UTC 표현이라 대칭이다).
+    final today = DateTime.utc(now.year, now.month, now.day);
     final thisMonday = today.subtract(Duration(days: today.weekday - DateTime.monday));
 
     final out = <HomeworkWeekSummary>[];
@@ -25,7 +30,7 @@ abstract final class HomeworkWeekRules {
       var done = 0;
       var total = 0;
       for (final c in checks) {
-        final d = DateTime(c.date.year, c.date.month, c.date.day);
+        final d = DateTime.utc(c.date.year, c.date.month, c.date.day);
         if (d.isBefore(start) || d.isAfter(end)) continue;
         total += c.done.length;
         done += c.done.where((v) => v).length;

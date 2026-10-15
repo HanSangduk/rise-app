@@ -246,9 +246,15 @@ class _PassListState extends ConsumerState<PassList> {
     final result = await ref.read(myViewModelProvider.notifier).resumeHold(p.id);
     if (!mounted) return;
     setState(() => _resumingPassId = null);
-    if (result case Err(:final failure)) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(riseSnackBar(failure.message, kind: RiseSnackKind.danger));
+    switch (result) {
+      case Ok():
+        // 성공도 말한다(P73) — 신청은 스낵바가 있는데 **재개**는 스피너가 꺼질 뿐이었다.
+        // 문장은 서버가 실제로 한 일만: 유효기간 재계산은 재개 시점에 따라 달라 숫자를 지어내지 않는다.
+        ScaffoldMessenger.of(context)
+            .showSnackBar(riseSnackBar('일시정지를 끝냈어요 — 오늘부터 다시 이용할 수 있어요', kind: RiseSnackKind.ok));
+      case Err(:final failure):
+        ScaffoldMessenger.of(context)
+            .showSnackBar(riseSnackBar(failure.message, kind: RiseSnackKind.danger));
     }
   }
 

@@ -6,6 +6,7 @@ import 'package:rise_member/core/network/api_result_guard.dart';
 import 'package:rise_member/core/result/failure.dart';
 import 'package:rise_member/core/result/result.dart';
 import 'package:rise_member/core/utils/date_format.dart';
+import 'package:rise_member/core/utils/settled.dart';
 import 'package:rise_member/features/home/data/home_remote_data_source.dart';
 import 'package:rise_member/features/home/domain/home_models.dart';
 import 'package:rise_member/features/home/domain/home_repository.dart';
@@ -41,19 +42,19 @@ class HomeRepositoryImpl implements HomeRepository {
       // 생긴다(예: 홈워크 필터가 `selected.trainerId`를 쓴다). 그래서 요청은
       // 함께 보내고, 기다리는 순서만 종전 그대로 둔다.
       //
-      // `_settle`로 감싸는 이유: 아래 `EmptyPassesFailure`처럼 **중간에 빠져나가는
+      // `settle`로 감싸는 이유: 아래 `EmptyPassesFailure`처럼 **중간에 빠져나가는
       // 경로**가 있는데, 그때 남은 future가 나중에 실패하면 아무도 받지 않는
       // 비동기 예외가 되어 앱이 죽는다. 감싸 두면 에러가 값으로 잡히고, 원래
       // 코드가 던지던 자리에서 원래 순서대로 다시 던진다.
       final todayKst = DateFmt.todayKst();
       final todayIso = DateFmt.isoDate(todayKst);
 
-      final staffMapF = _settle(_readStaffMap());
-      final passesF = _settle(_passesApi.fetchMyPasses(memberId));
-      final bookingsF = _settle(_bookingsApi.fetchMyBookings(memberId));
-      final homeworksF = _settle(_remote.fetchHomeworks(memberId));
+      final staffMapF = settle(_readStaffMap());
+      final passesF = settle(_passesApi.fetchMyPasses(memberId));
+      final bookingsF = settle(_bookingsApi.fetchMyBookings(memberId));
+      final homeworksF = settle(_remote.fetchHomeworks(memberId));
       final checksF =
-          _settle(_remote.fetchHwChecks(memberId: memberId, date: todayIso));
+          settle(_remote.fetchHwChecks(memberId: memberId, date: todayIso));
 
       // 이름·퇴사 여부 해석은 부가 정보 — 실패해도 빈 맵으로 돌아와 홈을 죽이지
       // 않는다(staffMapReaderProvider 주석: 왜 "모르면 현직"인지 포함).
@@ -269,36 +270,5 @@ class HomeRepositoryImpl implements HomeRepository {
   @override
   Future<Result<void>> selfCheckIn({String? scannedToken}) {
     return guardApi(() => _remote.selfCheckIn(scannedToken: scannedToken));
-  }
-}
-
-
-/// 성공/실패를 **값으로** 담는다 — 던지지 않는다.
-///
-/// 홈 로드는 다섯 요청을 동시에 띄우는데, 중간에 빠져나가는 경로가 있다
-/// (`EmptyPassesFailure`). 그때 남은 future가 나중에 실패하면 **아무도 받지 않는
-/// 비동기 예외**가 되어 앱이 죽는다. 감싸 두면 에러가 값으로 잡히고, 원래 코드가
-/// 던지던 자리에서 원래 순서대로 다시 던질 수 있다.
-class _Settled<T> {
-  const _Settled(this.value, this.error, this.stack);
-  final T? value;
-  final Object? error;
-  final StackTrace? stack;
-
-  /// 실패면 그대로 다시 던진다 — **스택을 보존**해서 원인 추적이 끊기지 않게.
-  T valueOrThrow() {
-    if (error != null) Error.throwWithStackTrace(error!, stack ?? StackTrace.current);
-    return value as T;
-  }
-
-  /// best-effort 호출용 — 실패하면 대체값.
-  T valueOr(T fallback) => error != null ? fallback : value as T;
-}
-
-Future<_Settled<T>> _settle<T>(Future<T> f) async {
-  try {
-    return _Settled(await f, null, null);
-  } catch (e, st) {
-    return _Settled(null, e, st);
   }
 }

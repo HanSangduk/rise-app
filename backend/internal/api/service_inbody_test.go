@@ -391,7 +391,7 @@ func newInbodyRouter(t *testing.T) (http.Handler, *Service) {
 	if err != nil {
 		t.Fatalf("NewAuthenticator: %v", err)
 	}
-	svc := NewService(st, cfg, auth.Provisioner())
+	svc := NewService(st, cfg, auth.Provisioner(testInitialPassword))
 	return NewRouter(NewHandlers(svc), auth, nil), svc
 }
 

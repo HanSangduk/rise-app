@@ -211,7 +211,11 @@ class _ConsentSheetState extends ConsumerState<_ConsentSheet> {
     if (!mounted) return;
     switch (result) {
       case Ok():
+        // 성공도 말한다(P73) — 동의 저장만 무음으로 닫혔다. 특히 민감정보 동의를 **켠** 사람은
+        // 다음 행동이 체형 촬영이라, 저장이 됐는지 모른 채 셔터를 누르게 된다.
+        final messenger = ScaffoldMessenger.of(context);
         Navigator.of(context).pop();
+        messenger.showSnackBar(riseSnackBar('동의 설정을 저장했어요', kind: RiseSnackKind.ok));
       case Err(:final failure):
         setState(() => widget.submitting.value = false);
         ScaffoldMessenger.of(context)

@@ -1,7 +1,10 @@
 import 'package:dio/dio.dart';
+// `select`(ProviderListenableSelect)는 riverpod_annotation이 재수출하지 않는다 — flutter_riverpod에서 가져온다.
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:rise_member/core/config/app_config.dart';
 import 'package:rise_member/core/network/dio_client.dart';
+import 'package:rise_member/core/session/session_provider.dart';
 
 part 'center_contact_provider.g.dart';
 
@@ -100,6 +103,14 @@ Future<CenterContact> centerContact(Ref ref, String? centerId) async {
 /// 동기 `String`으로 내려서 헤더·카드가 `AsyncValue` 분기 없이 `ref.watch` 한 줄로 쓴다.
 /// 로딩 중에도 임시 상수를 바로 보여주는 것이 의도다 — 상호 한 줄 때문에 홈 헤더가
 /// 스피너를 돌릴 이유가 없고, 서버 값이 오면 그 자리에서 바뀐다.
+///
+/// **로그인 뒤에는 세션의 센터를 묻는다**(P65 후속 3 · P73). 종전엔 항상 `?center=` 없는 기본
+/// 센터라, 2호점 회원의 홈 헤더·마이 탭·다음 예약 카드가 **1호점 상호**를 찍었다. 세션의
+/// `center_id`(`GET /v1/me`)는 연결된 회원의 실제 센터다. 세션이 없는 대기실은 종전대로 기본
+/// 센터(매칭 카드는 매칭 응답의 상호를 따로 받는다 — `_MatchedCenterCard`).
 @riverpod
-String centerDisplayName(Ref ref) =>
-    ref.watch(centerContactProvider(null)).value?.displayName ?? AppConfig.centerFullName;
+String centerDisplayName(Ref ref) {
+  final sessionCenter = ref.watch(sessionProvider.select((s) => s?.centerId));
+  final centerId = (sessionCenter == null || sessionCenter.isEmpty) ? null : sessionCenter;
+  return ref.watch(centerContactProvider(centerId)).value?.displayName ?? AppConfig.centerFullName;
+}

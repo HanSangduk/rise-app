@@ -1,8 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
-import 'package:rise_member/core/api/dto/join_dto.dart';
+import 'package:flutter/foundation.dart' show kDebugMode, visibleForTesting;
 import 'package:rise_member/core/api/me_api.dart';
 import 'package:rise_member/core/network/api_result_guard.dart';
 import 'package:rise_member/core/result/failure.dart';
@@ -26,7 +25,15 @@ class AuthRepositoryImpl implements AuthRepository {
 
   /// codeSent가 정상 응답에서 즉시 오는 데 대한 보험 — 어떤 콜백도 안 오는
   /// 플랫폼 이상 상황에서 UI가 "전송 중…"에 갇히지 않게 하는 상한.
-  static const _codeSentTimeout = Duration(seconds: 70);
+  ///
+  /// **사람이 reCAPTCHA를 푸는 시간을 담아야 한다**(P75). APNs가 없는 iOS는 실번호 인증이 전부 사파리
+  /// 시트를 지나고(Android는 Play Integrity 실패 시 Custom Tab), 그림 문제가 뜨면 사람이 푼다. 시계는
+  /// verifyPhoneNumber가 리스너만 걸고 반환한 직후부터 흐르고 네이티브 시트는 이 상한과 무관하게 계속
+  /// 돈다 — 종전 70초는 문제를 늦게 푼 회원에게 "지연" 오류를 띄운 뒤 SMS를 보내고(늦은 codeSent는
+  /// completeOnce가 버린다), 다시 누르면 두 번째 SMS가 나갔다. reCAPTCHA 문제 화면은 약 2분이면 만료되므로
+  /// 그보다 넉넉하게 둔다. 시트가 떠 있는 동안 회원은 시트를 닫아 즉시 오류(web-context-cancelled)를 받을
+  /// 수 있으니, 늘린 비용은 "콜백이 영영 안 오는" 병적 경우의 대기뿐이다.
+  static const _codeSentTimeout = Duration(seconds: 180);
 
   // ── 전화번호 인증: Firebase Phone Auth 실연동 (P06) ───────────────────────
   @override
@@ -154,27 +161,7 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   /// FirebaseAuthException → 한국어 도메인 Failure.
-  Failure _mapPhoneAuthError(FirebaseAuthException e) {
-    return switch (e.code) {
-      'invalid-phone-number' => const ValidationFailure('휴대폰 번호를 다시 확인해주세요'),
-      'invalid-verification-code' => const AuthFailure('인증번호가 맞지 않아요'),
-      'invalid-verification-id' ||
-      'session-expired' ||
-      'code-expired' =>
-        const AuthFailure('인증 시간이 지났어요. 인증번호를 다시 요청해주세요'),
-      'too-many-requests' => const RejectedFailure('시도가 너무 많았어요. 잠시 후 다시 시도해주세요'),
-      'quota-exceeded' => const RejectedFailure('인증 문자 발송 한도를 넘었어요. 잠시 후 다시 시도해주세요'),
-      'user-disabled' => const AuthFailure('사용이 중지된 계정이에요. 센터에 문의해주세요'),
-      'operation-not-allowed' => const AuthFailure('전화번호 로그인이 아직 열려 있지 않아요'),
-      'network-request-failed' => const NetworkFailure(),
-      'app-not-authorized' ||
-      'missing-client-identifier' ||
-      'captcha-check-failed' ||
-      'invalid-app-credential' =>
-        const AuthFailure('앱 인증에 실패했어요. 잠시 후 다시 시도해주세요'),
-      _ => AuthFailure('인증에 실패했어요 (${e.code})'),
-    };
-  }
+  Failure _mapPhoneAuthError(FirebaseAuthException e) => mapPhoneAuthError(e);
 
   // ── 여기서부터는 실제 API계약 엔드포인트 ──────────────────────────────────
   @override
@@ -183,11 +170,13 @@ class AuthRepositoryImpl implements AuthRepository {
     return result.map(_toDomain);
   }
 
-  JoinMatch _toDomain(JoinMatchResponseDto dto) {
+  JoinMatch _toDomain(JoinMatchPayload payload) {
+    final dto = payload.dto;
     final m = dto.member;
     if (m == null) return JoinMatch(needsConfirm: dto.needsConfirm);
     return JoinMatch(
       needsConfirm: dto.needsConfirm,
+      centerName: payload.centerName,
       member: MatchedMember(
         id: m.id,
         name: m.name,
@@ -270,4 +259,46 @@ class AuthRepositoryImpl implements AuthRepository {
       Err.new,
     );
   }
+}
+
+/// FirebaseAuthException → 한국어 도메인 Failure. 화면은 `message`를 그대로 보여 준다.
+@visibleForTesting
+Failure mapPhoneAuthError(FirebaseAuthException e) {
+  return switch (e.code) {
+    'invalid-phone-number' => const ValidationFailure('휴대폰 번호를 다시 확인해주세요'),
+    'invalid-verification-code' => const AuthFailure('인증번호가 맞지 않아요'),
+    'invalid-verification-id' ||
+    'session-expired' ||
+    'code-expired' =>
+      const AuthFailure('인증 시간이 지났어요. 인증번호를 다시 요청해주세요'),
+    'too-many-requests' => const RejectedFailure('시도가 너무 많았어요. 잠시 후 다시 시도해주세요'),
+    'quota-exceeded' => const RejectedFailure('인증 문자 발송 한도를 넘었어요. 잠시 후 다시 시도해주세요'),
+    'user-disabled' => const AuthFailure('사용이 중지된 계정이에요. 센터에 문의해주세요'),
+    'operation-not-allowed' => const AuthFailure('전화번호 로그인이 아직 열려 있지 않아요'),
+    'network-request-failed' || 'web-network-request-failed' => const NetworkFailure(),
+    // reCAPTCHA 폴백 갈래 — iOS는 사파리 시트, Android는 Play Integrity가 실패하면 Custom Tab(P75). APNs
+    // 사일런트 검증이 없는 동안 iOS 실번호 인증은 전부 이 길을 지난다. 매핑이 없으면 아래 기본 갈래가 영문 코드를
+    // 그대로 보인다. 철자가 플랫폼마다 다르다(iOS cancelled · Android canceled). 이 문구는 번호 화면("인증번호
+    // 받기")과 코드 화면("인증번호 재전송") 둘 다에서 뜨므로 버튼 이름을 말하지 않는다.
+    'web-context-cancelled' || 'web-context-canceled' =>
+      const AuthFailure('보안 확인이 끝나기 전에 창이 닫혔어요. 다시 시도해주세요'),
+    'internal-error' => const AuthFailure('일시적인 문제로 인증하지 못했어요. 잠시 후 다시 시도해주세요'),
+    'app-not-authorized' ||
+    'missing-client-identifier' ||
+    'captcha-check-failed' ||
+    'invalid-app-credential' ||
+    'missing-app-credential' ||
+    'app-not-verified' ||
+    'missing-app-token' ||
+    'notification-not-forwarded' ||
+    'app-verification-failed' ||
+    'invalid-client-id' =>
+      const AuthFailure('앱 인증에 실패했어요. 잠시 후 다시 시도해주세요'),
+    // 웹 확인(reCAPTCHA 시트·Custom Tab)과 reCAPTCHA 계열은 **이름을 하나씩 세지 않고 계열로** 받는다 —
+    // 콜백 URL이 firebaseError를 싣고 오면 iOS는 대부분 web-user-interaction-failure로 뭉치고, SDK가
+    // 판마다 새 이름을 더한다(목록으로 쫓으면 반드시 빠진다 — P75 반박 검토에서 실제로 둘이 빠졌다).
+    final code when code.startsWith('web-') || code.contains('recaptcha') =>
+      const AuthFailure('앱 인증에 실패했어요. 잠시 후 다시 시도해주세요'),
+    _ => AuthFailure('인증에 실패했어요 (${e.code})'),
+  };
 }

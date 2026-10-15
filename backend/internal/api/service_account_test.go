@@ -300,7 +300,7 @@ func TestDeleteMyAccountPurgesRequestQueues(t *testing.T) {
 
 	// 같은 센터의 이웃 회원 — 상담 요청 보유(탈퇴자와 무관하게 남아야 한다).
 	otherID, err := s.store.SaveMember(ctx, testCenter, &domain.Member{
-		Name: "이서준", Phone: "010-9999-0000", Status: domain.MemberStatusActive,
+		Name: "이서준", Phone: "010-1234-5678", Status: domain.MemberStatusActive,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -536,7 +536,7 @@ func TestDeleteMyAccountUnlinkedPurgesJoinRequest(t *testing.T) {
 	}
 	// 이웃 신청자 — 남의 요청까지 쓸어가면 안 된다(uid 스코프).
 	neighbour := Principal{UID: "u_other", Role: domain.RoleMember, CenterID: testCenter}
-	if _, err := s.JoinRequestCreate(ctx, neighbour, JoinRequestBody{Name: "이서준", Phone: "010-9999-0000"}); err != nil {
+	if _, err := s.JoinRequestCreate(ctx, neighbour, JoinRequestBody{Name: "이서준", Phone: "010-1234-5678"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -561,7 +561,7 @@ func TestDeleteMyAccountUnlinkedPurgesJoinRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 1 || list[0].UID != "u_other" || list[0].Phone != "010-9999-0000" {
+	if len(list) != 1 || list[0].UID != "u_other" || list[0].Phone != "010-1234-5678" {
 		t.Errorf("남은 가입 요청 = %+v, want 이웃 1건 온전 — uid로 좁혀지지 않았다", list)
 	}
 }
@@ -1084,4 +1084,76 @@ func deleteReq(t *testing.T, r http.Handler, path, uid, role string) *httptest.R
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	return rec
+}
+
+// 탈퇴 회원은 **회원권·Home Work 스코프 KPI에서도** 빠진다(v2.37, P73). 종전엔 회원 루프만
+// 걸렀다: 탈퇴 시 유효기간이 남은 패스는 "만료 임박(연장 제안)"에 그대로 잡혔고(연락처는 이미
+// 파기됐다), 배정 대상에 남은 탈퇴자는 hw-check가 전부 삭제되므로 완료율 분모만 채웠다.
+func TestWithdrawnMemberExcludedFromExpiringAndHomework(t *testing.T) {
+	s := newTestService()
+	ctx := context.Background()
+	kst := time.Now().In(domain.KST)
+	seedTrainerRecord(t, s, "t1", "정혜린")
+
+	// 탈퇴할 회원 — 3일 뒤 만료되는 패스(정책 기본 expiring_days=7 안) + 진행 중 배정.
+	mem, err := s.CreateMember(ctx, ownerP(), &domain.Member{
+		Name: "김민지", Phone: "010-1234-5678", TrainerID: "t1", Status: domain.MemberStatusActive,
+		Consent: domain.Consent{General: true, Sensitive: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreatePass(ctx, ownerP(), PassCreateRequest{
+		MemberID: mem.ID, TrainerID: "t1", Product: "PT 10회", PaidAmount: 500_000, TotalSessions: 10,
+		ValidFrom: kst.AddDate(0, 0, -20).Format("2006-01-02"), ValidUntil: kst.AddDate(0, 0, 3).Format("2006-01-02"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SaveUserIndex(ctx, &store.UserIndex{
+		UID: "u-" + mem.ID, Role: domain.RoleMember, CenterID: testCenter, MemberID: mem.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 남는 회원 — 같은 배정의 대조군(분모 1이 남아야 한다).
+	other, err := s.CreateMember(ctx, ownerP(), &domain.Member{
+		Name: "박현우", Phone: "010-2345-6789", TrainerID: "t1", Status: domain.MemberStatusActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateHomework(ctx, ownerP(), HomeworkCreateRequest{
+		TrainerID: "t1", Scope: domain.HwScopeIndividual, TargetMemberIDs: []string{mem.ID, other.ID},
+		Items:    []domain.HwItem{{Name: "스쿼트", Sets: 3, Reps: "12"}},
+		Schedule: domain.HwSchedule{Type: "weekly", Days: []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := s.Stats(ctx, ownerP(), "", "center")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Expiring != 1 || before.HwD != 2 {
+		t.Fatalf("픽스처 전제가 깨졌다: 탈퇴 전 expiring=%d hw_d=%d, want 1/2", before.Expiring, before.HwD)
+	}
+
+	if _, err := s.DeleteMyAccount(ctx, memberP(mem.ID)); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.Stats(ctx, ownerP(), "", "center")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Expiring != 0 {
+		t.Errorf("expiring = %d, want 0 — 탈퇴자의 남은 패스가 '연장 제안' 대상으로 잡히고 있다", after.Expiring)
+	}
+	if after.HwD != 1 {
+		t.Errorf("hw_d = %d, want 1 — 탈퇴자가 Home Work 완료율 분모에 남아 있다", after.HwD)
+	}
+	// 트레이너 비교표도 같은 판정을 써야 한다(같은 헬퍼를 지나는지 배선까지 본다).
+	for _, row := range after.ByTrainer {
+		if row.UID == "t1" && row.HwD != 1 {
+			t.Errorf("by_trainer[t1].hw_d = %d, want 1", row.HwD)
+		}
+	}
 }

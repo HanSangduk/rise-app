@@ -8,6 +8,7 @@ import 'package:rise_member/core/api/member_api.dart';
 import 'package:rise_member/core/permissions/camera_permission.dart';
 import 'package:rise_member/core/theme/app_theme.dart';
 import 'package:rise_member/core/utils/date_format.dart';
+import 'package:rise_member/features/bodycheck/presentation/body_camera_provider.dart';
 import 'package:rise_member/features/bodycheck/presentation/camera_screen.dart';
 import 'package:rise_member/features/bodycheck/presentation/level_simulator_provider.dart';
 import 'package:rise_member/features/bodycheck/presentation/widgets/grid_overlay.dart';
@@ -122,6 +123,71 @@ void main() {
     expect(gate.requests, 2);
   });
 
+  // 영구 거부에서 이 화면이 주는 유일한 다음 행동은 "설정 열기"다. 설정에서 켜고
+  // 돌아왔는데 옛 판정이 그대로면 회원은 **이미 켠 설정을 또 여는 버튼** 앞에 갇힌다 —
+  // 앱으로 돌아오는 것만으로 복구돼야 한다.
+  //
+  // 뮤테이션: `didChangeAppLifecycleState`의 invalidate를 지우면 요청 수가 1에 멈춘다.
+  testWidgets('설정에서 켜고 돌아오면 권한을 다시 확인한다 — 같은 화면에 갇히지 않는다', (tester) async {
+    await pump(tester, permission: CameraPermissionResult.permanentlyDenied);
+    expect(gate.requests, 1);
+
+    await _backgroundAndReturn(tester);
+
+    expect(gate.requests, greaterThan(1), reason: '복귀 시 권한을 다시 묻지 않으면 화면이 스스로 못 푼다');
+  });
+
+  // 머리 주석은 "포그라운드를 잃으면 구독 0이 되어 카메라가 정리된다"고 적었지만,
+  // `build()`가 프레임 비율 하나를 `active` 게이팅 없이 watch해서 구독이 0이 되지
+  // 않았다 — 홈 버튼을 눌러도 카메라가 계속 열려 배터리·발열이 샜다(주석과 동작 불일치).
+  //
+  // 뮤테이션: `previewAspect`의 `active ? …` 게이팅을 지우면 이 테스트가 죽는다.
+  testWidgets('백그라운드로 가면 카메라 provider가 실제로 폐기된다', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 3.0;
+    addTearDown(tester.view.reset);
+
+    final container = ProviderContainer.test(
+      overrides: [
+        cameraPermissionGateProvider.overrideWithValue(_FakeGate(CameraPermissionResult.denied)),
+        accelerometerSourceProvider.overrideWithValue(
+          () => const Stream<AccelerometerEvent>.empty(),
+        ),
+        myProfileProvider.overrideWith(
+          (ref) async => const MemberDto(
+            id: 'm1',
+            name: '람',
+            phone: '01012345678',
+            consent: ConsentDto(general: true, sensitive: true),
+          ),
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(theme: buildAppTheme(), home: const CameraScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(container.exists(bodyCameraProvider), isTrue, reason: '전제가 깨졌다 — 열려 있어야 한다');
+
+    for (final state in const [
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+      AppLifecycleState.paused,
+    ]) {
+      tester.binding.handleAppLifecycleStateChanged(state);
+      await tester.pump();
+    }
+    // riverpod 3의 autoDispose 정리는 구독이 0이 된 **뒤 프레임**에 돈다 — 즉시가 아니다.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(container.exists(bodyCameraProvider), isFalse,
+        reason: '구독이 남아 카메라가 안 꺼졌다 — 배터리·발열이 샌다');
+  });
+
   testWidgets('카메라 플러그인이 없어도(테스트 환경) 화면과 오버레이가 살아 있다', (tester) async {
     // unsupported면 권한으로 막지 않고 카메라 초기화까지 간다. 위젯 테스트의
     // fake-async 존에서는 플랫폼 채널 응답이 오지 않아 계속 "준비 중"에 머문다
@@ -177,6 +243,24 @@ void main() {
 
     expect(find.text(DateFmt.monthDayWeekday(DateFmt.todayKst())), findsOneWidget);
   });
+}
+
+/// 홈 버튼 → 설정 → 앱 복귀. 수명주기 전이는 **건너뛸 수 없다**(프레임워크가 인접
+/// 전이만 허용한다) — resumed에서 곧장 paused로 보내면 단언에 걸린다.
+Future<void> _backgroundAndReturn(WidgetTester tester) async {
+  const path = [
+    AppLifecycleState.inactive,
+    AppLifecycleState.hidden,
+    AppLifecycleState.paused,
+    AppLifecycleState.hidden,
+    AppLifecycleState.inactive,
+    AppLifecycleState.resumed,
+  ];
+  for (final state in path) {
+    tester.binding.handleAppLifecycleStateChanged(state);
+    await tester.pump();
+  }
+  await tester.pumpAndSettle();
 }
 
 class _FakeGate implements CameraPermissionGate {

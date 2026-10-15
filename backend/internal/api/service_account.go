@@ -122,7 +122,10 @@ func (s *Service) DeleteMyAccount(ctx context.Context, p Principal) (AccountDele
 	}
 	paths := make([]string, 0, len(photos))
 	for _, ph := range photos {
-		paths = append(paths, ph.StoragePath)
+		// 회원 폴더 밖을 가리키는 옛 레코드의 파일은 지우지 않는다(purgeBodyPhoto와 같은 규칙 — ownedBodyPhotoPath).
+		if path, ok := ownedBodyPhotoPath(ph); ok {
+			paths = append(paths, path)
+		}
 	}
 	retained, remaining, err := s.retainedForMember(ctx, p.CenterID, mem.ID)
 	if err != nil {
@@ -326,7 +329,7 @@ func (s *Service) retainedForMember(ctx context.Context, centerID, memberID stri
 	}
 	out.Contracts = len(contracts)
 
-	payments, err := s.store.ListPayments(ctx, centerID)
+	payments, err := s.store.ListPaymentsByMember(ctx, centerID, memberID) // 회원 것만(v2.38, P74)
 	if err != nil {
 		return out, 0, err
 	}

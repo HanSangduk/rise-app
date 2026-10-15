@@ -97,7 +97,7 @@ func TestSignContractTwoHashSeparationPairedGolden(t *testing.T) {
 	s := newTestService()
 	ctx := context.Background()
 	memA, cidA := seedStampedSentContract(t, s, "김민지", "010-1234-5678")
-	memB, cidB := seedStampedSentContract(t, s, "이서준", "010-9999-0000")
+	memB, cidB := seedStampedSentContract(t, s, "이서준", "010-1234-5678")
 
 	sig := signPadPNG(t, 300, 120)
 	sum := sha256.Sum256(sig) // 정의로 재계산(구현 경유 없음) — 엉뚱한 바이트 해시 뮤턴트 검출

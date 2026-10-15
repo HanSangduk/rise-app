@@ -353,6 +353,13 @@ type Store interface {
 	GetPayment(ctx context.Context, centerID, id string) (*domain.Payment, error)
 	UpdatePayment(ctx context.Context, centerID string, p *domain.Payment) error
 	ListPayments(ctx context.Context, centerID string) ([]domain.Payment, error)
+	// ListPaymentsByPass — 한 패스에 귀속된 결제만(v2.38, P74). 환불 정산·계약가 상한·계약서 조립은
+	// 패스 1건의 결제만 필요한데 종전엔 센터 전체 결제를 읽고 Go에서 걸렀다 — 센터의 누적 결제
+	// 수에 비례해 환불 견적 1건이 비싸지는 자리다. 정렬은 ListPayments와 같은 규칙(문서 ID).
+	ListPaymentsByPass(ctx context.Context, centerID, passID string) ([]domain.Payment, error)
+	// ListPaymentsByMember — 한 회원의 결제만(v2.38, P74). 앱 마이 탭이 회원마다 부르는 경로가 센터
+	// 전체 결제를 읽지 않게 한다. 정렬은 ListPayments와 같은 규칙.
+	ListPaymentsByMember(ctx context.Context, centerID, memberID string) ([]domain.Payment, error)
 
 	// ---- 전자계약(Contract, v1.1 정합 패치) ----
 	// CreateContract — 계약 문서 하나만 만든다. **수동 생성 경로에서는 쓰지 않는다**

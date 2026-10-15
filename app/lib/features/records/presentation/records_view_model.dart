@@ -74,9 +74,40 @@ class RecordsViewModel extends _$RecordsViewModel {
   }
 
   /// 인바디 기록 삭제 — 같은 규약(성공 시에만 무효화).
-  Future<Result<void>> deleteInbody(String id) async {
+  ///
+  /// **같은 기록의 삭제가 진행 중이면 그 결과를 함께 받는다**(P73). 서버 왕복 동안 행이 화면에
+  /// 남아 있어 "삭제 → 삭제하기"를 한 번 더 하면 두 번째 DELETE가 이미 없는 문서를 만나
+  /// 400대로 돌아왔고, 방금 성공한 삭제에 "삭제 실패" 토스트가 떴다("되돌릴 수 없어요"라고
+  /// 강조한 화면에서 성공과 모순되는 안내). 성공 즉시 행을 목록에서 빼기도 한다 — 재조회가
+  /// 끝나기 전에 두 번째 탭이 들어갈 자리를 없앤다.
+  Future<Result<void>> deleteInbody(String id) =>
+      // 블록 본문이어야 한다: `=> _deletingInbody.remove(id)`는 지도에 든 **이 Future 자신**을
+      // 돌려주고, whenComplete는 콜백이 돌려준 Future를 기다리므로 자기 자신을 기다리다 영원히
+      // 끝나지 않는다(자문자답 라운드에서 잡음).
+      _deletingInbody[id] ??= _deleteInbody(id).whenComplete(() {
+        _deletingInbody.remove(id);
+      });
+
+  final _deletingInbody = <String, Future<Result<void>>>{};
+
+  Future<Result<void>> _deleteInbody(String id) async {
     final result = await ref.read(recordsRepositoryProvider).deleteInbody(id);
-    if (result case Ok()) refresh();
+    // 왕복 중 provider가 폐기됐으면(로그아웃) 갱신할 상태가 없다 — 결과만 돌려준다.
+    if (!ref.mounted) return result;
+    if (result case Ok()) {
+      final current = state.value;
+      if (current != null) {
+        state = AsyncData(RecordsData(
+          workoutLogs: current.workoutLogs,
+          homeworkWeeks: current.homeworkWeeks,
+          inbodyRecords: current.inbodyRecords.where((r) => r.id != id).toList(growable: false),
+          bodyPhotos: current.bodyPhotos,
+          homeworkWeeksFailed: current.homeworkWeeksFailed,
+          bodyPhotosFailed: current.bodyPhotosFailed,
+        ));
+      }
+      refresh();
+    }
     return result;
   }
 }

@@ -68,8 +68,14 @@ store/
 
 5. **[권장] iOS APNs 인증 키 업로드** — Firebase 콘솔 > 프로젝트 설정 > 클라우드 메시징 >
    Apple 앱 구성 > APNs 인증 키(.p8). 없으면 iOS 전화 인증이 사일런트 푸시 대신
-   **reCAPTCHA 웹뷰**로 떨어진다(동작은 하지만 사용자에게 한 단계가 더 보인다 —
-   URL 스킴은 이미 넣어 뒀다). 심사에는 지장 없다.
+   **reCAPTCHA 웹뷰**로 떨어진다. 심사에는 지장 없다(심사 번호는 앱 검증을 건너뛴다).
+   > ⚠️ **정정(P75, 2026-10-16)**: 종전 문구 "동작은 하지만 한 단계가 더 보인다"는 **틀렸다.** 복귀 URL이
+   > go_router로 새어 화면 전체가 "Page Not Found"가 됐고, **iOS 실번호 가입·로그인이 전부 막혀 있었다**
+   > (2026-10-14 실사용자 제보, 실기기 재현). `Info.plist` `FlutterDeepLinkingEnabled=false`로 고쳤다 — 지금은 동작하고
+   > 사파리 시트가 한 단계 더 보인다. 그 시트를 없애려면 키 업로드만으로는 안 된다: 앱에 **Push Notifications
+   > capability(aps-environment 엔타이틀먼트)가 아직 없다**(서명된 산출물 확인). 키 업로드 + Xcode Runner 타깃에
+   > Push Notifications(+ Background Modes › Remote notifications) 추가를 **함께** 해야 한다 — 엔타이틀먼트만 넣고
+   > 키가 없으면 사일런트 푸시를 기다리다 타임아웃 뒤 reCAPTCHA로 가 더 느려진다.
    - iOS teamId(ZG9DP757ZM)는 등록 완료(2026-08-30).
    - App Store ID는 앱 생성 후 채우면 된다(선택).
 
@@ -90,7 +96,8 @@ bash store/scripts/build-release.sh ios       # → build/ios/ipa/*.ipa + 아카
 > 컴파일돼 **통합테스트가 앱으로 올라갔고** 1.0 (3)이 2.1(a)로 리젝됐다. 방어선 3겹:
 > ① `build-release.sh ios`가 `flutter build ipa`로 xcconfig를 다시 쓴다 ② Xcode 빌드 페이즈 가드
 > `app/ios/scripts/check_release_target.sh`가 Release/Profile에서 테스트 진입점·localhost를 거부한다
-> ③ `store/scripts/verify-ios-archive.sh`가 산출물에서 프로덕션 주소·로컬 주소·`integration_test` 잔재·심사 번호를 검사한다.
+> ③ `store/scripts/verify-ios-archive.sh`가 산출물에서 프로덕션 주소·로컬 주소·`integration_test` 잔재·심사 번호를 검사한다
+> (P75부터: reCAPTCHA 복귀 스킴이 번들 GoogleService-Info.plist 앱 ID와 맞는지 · `FlutterDeepLinkingEnabled=false`인지도).
 > 부득이 Organizer로 만들었다면 업로드 전에 `bash store/scripts/verify-ios-archive.sh ~/Library/Developer/Xcode/Archives/<날짜>/<이름>.xcarchive`.
 릴리스 기본값이 이미 프로덕션 API이고(`api_config.dart`), 디버그만 로컬을 봅니다 —
 스크립트는 `DEV_SESSION=false`만 강제합니다. 스테이징으로 돌리려면

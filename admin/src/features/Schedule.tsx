@@ -210,8 +210,11 @@ export function Schedule() {
           <ErrorState error={slotsQ.error} onRetry={() => void slotsQ.refetch()} />
         ) : (
           <div
-            className="grid gap-1.5 text-[11px]"
-            style={{ gridTemplateColumns: `44px repeat(${laneCols}, 1fr)` }}
+            // 레인당 최소 폭 + 가로 스크롤(P73): 레인 수는 정책(slot_capacity 1~10)이라 폰 폭에서
+            // 1fr만 쓰면 레인 6개 이상에서 회원명이 글자 단위로 세로로 눌린다. 좁으면 가로로
+            // 스크롤하게 두는 편이 읽을 수 있다(BodyPhotos 포즈 타일과 같은 처리).
+            className="grid gap-1.5 overflow-x-auto text-[11px]"
+            style={{ gridTemplateColumns: `44px repeat(${laneCols}, minmax(72px, 1fr))` }}
           >
             <div />
             {Array.from({ length: laneCols }, (_, i) => (
@@ -249,7 +252,16 @@ export function Schedule() {
       <RecurringPanel hours={hours} />
 
       {modal?.mode === "create" && (
-        <CreateBookingModal slotKey={modal.slotKey} hours={hours} date={date} onClose={() => setModal(null)} />
+        // 이미 조회해 둔 슬롯을 그대로 넘긴다(추가 요청 없음) — 시간 셀렉트가 잔여 레인을
+        // 말하고 만석은 못 고르게 하기 위해서다. 그리드가 아는 사실을 모달만 모르고 있었다.
+        <CreateBookingModal
+          slotKey={modal.slotKey}
+          hours={hours}
+          date={date}
+          slotByHour={slotByHour}
+          capacity={capacity}
+          onClose={() => setModal(null)}
+        />
       )}
       {modal?.mode === "manage" && (
         <ManageBookingModal
@@ -344,11 +356,17 @@ function CreateBookingModal({
   slotKey: initialSlotKey,
   hours,
   date,
+  slotByHour,
+  capacity,
   onClose,
 }: {
   slotKey: string;
   hours: number[];
   date: string;
+  /** 그리드가 이미 조회한 그날 슬롯(시각 → Slot) — 추가 요청 없이 잔여를 계산한다. */
+  slotByHour: Map<number, Slot>;
+  /** 슬롯이 아직 없는 시간대의 잔여 기준(센터 정책 slot_capacity 폴백까지 호출부가 계산). */
+  capacity: number;
   onClose: () => void;
 }) {
   const [hour, setHour] = useState(slotKeyToHour(initialSlotKey));
@@ -377,6 +395,26 @@ function CreateBookingModal({
   // 받는 대신 이유와 해법을 먼저 보여준다.
   const passTrainerRetired =
     !!selectedPass && !isStaffActive(staffQ.data?.find((s) => s.uid === selectedPass.trainer_id));
+
+  // 시간대별 잔여 레인. 이 창은 운영시간을 잔여 없이 전부 나열해서, 만석 시간을 고르고 [예약
+  // 확정]을 눌러야 서버 400을 받았다 — 같은 창이 퇴사 코치는 사전에 막으면서 용량만 왕복에
+  // 맡기고 있었다. 슬롯이 없는 시간(그날 예약 0건)은 capacity 그대로가 잔여다.
+  // 취소된 예약은 teams에서 빠지므로 teams.length가 곧 사용 중인 레인 수다(types.ts SlotTeam).
+  const remainingAt = (h: number): number => {
+    const slot = slotByHour.get(h);
+    if (!slot) return capacity;
+    // 정책 변경 이력 등으로 teams가 capacity를 넘겨 저장된 슬롯이 있다 — 음수 잔여는 만석으로 접는다.
+    return Math.max(0, slot.capacity - slot.teams.length);
+  };
+  // 선택 중인 시간이 만석이면 확정 자체를 막는다(서버 400의 사전 차단). 초기 slotKey가 만석
+  // 슬롯일 수 있으므로(그리드의 다른 자리에서 [예약 (대행)]을 눌러 들어온 경우) 셀렉트 잠금만으로는 부족하다.
+  const hourFull = remainingAt(hour) <= 0;
+  // 서버의 두 번째 규칙: **트레이너는 같은 시간 1팀만**. 패스가 담당을 정하는 구조라 이 창엔
+  // 트레이너 셀렉트가 없어, 회원권을 고른 뒤에야 알 수 있다 — 잔여가 남았는데도 400이 나는
+  // 유일한 경로라 별도 문장으로 말한다(레인 잔여와 겹치지 않는 다른 이유다).
+  const trainerBusy =
+    !!selectedPass &&
+    (slotByHour.get(hour)?.teams ?? []).some((t) => t.trainer_id === selectedPass.trainer_id);
   const pending = createBooking.isPending || createRecurring.isPending;
   const error = createBooking.error ?? createRecurring.error;
 
@@ -403,7 +441,7 @@ function CreateBookingModal({
 
   if (createRecurring.isSuccess) {
     return (
-      <Modal open onClose={onClose} title="예약 생성 (대행)">
+      <Modal open onClose={onClose} closeDisabled={createBooking.isPending || createRecurring.isPending} title="예약 생성 (대행)">
         <div className="space-y-3">
           <p className="text-[12.5px] text-ok">
             <Check className="mr-1 inline h-3.5 w-3.5" />
@@ -422,17 +460,28 @@ function CreateBookingModal({
   }
 
   return (
-    <Modal open onClose={onClose} title="예약 생성 (대행)">
+    <Modal open onClose={onClose} closeDisabled={createBooking.isPending || createRecurring.isPending} title="예약 생성 (대행)">
       <div className="space-y-3">
         <div>
           <label className="mb-1 block text-[11px] text-muted">시간</label>
           <Select value={hour} onChange={(e) => setHour(Number(e.target.value))}>
-            {hours.map((h) => (
-              <option key={h} value={h}>
-                {h}:00
-              </option>
-            ))}
+            {hours.map((h) => {
+              const left = remainingAt(h);
+              return (
+                // 만석은 목록에서 지우지 않고 **못 고르게만** 한다 — 사라지면 "그 시간이 원래
+                // 없는 것"으로 읽혀 대표가 운영시간 설정을 의심하게 된다. 이유를 붙여 남긴다.
+                <option key={h} value={h} disabled={left <= 0}>
+                  {h}:00 · {left > 0 ? `잔여 ${left}레인` : "만석"}
+                </option>
+              );
+            })}
           </Select>
+          {hourFull && (
+            <p className="mt-1 text-[10.5px] text-warn">
+              {hour}:00은 레인이 모두 찼어요 — 다른 시간을 고르거나, 설정에서 시간당 레인 수를
+              늘려주세요.
+            </p>
+          )}
         </div>
         <div>
           <label className="mb-1 block text-[11px] text-muted">회원</label>
@@ -478,6 +527,12 @@ function CreateBookingModal({
               이 회원권의 담당이 퇴사 처리됐어요 — 설정·직원에서 담당을 이관한 뒤 예약할 수 있어요.
             </p>
           )}
+          {selectedPass && trainerBusy && !passTrainerRetired && (
+            <p className="mt-1 text-[10.5px] text-warn">
+              {staffName(selectedPass.trainer_id)} 코치는 {hour}:00에 이미 수업이 있어요 — 한
+              코치는 같은 시간에 1팀만 맡을 수 있습니다. 다른 시간을 골라주세요.
+            </p>
+          )}
         </div>
 
         <label className="flex items-center gap-2 text-[12.5px]">
@@ -505,7 +560,12 @@ function CreateBookingModal({
 
         <Button
           className="w-full"
-          disabled={!memberId || !passId || pending || passTrainerRetired}
+          // 만석·코치 중복은 서버가 400으로 막는 조건이다 — 확정을 눌러 실패를 배우게 하지
+          // 않는다(퇴사 코치 사전 차단과 같은 자리). 고정 스케줄도 첫 회차가 이 슬롯에 깔리므로
+          // 같은 판정을 쓴다.
+          disabled={
+            !memberId || !passId || pending || passTrainerRetired || hourFull || trainerBusy
+          }
           onClick={submit}
         >
           {repeatWeekly ? <Repeat className="h-4 w-4" /> : <Plus className="h-4 w-4" />}{" "}
@@ -554,7 +614,7 @@ function ManageBookingModal({
   const err = complete.error ?? noshow.error ?? cancel.error;
 
   return (
-    <Modal open onClose={onClose} title="예약 상세">
+    <Modal open onClose={onClose} closeDisabled={complete.isPending || noshow.isPending || cancel.isPending} title="예약 상세">
       <div className="space-y-3 text-sm">
         <div>
           <div className="text-[15px] font-bold">
@@ -601,12 +661,18 @@ function ManageBookingModal({
                 <XCircle className="h-3.5 w-3.5" /> 예약 취소
               </Button>
             </div>
+            {/* 확인 패널이 열려 있는 **동안에는** 체크를 못 바꾼다. 종전엔 취소 확인 중에만
+                잠갔는데, 노쇼 확인 중에는 켜진 채로 남아 있었다 — waive는 취소 뮤테이션에만
+                실리는 값이라(useNoshowBooking은 보내지 않는다) 체크를 켜고 [노쇼 처리 확정]을
+                눌러도 1회 차감과 유예 소진이 그대로 일어난다. "페널티 없이"라고 적힌 칸이
+                켜져 있는데 페널티가 붙는 화면이라, 되돌리는 동사가 없는 동작 앞에서 가장
+                위험한 종류의 거짓말이었다. 아래 노쇼 패널이 무엇을 써야 하는지도 말한다. */}
             <label className="flex items-center gap-2 text-[11.5px] text-muted">
               <input
                 type="checkbox"
                 checked={waiveCancel}
                 onChange={(e) => setWaiveCancel(e.target.checked)}
-                disabled={confirmAction === "cancel"}
+                disabled={confirmAction !== null}
               />
               페널티 없이 취소 (운영 사유)
             </label>
@@ -618,6 +684,15 @@ function ManageBookingModal({
                   (센터 정책상 최초 1회는 유예로 기록되며, 그 경우 유예가 소진돼요). 되돌리는
                   기능이 없어요.
                 </p>
+                {/* 체크가 켜져 있으면 대표는 "이번 노쇼는 무차감"이라고 읽는다 — 그 오해를
+                    확정 버튼 **위에서** 끊고, 무차감으로 처리하려던 사람의 올바른 동사를 가리킨다. */}
+                {waiveCancel && (
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-warn">
+                    "페널티 없이 취소"를 켜 두셨지만 <b>노쇼에는 적용되지 않아요</b> — 노쇼는
+                    항상 차감됩니다. 차감 없이 정리하려면 "취소"를 눌러 이 패널을 닫고{" "}
+                    <b>[예약 취소]</b>로 처리하세요.
+                  </p>
+                )}
                 <div className="mt-2 flex gap-2">
                   <Button
                     size="sm"

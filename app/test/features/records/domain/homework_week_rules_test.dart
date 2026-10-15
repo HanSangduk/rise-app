@@ -53,5 +53,25 @@ void main() {
     test('체크가 하나도 없으면 빈 목록', () {
       expect(HomeworkWeekRules.summarize(now: now, checks: const []), isEmpty);
     });
+
+    // P73: 주 경계 산술이 기기 서머타임에 흔들리지 않는다. 종전(로컬 `DateTime.subtract(days: 7)`)은
+    // `TZ=America/New_York`에서 2026-03-08(일, 봄 전환일) 체크가 지난 주 끝(03-07 23:00으로
+    // 1시간 밀림)보다 뒤이면서 이번 주 시작(03-09)보다 앞이라 **어느 주에도 들지 않았다**.
+    // ⚠️ 호스트가 KST면 종전 코드도 통과한다 — KST 아닌 TZ로도 한 번 돌리는 것까지가 검증이다.
+    test('서머타임 전환일(2026-03-08)의 체크가 지난 주에 온전히 집계된다', () {
+      final wed = DateTime(2026, 3, 11); // 수요일 → 이번 주 03-09(월)~03-15(일), 지난 주 03-02~03-08
+      final checks = [
+        HomeworkCheckDay(date: DateTime(2026, 3, 2), done: const [true]), // 지난 주 월
+        HomeworkCheckDay(date: DateTime(2026, 3, 8), done: const [true, false]), // 지난 주 일 = 전환일
+        HomeworkCheckDay(date: DateTime(2026, 3, 9), done: const [true]), // 이번 주 월
+      ];
+
+      final weeks = HomeworkWeekRules.summarize(now: wed, checks: checks);
+
+      expect(weeks.map((w) => w.label).toList(), ['이번 주', '지난 주']);
+      expect(weeks[0].total, 1);
+      expect(weeks[1].done, 2, reason: '전환일(03-08) 체크가 지난 주에서 빠졌다');
+      expect(weeks[1].total, 3);
+    });
   });
 }

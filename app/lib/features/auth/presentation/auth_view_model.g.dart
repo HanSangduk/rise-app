@@ -278,7 +278,7 @@ final class AuthViewModelProvider
   }
 }
 
-String _$authViewModelHash() => r'b0c1a8aa8189a5a09c35433723fc5a64f18e6a0d';
+String _$authViewModelHash() => r'140391f385e696cf8e5dcf4c924a4a805d6207db';
 
 /// 전화번호 → 인증번호 → 센터 자동매칭 → 이름확인(P48) 전체 흐름을 관리.
 /// 화면 3개(phone/code/center_confirm)가 이 하나의 Notifier를 공유한다.

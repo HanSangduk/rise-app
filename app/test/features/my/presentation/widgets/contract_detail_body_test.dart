@@ -4,6 +4,7 @@
 // 유지" — 없는 걸 있는 척하지 않는다는 원래 판단).
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rise_member/features/my/domain/my_models.dart';
 import 'package:rise_member/features/my/presentation/widgets/contract_detail_sheet.dart';
@@ -43,13 +44,16 @@ void main() {
       );
 
   Future<void> open(WidgetTester tester, ContractItem c, {FakeAssetBundle? bundle}) async {
-    Widget app = MaterialApp(
-      theme: ThemeData(fontFamily: 'Pretendard'),
-      home: Scaffold(
-        body: Builder(
-          builder: (context) => TextButton(
-            onPressed: () => showContractDetailSheet(context, contract: c, penaltyRate: 0.1),
-            child: const Text('열기'),
+    // showRiseSheet는 세션 감시자(_SessionSheetGuard)를 달아 연다 — 앱과 같은 DI 루트가 필요하다.
+    Widget app = ProviderScope(
+      child: MaterialApp(
+        theme: ThemeData(fontFamily: 'Pretendard'),
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showContractDetailSheet(context, contract: c, penaltyRate: 0.1),
+              child: const Text('열기'),
+            ),
           ),
         ),
       ),

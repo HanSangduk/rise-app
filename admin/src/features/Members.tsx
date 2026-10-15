@@ -122,6 +122,27 @@ const UNKNOWN_LABEL = "확인 필요";
 /// 두 곳을 함께 고쳐야 하는 값이므로 옮길 일이 생기면 Schedule.tsx와 같이 옮긴다.
 const UNRESOLVED_STAFF = "(담당 미확인)";
 
+/// 이 계약에 **계약서 본문이 찍혔는가**(스탬프 = template_version 확정).
+///
+/// 서버 규약(backend service.go buildContractForPass·SendContract): 회원권 발급 시 자동 생성되는
+/// 계약은 결제 2키(결제방법·납부일정)가 아직 없어 "전부-아니면-전무" 가드가 스탬프를 **거의 항상
+/// 스킵**한다 — 첫 완전 스탬프는 **결제 기록 뒤 운영자가 [재발송]을 한 번 더 누를 때** 찍히는 것이
+/// 정상 경로다. 사업자 정보 12칸이 비었거나 시설 신고 상태가 `unknown`이면 재발송해도 스킵된다
+/// (contractSkipFacilityUnknown — 모르는 상태로 문서를 만들지 않는다).
+///
+/// 그 사이 계약은 status=sent라 화면상 "서명 대기"로 보이지만, 회원이 앱에서 여는 문서에는
+/// **본문이 없다**. 배지 하나로 그 상태를 드러내지 않으면 대표는 발송을 끝냈다고 믿는다.
+///
+/// 타입 캐스팅인 이유: domain.Contract는 template_version을 omitempty 없이 늘 내려주는데
+/// (빈 값 = 스탬프 전 레거시), 어드민 `Contract` 인터페이스에는 아직 그 필드가 없다.
+/// lib/types.ts에 필드가 정식으로 추가되면 이 헬퍼의 캐스팅만 지우면 된다.
+// template_version이 비어 있으면 계약서 **본문이 아직 안 찍힌** 상태다(요약 고지만 발송).
+// 옵셔널 체이닝을 남겨 두는 이유: 구버전 서버가 이 키 없이 응답할 수 있고, 그때 undefined를
+// "미발행"으로 읽는 것이 안전한 방향이다(찍혔다고 단언하지 않는다).
+function contractStamped(c: Contract): boolean {
+  return typeof c.template_version === "string" && c.template_version.trim() !== "";
+}
+
 // focusJoinRequestId — 대시보드 "가입 요청 대기" 줄의 이름 클릭 → 상단 큐에서 그 행 강조(P69). 같은
 // 리마운트 규약이라 초기값처럼 써도 되지만 큐 컴포넌트가 직접 받아 "이미 처리됨"까지 판정한다.
 export function Members({
@@ -187,17 +208,25 @@ export function Members({
   // 담당 필터 칩 — **재직자만** 새로 고를 수 있다(v2.0: GET /v1/staff는 inactive도 준다).
   // 다만 이미 그 사람으로 필터가 걸린 상태에서 퇴사 처리가 들어오면 칩이 사라져 "왜 목록이
   // 비었는지" 알 수 없어지므로, 선택 중인 퇴사자 칩은 "(퇴사)" 표기로 남겨 해제할 수 있게 한다.
-  const trainers = (staffQ.data ?? []).filter(
-    (s) => (isOwner || s.uid === me?.uid) && (isStaffActive(s) || s.uid === trainerFilter),
+  const trainers = useMemo(
+    () =>
+      (staffQ.data ?? []).filter(
+        (s) => (isOwner || s.uid === me?.uid) && (isStaffActive(s) || s.uid === trainerFilter),
+      ),
+    [staffQ.data, isOwner, me?.uid, trainerFilter],
   );
   // 미배정 카운트에서 탈퇴자를 뺀다 — 가명화가 trainer_id를 ""로 회수하므로(계약 v2.11),
   // 거르지 않으면 탈퇴자 전원이 "담당 배정이 필요한 회원"으로 잡혀 영원히 줄지 않는 할 일이 된다.
   // 서버 stats.unassigned도 같은 이유로 탈퇴자를 제외한다(두 숫자가 갈리면 안 된다).
-  const unassignedCount = (membersQ.data ?? []).filter(
-    (m) => !m.trainer_id && m.status !== "withdrawn",
-  ).length;
-  const activeCount = (membersQ.data ?? []).filter((m) => m.status === "active").length;
-  const withdrawnCount = (membersQ.data ?? []).filter((m) => m.status === "withdrawn").length;
+  // 세 카운트는 회원 배열이 바뀔 때만 다시 센다(P74) — 검색어 한 글자마다 전체를 세 번 훑지 않는다.
+  const { unassignedCount, activeCount, withdrawnCount } = useMemo(() => {
+    const all = membersQ.data ?? [];
+    return {
+      unassignedCount: all.filter((m) => !m.trainer_id && m.status !== "withdrawn").length,
+      activeCount: all.filter((m) => m.status === "active").length,
+      withdrawnCount: all.filter((m) => m.status === "withdrawn").length,
+    };
+  }, [membersQ.data]);
 
   return (
     <div>
@@ -414,6 +443,15 @@ export function Members({
           initial={formOpen === "create" ? undefined : formOpen}
           staff={staffQ.data ?? []}
           onClose={() => setFormOpen(null)}
+          // 손등록에도 앱 승인(onApproved)과 **같은 세 줄**을 준다. 종전엔 모달만 닫혀서, 담당
+          // 필터가 특정 트레이너로 걸려 있으면 방금 만든 미배정 회원이 목록에서 걸러져 **등록이
+          // 실패한 것처럼** 보였다(다시 등록 → 중복). 회원권 발급·담당 배정이 곧바로 이어져야
+          // 하는 자리라 상세를 열어 다음 행동으로 잇는다.
+          onCreated={(m) => {
+            setQ("");
+            setTrainerFilter("all");
+            setSelectedId(m.id);
+          }}
         />
       )}
     </div>
@@ -576,7 +614,13 @@ function MemberDetail({
           회원권 {member.passes.length}개 — 트레이너별 바인딩
         </div>
         {!member.passes.length ? (
-          <EmptyState>등록된 회원권이 없습니다.</EmptyState>
+          // "없습니다"로 끝나면 다음 행동이 어디 있는지 화면이 말하지 않는다 — 바로 아래
+          // 버튼이 유일한 입구인데 이름이 "추가 계약(재등록)"이라 첫 계약인 사람에게는
+          // 자기 것이 아닌 버튼으로 읽힌다. 그 버튼을 가리켜 준다(라벨도 아래에서 갈랐다).
+          <EmptyState>
+            아직 회원권이 없어요 — 아래 <b className="text-ink">"회원권 발급 · 계약"</b>으로 첫
+            회원권을 끊고 계약서를 보낼 수 있어요.
+          </EmptyState>
         ) : (
           <div className="space-y-1.5">
             {member.passes.map((p) => {
@@ -609,6 +653,15 @@ function MemberDetail({
                       잔여 {p.remaining}/{p.total_sessions}회 · ~{p.valid_until} · 계약가{" "}
                       {formatCurrency(p.paid_amount)}
                     </div>
+                    {/* v2.37(P73): 환불 마감이 정산한 실제 환불액 — 종전엔 이 숫자가 환불 완료 화면에만
+                        떴다가 사라져, 나중에 "얼마 돌려줬지"를 확인할 자리가 없었다. 구서버 데이터
+                        (필드 없음)는 조용히 생략 — 0원을 지어내지 않는다. */}
+                    {p.status === "refunded" && p.refunded_amount != null && (
+                      <div className="mt-0.5 text-[11px] text-danger">
+                        환불액 {formatCurrency(p.refunded_amount)}
+                        {p.refunded_at ? ` · ${p.refunded_at.slice(0, 10)} 마감` : ""}
+                      </div>
+                    )}
                     {p.holds.length > 0 && (
                       <div className="mt-1 text-[10.5px] text-muted">
                         정지 이력 {p.holds.length}회:{" "}
@@ -652,10 +705,16 @@ function MemberDetail({
           <span className="text-[11px] text-muted">계약 · 결제</span>
           {/* P38: 탈퇴 회원에겐 추가 계약(재등록) 입구를 없앤다 — 서버가 400으로 거부한다
               (guardMemberNotWithdrawn). 눌러보고야 실패를 아는 버튼을 남기지 않는다(위 수정
-              버튼 선례). 아래 계약·결제 목록은 5년 보존 기록 열람이라 그대로 남는다. */}
+              버튼 선례). 아래 계약·결제 목록은 5년 보존 기록 열람이라 그대로 남는다.
+
+              라벨은 **회원권이 있느냐**로 갈린다: 이 버튼이 첫 회원권 발급의 유일한 입구인데
+              이름이 늘 "추가 계약(재등록)"이라, 회원권 0개인 사람 앞에서 "추가"도 "재등록"도
+              사실이 아니었다 — 대표는 자기가 찾는 버튼이 아니라고 읽고 지나쳤다. 동작은 같고
+              말만 그 사람의 상황에 맞춘다. */}
           {!isWithdrawn(member) && (
             <Button size="sm" onClick={() => setRegisterOpen(true)}>
-              <Plus className="h-3.5 w-3.5" /> 추가 계약(재등록)
+              <Plus className="h-3.5 w-3.5" />{" "}
+              {member.passes.length ? "추가 계약(재등록)" : "회원권 발급 · 계약"}
             </Button>
           )}
         </div>
@@ -667,7 +726,13 @@ function MemberDetail({
         ) : contractsQ.isError ? (
           <ErrorState error={contractsQ.error} onRetry={() => void contractsQ.refetch()} />
         ) : !contractsQ.data?.length ? (
-          <EmptyState>등록된 계약이 없습니다.</EmptyState>
+          // 빈 목록도 "왜 비었고 다음에 무엇을 하는지"까지 말한다 — 계약은 회원권 발급과 함께
+          // 자동 생성되므로, 여기가 비었다는 건 아직 회원권을 끊지 않았다는 뜻이다.
+          <EmptyState>
+            {member.passes.length
+              ? "계약 기록이 없어요 — 회원권 발급 전에 만들어진 회원권이면 계약서가 없을 수 있어요."
+              : '계약이 아직 없어요 — 위 "회원권 발급 · 계약"으로 회원권을 끊으면 계약서가 함께 만들어져요.'}
+          </EmptyState>
         ) : (
           <Table>
             <THead>
@@ -691,6 +756,13 @@ function MemberDetail({
                   <TR key={c.id}>
                     <TD className="font-bold">
                       {c.product}
+                      {/* voided는 무효 처리된 계약이라 본문 유무를 따질 일이 없다 — 경고를 달면
+                          "고쳐야 할 것"으로 읽혀 재발송(400)을 시도하게 만든다. */}
+                      {c.status !== "voided" && !contractStamped(c) && (
+                        <Badge tone="warn" className="ml-1.5 font-normal">
+                          본문 미발행
+                        </Badge>
+                      )}
                       <div className="text-[10.5px] font-normal text-muted">
                         {/* v1.5: 계약가 + 서명 요율 스냅샷(회원 동의 요율 — 정책 변경 비소급).
                             null = 레거시(v1.5 이전 — 스냅샷 없음, 정산 시 현재 정책 폴백) → "—",
@@ -754,6 +826,18 @@ function MemberDetail({
         )}
         {/* 발송 실패는 실패한 계약 행 안에 붙인다(위 rowFailed) — 목록 아래 한 곳이면 계약이
             여러 건일 때 무엇이 실패했는지 알 수 없다(회차 납부 에러와 같은 원칙). */}
+        {/* "본문 미발행" 배지가 하나라도 있으면 **무엇을 눌러야 낫는지**를 목록 아래에서 말한다.
+            배지만 있으면 대표는 고장으로 읽고 문의하거나, 더 나쁘게는 그냥 넘긴다 — 회원이 서명한
+            문서에 본문이 없는 채로 거래가 끝난다. 재발송이 스탬프를 (재)확정하는 동사다
+            (service.go SendContract), 사업자 정보·시설 신고가 비면 재발송해도 안 찍힌다. */}
+        {contractsQ.data?.some((c) => c.status !== "voided" && !contractStamped(c)) && (
+          <p className="mt-1 rounded-[10px] border border-warn/40 bg-warn/[0.08] px-3 py-2 text-[10.5px] leading-[1.8] text-warn">
+            <b>본문 미발행</b> 계약이 있어요 — 회원이 앱에서 여는 문서에 계약서 본문이 아직 찍히지
+            않은 상태예요. 결제 기록이 끝난 뒤 위 <b>[재발송]</b>을 한 번 누르면 그 시점의 내용으로
+            본문이 확정됩니다. 눌러도 이 표시가 남으면 설정에서 <b>사업자 정보(12칸)</b>와{" "}
+            <b>체육시설 신고 상태</b>를 채워주세요 — 둘 중 하나라도 비면 본문을 찍지 않습니다.
+          </p>
+        )}
 
         <div className="mt-2.5 mb-1 flex items-center gap-1 text-[10.5px] text-muted">
           <CreditCard className="h-3 w-3" /> 결제 목록
@@ -763,7 +847,11 @@ function MemberDetail({
         ) : paymentsQ.isError ? (
           <ErrorState error={paymentsQ.error} onRetry={() => void paymentsQ.refetch()} />
         ) : !paymentsQ.data?.length ? (
-          <EmptyState>결제 기록이 없습니다.</EmptyState>
+          <EmptyState>
+            {member.passes.length
+              ? '결제 기록이 없어요 — 돈은 이미 받았다면 위 버튼의 "결제만 기록"으로 남겨주세요(미기록 매출이 됩니다).'
+              : "결제 기록이 없어요 — 회원권을 발급하면서 함께 기록할 수 있어요."}
+          </EmptyState>
         ) : (
           <div className="space-y-1.5">
             {paymentsQ.data.map((pay) => {
@@ -900,7 +988,10 @@ function MemberDetail({
         ) : ledgerQ.isError ? (
           <ErrorState error={ledgerQ.error} onRetry={() => void ledgerQ.refetch()} />
         ) : !ledgerQ.data?.length ? (
-          <EmptyState>원장 기록이 없습니다.</EmptyState>
+          <EmptyState>
+            세션 원장이 비어 있어요 — 회원권 발급·수업 완료·노쇼·환불이 일어나면 여기에 한 줄씩
+            쌓입니다.
+          </EmptyState>
         ) : (
           <Table>
             <tbody>
@@ -1048,7 +1139,7 @@ function HoldModal({ pass, onClose }: { pass: Pass; onClose: () => void }) {
   const holdPass = useHoldPass();
 
   return (
-    <Modal open onClose={onClose} title={`일시정지 — ${pass.product}`}>
+    <Modal open onClose={onClose} closeDisabled={holdPass.isPending} title={`일시정지 — ${pass.product}`}>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -1102,7 +1193,7 @@ function RefundQuoteModal({ pass, onClose }: { pass: Pass; onClose: () => void }
   // 환불 완료 — 결과만 보여주고 닫는다(입력 UI로 되돌아갈 이유가 없음).
   if (refundPass.isSuccess) {
     return (
-      <Modal open onClose={onClose} title={`환불 처리 — ${pass.product}`}>
+      <Modal open onClose={onClose} closeDisabled={refundPass.isPending} title={`환불 처리 — ${pass.product}`}>
         <div className="space-y-3">
           <p className="text-[13px] font-bold text-ok">
             <Check className="mr-1 inline h-4 w-4" />
@@ -1138,8 +1229,10 @@ function RefundQuoteModal({ pass, onClose }: { pass: Pass; onClose: () => void }
     );
   }
 
+  // 잠금은 **실행**(refundPass) 중에만 — 견적 조회(refundQuote)는 읽기라 닫아도 잃는 게 없고, 느린
+  // 회선에서 견적이 도는 동안 계산기를 못 닫는 쪽이 더 나쁘다(P73).
   return (
-    <Modal open onClose={onClose} title={`환불 계산기 — ${pass.product}`}>
+    <Modal open onClose={onClose} closeDisabled={refundPass.isPending} title={`환불 계산기 — ${pass.product}`}>
       <div className="space-y-3">
         <div className="text-[11.5px] text-muted">
           {/* v1.5 어휘: paid_amount = 계약가(단가·위약금 산정 기준) — 환불액은 실수납 기준. */}
@@ -1252,10 +1345,13 @@ function MemberFormModal({
   initial,
   staff,
   onClose,
+  onCreated,
 }: {
   initial: Member | undefined;
   staff: Staff[];
   onClose: () => void;
+  /** 신규 등록 성공 — 서버가 돌려준 회원. 호출부가 검색·필터를 풀고 그 회원을 선택한다. */
+  onCreated?: (member: Member) => void;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [phone, setPhone] = useState(initial?.phone ?? "");
@@ -1302,13 +1398,24 @@ function MemberFormModal({
     } else {
       createMember.mutate(
         { ...payload, app_linked: false, status: "active", last_visit_at: null },
-        { onSuccess: onClose },
+        {
+          // 창은 성공까지 마운트돼 있어 mutate-레벨 콜백이 떨어진다(JoinRequests 승인과 같은 구조).
+          onSuccess: (created) => {
+            onCreated?.(created);
+            onClose();
+          },
+        },
       );
     }
   }
 
   return (
-    <Modal open onClose={onClose} title={initial ? "회원 정보 수정" : "회원 등록"}>
+    <Modal
+      open
+      onClose={onClose}
+      closeDisabled={createMember.isPending || updateMember.isPending}
+      title={initial ? "회원 정보 수정" : "회원 등록"}
+    >
       <div className="space-y-3">
         <div>
           <Label>이름</Label>
@@ -1586,7 +1693,7 @@ function AddContractModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`추가 계약(재등록) — ${member.name}`}>
+    <Modal open onClose={onClose} closeDisabled={pending} title={`추가 계약(재등록) — ${member.name}`}>
       <div className="space-y-3">
         {/* v1.5: 발급만 되고 결제 기록이 없는 active 패스가 있으면 "결제만 기록" 선택지 제공
             — 새로 발급하면 같은 회원권이 이중으로 생긴다(대시보드 경고 항목의 해소 경로). */}
@@ -1764,7 +1871,11 @@ function AddContractModal({
               화면에는 대표가 실제로 보게 될 말("서명 대기")로 쓴다. */}
           {payOnlyPass
             ? "기존 회원권에 결제 기록만 추가합니다 — 발급·계약서 발송은 일어나지 않아요. 분할 결제의 2차 납부는 \"결제 목록\"에서 납부 처리로 완결하세요."
-            : "회원권 발급 → 계약서 발송(서명 대기) → 결제 기록까지 한 번에 처리합니다. 분할 결제의 2차 납부는 등록 후 \"결제 목록\"에서 납부 처리로 완결하세요."}
+            : // 이 자리는 **끝났다**고 말하면 안 된다: 발급 시 자동 생성되는 계약은 결제 2키가
+              // 아직 없어 본문 스탬프가 스킵되고(service.go buildContractForPass), 본문은 결제
+              // 기록 뒤 운영자의 [재발송]에서 찍힌다. 종전 문구("한 번에 처리합니다")를 믿고
+              // 창을 닫으면 본문 없는 계약서가 회원에게 가 있는 채로 남았다.
+              '회원권 발급 → 계약서 발송(서명 대기) → 결제 기록을 이어서 처리합니다. 등록 후 계약 목록에서 [재발송]을 한 번 눌러야 계약서 본문이 확정돼요("본문 미발행" 표시가 사라집니다). 분할 결제의 2차 납부도 "결제 목록"에서 납부 처리로 완결하세요.'}
         </p>
       </div>
     </Modal>

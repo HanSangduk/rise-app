@@ -10,6 +10,10 @@ import (
 )
 
 func TestValidateRejectsFirestoreWithoutFirebaseAuth(t *testing.T) {
+	// v2.36: InitialStaffPassword가 Validate의 두 번째 검사라 **모든 케이스가 이 값을 채워야**
+	// 다른 조합을 홀로 검증할 수 있다. Load()는 항상 기본값을 채우므로 실서비스에서는 빈 값이
+	// 나오지 않는다 — 여기서만 손으로 세운다.
+	const pw = "123456"
 	cases := []struct {
 		name    string
 		cfg     Config
@@ -17,22 +21,22 @@ func TestValidateRejectsFirestoreWithoutFirebaseAuth(t *testing.T) {
 	}{
 		{
 			name:    "실 DB + dev 헤더 인증 = 사고 조합",
-			cfg:     Config{UseFirestore: true, GCPProject: "rise-prod"},
+			cfg:     Config{UseFirestore: true, GCPProject: "rise-prod", InitialStaffPassword: pw},
 			wantErr: true,
 		},
 		{
 			name:    "로컬 인메모리 개발 — 지금 그대로 뜬다",
-			cfg:     Config{},
+			cfg:     Config{InitialStaffPassword: pw},
 			wantErr: false,
 		},
 		{
 			name:    "인메모리 + Firebase 인증(토큰 디버깅) — 실 데이터가 없으니 막을 이유 없다",
-			cfg:     Config{FirebaseProject: "rise-prod"},
+			cfg:     Config{FirebaseProject: "rise-prod", InitialStaffPassword: pw},
 			wantErr: false,
 		},
 		{
 			name:    "정상 프로덕션",
-			cfg:     Config{UseFirestore: true, GCPProject: "rise-prod", FirebaseProject: "rise-prod"},
+			cfg:     Config{UseFirestore: true, GCPProject: "rise-prod", FirebaseProject: "rise-prod", InitialStaffPassword: pw},
 			wantErr: false,
 		},
 	}
@@ -88,5 +92,35 @@ func TestLoadThenValidate(t *testing.T) {
 	t.Setenv("FIREBASE_PROJECT", "rise-prod")
 	if err := Load().Validate(); err != nil {
 		t.Fatalf("정상 프로덕션 설정이 거부됨: %v", err)
+	}
+}
+
+// v2.36 — Firebase는 6자 미만 비밀번호로 계정을 만들지 못한다(Admin SDK가 요청 전에 거부:
+// "password must be a string at least 6 characters long"). 그 값으로 뜨면 **직원·센터 대표
+// 초대가 전부 실패**하는데, 실패는 첫 초대 요청까지 드러나지 않는다 — 그 시점엔 센터 문서와
+// 정책이 이미 저장돼 "센터는 생겼는데 대표가 없는" 반쪽 상태가 남는다. 그래서 기동에서 막는다.
+func TestValidateRejectsShortInitialStaffPassword(t *testing.T) {
+	for _, pw := range []string{"", "1234", "12345"} {
+		cfg := Config{InitialStaffPassword: pw}
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("InitialStaffPassword=%q: Validate()=nil, want 기동 거부", pw)
+			continue
+		}
+		if !strings.Contains(err.Error(), "INITIAL_STAFF_PASSWORD") {
+			t.Errorf("InitialStaffPassword=%q: 에러에 고칠 환경변수 이름이 없다: %v", pw, err)
+		}
+	}
+	if err := (Config{InitialStaffPassword: "123456"}).Validate(); err != nil {
+		t.Errorf("6자는 통과해야 한다(Firebase 최저 길이): %v", err)
+	}
+}
+
+// Load의 기본값이 Firebase 최저 길이를 만족해야 한다 — 환경변수를 안 주고 띄우는 로컬·CI가
+// 기동 거부에 걸리면 안 된다.
+func TestLoadDefaultInitialStaffPasswordPassesValidate(t *testing.T) {
+	t.Setenv("INITIAL_STAFF_PASSWORD", "")
+	if err := Load().Validate(); err != nil {
+		t.Fatalf("기본값으로 기동이 거부됐다: %v", err)
 	}
 }

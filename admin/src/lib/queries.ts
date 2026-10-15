@@ -270,6 +270,9 @@ export function useCompleteBooking() {
       qc.invalidateQueries({ queryKey: ["members"] });
       // 완료는 원장(complete, -1) 기록을 남긴다.
       qc.invalidateQueries({ queryKey: ["memberLedger"] });
+      // 완료 세션 수(sessions)·노쇼율 분모가 바뀐다 — 대시보드 정산 줄(TrainerPayoutLine)이
+      // 이 값 × 요율을 그대로 그리므로, 빠뜨리면 마감 시점에 60초 stale 숫자를 확언한다(P73).
+      qc.invalidateQueries({ queryKey: ["stats"] });
     },
   });
 }
@@ -283,6 +286,8 @@ export function useNoshowBooking() {
       qc.invalidateQueries({ queryKey: ["members"] });
       // 노쇼는 원장(noshow 또는 noshow_waived) 기록을 남긴다.
       qc.invalidateQueries({ queryKey: ["memberLedger"] });
+      // 노쇼율 분자·분모가 바뀐다(useCompleteBooking과 같은 이유, P73).
+      qc.invalidateQueries({ queryKey: ["stats"] });
     },
   });
 }
@@ -721,8 +726,9 @@ export function useJoinRequests(enabled = true) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) return false;
       return JOIN_REQUESTS_POLL_MS;
     },
-    // 전역 기본(refetchOnWindowFocus:false)을 이 쿼리만 뒤집는다 — 다른 창에서 일하다 돌아온
-    // 순간이 대표가 목록을 확인하는 시점이다. 전역 staleTime 15초가 연타 포커스를 흡수한다.
+    // 전역 기본도 이제 true다(main.tsx — 이 쿼리와 같은 논거로 켰다). 그래도 여기 명시적으로
+    // 남긴다: 다른 창에서 일하다 돌아온 순간이 대표가 목록을 확인하는 시점이라, 전역값이 다시
+    // 바뀌어도 이 화면의 포커스 복귀 재조회는 유지돼야 한다. 전역 staleTime이 연타 포커스를 흡수한다.
     refetchOnWindowFocus: true,
   });
 }

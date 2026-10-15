@@ -3,6 +3,7 @@ import 'package:rise_member/core/network/api_result_guard.dart';
 import 'package:rise_member/core/result/failure.dart';
 import 'package:rise_member/core/result/result.dart';
 import 'package:rise_member/core/utils/date_format.dart';
+import 'package:rise_member/core/utils/settled.dart';
 import 'package:rise_member/features/bodycheck/domain/body_check_repository.dart';
 import 'package:rise_member/features/bodycheck/domain/bodycheck_models.dart';
 import 'package:rise_member/features/records/data/records_remote_data_source.dart';
@@ -20,9 +21,17 @@ class RecordsRepositoryImpl implements RecordsRepository {
   @override
   Future<Result<RecordsData>> load(String memberId) {
     return guardApi(() async {
+      // 네 조회는 서로 독립이라 **동시에** 띄운다(P74) — 홈·마이 탭과 같은 규약. 종전엔 수업 기록 →
+      // hw-checks → 인바디 → 체형사진이 직렬이라 탭 전환마다 왕복 3회분을 그냥 기다렸다. best-effort
+      // 단위(hw-checks·체형사진은 플래그, 수업 기록·인바디는 필수)는 종전 그대로다.
+      final logsF = settleCall(() => _remote.fetchWorkoutLogs(memberId));
+      final checksF = settleCall(() => _remote.fetchHwChecks(memberId));
+      final inbodyF = settleCall(() => _remote.fetchInbody(memberId));
+      final photosF = settleCall(() => _bodyCheckRepository.fetchPhotos(memberId));
+
       // 수업 기록(GET /v1/workout-logs?member=, v1.4) — 최신 세션 먼저.
       // 날짜는 tryParse — 불량 날짜 1건이 기록 탭 전체를 죽이지 않도록 그 건만 스킵.
-      final logDtos = await _remote.fetchWorkoutLogs(memberId);
+      final logDtos = (await logsF).valueOrThrow();
       final workoutLogs = <WorkoutLog>[];
       for (final d in logDtos) {
         final date = DateTime.tryParse(d.date);
@@ -51,7 +60,7 @@ class RecordsRepositoryImpl implements RecordsRepository {
       var homeworkWeeks = const <HomeworkWeekSummary>[];
       var homeworkWeeksFailed = false;
       try {
-        final checkDtos = await _remote.fetchHwChecks(memberId);
+        final checkDtos = (await checksF).valueOrThrow();
         final checks = <HomeworkCheckDay>[];
         for (final c in checkDtos) {
           final parsed = DateTime.tryParse(c.date);
@@ -72,7 +81,7 @@ class RecordsRepositoryImpl implements RecordsRepository {
       // 없이 저장하므로("2026-8-2" 같은 값이 실제로 들어올 수 있다) 불량 1건이
       // guardApi까지 올라가 운동·인바디·체형 **세 탭 전부**를 "알 수 없는 오류"로
       // 만들고 pull-to-refresh로도 복구되지 않았다.
-      final inbodyDtos = await _remote.fetchInbody(memberId);
+      final inbodyDtos = (await inbodyF).valueOrThrow();
       final inbody = <InbodyRecord>[];
       for (final d in inbodyDtos) {
         final date = DateTime.tryParse(d.date);
@@ -107,7 +116,9 @@ class RecordsRepositoryImpl implements RecordsRepository {
       // 체형사진도 best-effort지만 실패를 "아직 촬영한 사진이 없어요"로 위장하지
       // 않는다 — 같은 파일 hw-checks와 같은 규약으로 플래그를 세워 UI에 넘긴다.
       // (valueOrNull ?? []는 실패와 0장을 구분할 수 없어 쓰지 않는다.)
-      final photosResult = await _bodyCheckRepository.fetchPhotos(memberId);
+      // fetchPhotos는 Result를 돌려주지 던지지 않는다 — settle은 예외만 값으로 접으므로 여기서
+      // 실패(Err)로 다시 편다(종전 판정과 같다).
+      final photosResult = (await photosF).valueOr(const Err<List<BodyPhotoEntry>>(UnknownFailure()));
       final List<BodyPhotoEntry> allPhotos;
       final bool bodyPhotosFailed;
       switch (photosResult) {

@@ -18,8 +18,8 @@
 // DragEvent는 React 합성 이벤트와 DOM 전역이 같은 이름이라 별칭으로 가른다 — 창 전체에 거는
 // 리스너(TrainerPhotoField)는 DOM 쪽 타입이어야 한다.
 import { useEffect, useId, useRef, useState, type DragEvent as ReactDragEvent } from "react";
-import { FirebaseError } from "firebase/app";
 import { sendPasswordResetEmail } from "firebase/auth";
+import { InitialPasswordNotice } from "./InitialPasswordNotice";
 import {
   ArrowRightLeft,
   CalendarOff,
@@ -60,6 +60,7 @@ import {
 import { ApiError, isRouteNotFound } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { auth } from "@/lib/firebase";
+import { mailErrorKo } from "@/lib/firebaseErrorKo";
 // 데스크 체크인 QR(P11 → P49) — 발급·QR 렌더·A4 인쇄 시트가 한 덩어리라 별 파일로 뺀다
 // (인쇄 포털·print 전용 CSS가 이 화면의 다른 섹션과 공유하는 게 하나도 없다).
 import { CheckinQrCard } from "@/features/CheckinQr";
@@ -193,6 +194,15 @@ export function Settings({ onOpenMembers }: { onOpenMembers?: () => void }) {
                 s.profile.title && (
                   <div className="truncate text-[10.5px] text-muted">{s.profile.title}</div>
                 )
+              )}
+              {/* 로그인 ID(v2.36). "이 사람 로그인이 안 돼요"에 대표가 답할 수 있어야 하고,
+                  오타로 초대한 주소도 여기서 드러난다. v2.36 이전에 만든 계정은 서버에 값이
+                  없으므로 **줄 자체를 그리지 않는다** — 빈 칸을 그리면 "이메일이 없는 계정"으로
+                  읽힌다(실제로는 모르는 것이다). */}
+              {s.email && (
+                <div className="truncate font-mono text-[10.5px] text-muted" title={s.email}>
+                  {s.email}
+                </div>
               )}
             </div>
           </div>
@@ -1773,7 +1783,7 @@ export function OffdaysModal({ staff, onClose }: { staff: Staff; onClose: () => 
     offdays.length !== savedSorted.length || offdays.some((d, i) => d !== savedSorted[i]);
 
   return (
-    <Modal open onClose={onClose} title={`휴무 설정 — ${staff.name}`}>
+    <Modal open onClose={onClose} closeDisabled={setOffdaysMut.isPending} title={`휴무 설정 — ${staff.name}`}>
       <div className="space-y-3">
         <div className="flex gap-2">
           <Input
@@ -2219,7 +2229,7 @@ export function ProfileModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`프로필 편집 — ${staff.name}`} wide>
+    <Modal open onClose={onClose} closeDisabled={updateProfile.isPending} title={`프로필 편집 — ${staff.name}`} wide>
       <div className="space-y-3">
         {photoEditable ? (
           <TrainerPhotoField
@@ -2390,6 +2400,9 @@ interface InviteResult {
   name: string;
   email: string;
   mailError: string | null; // null = 메일까지 정상 발송
+  // 최초 비밀번호(계약 v2.36). 서버가 이번 요청으로 **계정을 새로 만들었을 때만** 채워진다 —
+  // 비어 있으면 재초대·재고용이라 그 사람이 쓰던 비밀번호가 살아 있다.
+  initialPassword?: string;
 }
 
 // 초대 = ① 계정 생성(POST /v1/staff) + ② 비밀번호 설정 메일, 2단 플로우. 서버는 임시 비밀번호로
@@ -2442,7 +2455,7 @@ function InviteStaffModal({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      await createStaff.mutateAsync({
+      const created = await createStaff.mutateAsync({
         name: trimmedName,
         email: normalizedEmail,
         role,
@@ -2460,12 +2473,18 @@ function InviteStaffModal({ onClose }: { onClose: () => void }) {
       // 이 줄부터는 무슨 일이 있어도 "계정은 만들어진" 상태다 — 아래 실패를 초대 실패로 되돌리지 않는다.
       try {
         await sendPasswordResetEmail(auth, normalizedEmail);
-        setResult({ name: trimmedName, email: normalizedEmail, mailError: null });
+        setResult({
+          name: trimmedName,
+          email: normalizedEmail,
+          mailError: null,
+          initialPassword: created.initial_password,
+        });
       } catch (e) {
         setResult({
           name: trimmedName,
           email: normalizedEmail,
-          mailError: e instanceof FirebaseError ? e.code : e instanceof Error ? e.message : "unknown",
+          mailError: mailErrorKo(e),
+          initialPassword: created.initial_password,
         });
       }
     } catch (e) {
@@ -2476,7 +2495,7 @@ function InviteStaffModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal open onClose={onClose} title="트레이너 초대">
+    <Modal open onClose={onClose} closeDisabled={busy} title="트레이너 초대">
       {result ? (
         <div className="space-y-3">
           {result.mailError === null ? (
@@ -2487,8 +2506,9 @@ function InviteStaffModal({ onClose }: { onClose: () => void }) {
           ) : (
             <>
               <p className="text-[12.5px] text-warn">
-                <b>{result.name}</b> 님의 계정은 만들어졌지만 메일 발송에 실패했어요. 로그인 화면의
-                "비밀번호를 잊으셨나요"로 재발송할 수 있어요.
+                <b>{result.name}</b> 님의 계정은 만들어졌지만 메일 발송에 실패했어요. 아래 비밀번호로
+                바로 로그인할 수 있고, 메일이 필요하면 본인이 로그인 화면의 "비밀번호를 잊으셨나요"를
+                누르면 됩니다.
               </p>
               <p className="text-[10.5px] text-muted">
                 발송 실패 사유: {result.mailError} · 초대를 다시 누르지는 마세요 — 계정이 이미 있어
@@ -2496,6 +2516,14 @@ function InviteStaffModal({ onClose }: { onClose: () => void }) {
               </p>
             </>
           )}
+
+          {/* v2.36 — 메일이 스팸함으로 가거나 도메인 메일이 막힌 곳에서도 초대가 완결되도록,
+              최초 비밀번호를 화면에서 읽어 구두로 전달할 수 있게 한다. 메일 경로는 그대로다. */}
+          <InitialPasswordNotice
+            email={result.email}
+            password={result.initialPassword}
+            who={role === "owner" ? "대표" : "트레이너"}
+          />
           <Button className="w-full" variant="outline" onClick={onClose}>
             닫기
           </Button>
@@ -2671,7 +2699,7 @@ function StaffEditModal({
   const inputsOk = nameOk && colorOk && (!showPayout || payoutOk);
 
   return (
-    <Modal open onClose={onClose} title={`직원 정정 — ${staff.name}`}>
+    <Modal open onClose={onClose} closeDisabled={updateStaff.isPending} title={`직원 정정 — ${staff.name}`}>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -2825,7 +2853,7 @@ function TransferStaffModal({
       .map(toBookingRef)
       .sort((a, b) => a.slot_key.localeCompare(b.slot_key));
     return (
-      <Modal open onClose={onClose} title={`담당 이관 — ${from.name}`}>
+      <Modal open onClose={onClose} closeDisabled={transfer.isPending} title={`담당 이관 — ${from.name}`}>
         <div className="space-y-3">
           <p className="text-[12.5px] text-ok">
             <Check className="mr-1 inline h-3.5 w-3.5" />
@@ -2868,7 +2896,7 @@ function TransferStaffModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`담당 이관 — ${from.name}`}>
+    <Modal open onClose={onClose} closeDisabled={transfer.isPending} title={`담당 이관 — ${from.name}`}>
       <div className="space-y-3">
         <p className="text-[11.5px] text-muted">
           <b className="text-ink">{from.name}</b> 님의 담당 회원 · 유효한 회원권 · 고정 스케줄 · 예정된
@@ -3088,7 +3116,7 @@ function DeactivateStaffModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`퇴사 처리 — ${staff.name}`}>
+    <Modal open onClose={onClose} closeDisabled={deactivate.isPending} title={`퇴사 처리 — ${staff.name}`}>
       <div className="space-y-3">
         <div>
           <Label htmlFor="dc-left-at">퇴사일</Label>
@@ -3180,7 +3208,7 @@ function DeactivateStaffModal({
 function ReactivateStaffModal({ staff, onClose }: { staff: Staff; onClose: () => void }) {
   const reactivate = useReactivateStaff();
   return (
-    <Modal open onClose={onClose} title={`재입사 — ${staff.name}`}>
+    <Modal open onClose={onClose} closeDisabled={reactivate.isPending} title={`재입사 — ${staff.name}`}>
       <div className="space-y-3">
         <p className="text-[12.5px]">
           <b>{staff.name}</b> 님을 다시 재직 상태로 되돌립니다 — 로그인 계정이 열리고{" "}

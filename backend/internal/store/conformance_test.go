@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -55,6 +56,9 @@ func runStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 	})
 	t.Run("BookAtomicEnforcesPassBudget", func(t *testing.T) {
 		testBookAtomicBudget(t, newStore(t))
+	})
+	t.Run("BookAtomicEnforcesSlotRules", func(t *testing.T) {
+		testBookAtomicSlotRules(t, newStore(t))
 	})
 	t.Run("PassListOrderedByValidFrom", func(t *testing.T) {
 		testPassOrdering(t, newStore(t))
@@ -115,6 +119,12 @@ func runStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 	})
 	t.Run("ConcurrentGuardedContractCreateOnePerPass", func(t *testing.T) {
 		testConcurrentContractCreate(t, newStore(t))
+	})
+	t.Run("PaymentsFilteredByPassAndMember", func(t *testing.T) {
+		testPaymentsFiltered(t, newStore(t))
+	})
+	t.Run("HwChecksFilteredByMember", func(t *testing.T) {
+		testHwChecksByMember(t, newStore(t))
 	})
 }
 
@@ -214,6 +224,13 @@ func testEmptyIDReads(t *testing.T, st Store) {
 		"GetMember":    func() error { _, err := st.GetMember(ctx, center, ""); return err },
 		"GetSlot":      func() error { _, err := st.GetSlot(ctx, center, ""); return err },
 		"GetInbody":    func() error { _, err := st.GetInbody(ctx, center, ""); return err },
+		// v2.37(P73) — 체형사진 셋만 이 목록에서 빠져 있었고, Firestore 구현도 정확히 그 셋만
+		// checkDocID가 없었다. 목록의 사각지대가 곧 구현의 사각지대였다.
+		"GetBodyPhoto":    func() error { _, err := st.GetBodyPhoto(ctx, center, ""); return err },
+		"DeleteBodyPhoto": func() error { return st.DeleteBodyPhoto(ctx, center, "") },
+		"SaveBodyPhoto": func() error {
+			return st.SaveBodyPhoto(ctx, center, &domain.BodyPhoto{MemberID: "m1", Pose: "stand", Direction: "front", Date: "2026-09-01"})
+		},
 	} {
 		if err := get(); !errors.Is(err, ErrNotFound) {
 			t.Errorf("%s(\"\") = %v, want ErrNotFound", name, err)
@@ -1508,6 +1525,30 @@ func testCenterIdentity(t *testing.T, st Store) {
 	if bizGot.BizName != "테스트상호" {
 		t.Fatalf("센터 신원 저장 후 사업자 정보 = %+v — SaveCenter가 business를 지웠다", bizGot)
 	}
+
+	// ⑤ 읽기 시점 정규화(v2.37, P73) — status가 빈 문서(손편집·구버전)는 두 스토어 모두
+	// "active"로 승격해 돌려준다(Policy·Business·Facility·CheckinQR와 같은 규약). 종전 Memory는
+	// 저장값을 그대로 돌려줘 이 케이스에서만 운영과 답이 갈렸다.
+	blank := &domain.Center{ID: center, Name: "상태 없는 지점", Status: "", CreatedAt: time.Now().UTC()}
+	if err := st.SaveCenter(ctx, blank); err != nil {
+		t.Fatal(err)
+	}
+	got, err = st.GetCenter(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != domain.CenterStatusActive || got.ID != center {
+		t.Fatalf("빈 status 문서 GetCenter = %+v, want status=active·ID=키 원문", got)
+	}
+	list, err = st.ListCenters(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range list {
+		if c.ID == center && c.Status != domain.CenterStatusActive {
+			t.Fatalf("빈 status 문서 ListCenters 항목 = %+v, want status=active", c)
+		}
+	}
 }
 
 // testConsultRequests — 재등록/상담 요청(v2.20): 라운드트립 · 큐 정렬(오래된 순 → ID) ·
@@ -1921,4 +1962,164 @@ func testCheckinQRCoexist(t *testing.T, st Store) {
 
 func TestMemoryStoreConformance(t *testing.T) {
 	runStoreConformance(t, func(*testing.T) Store { return NewMemory() })
+}
+
+// testBookAtomicSlotRules — **같은 슬롯**의 정원·코치 중복·회원 중복(domain.CanBook)이 두 구현에서
+// 똑같이 강제되는가.
+//
+// 이 서브테스트가 없어서 P71까지 프로덕션이 무방비였다. 기존 커버리지가 비껴간 이유가 정확히
+// 하나다: testBookAtomicBudget·testConcurrentBookings는 잔여 회차(패스 예산)를 겨냥해 goroutine마다
+// **다른 slotKey**를 쓴다("202609%02d-10"). 슬롯 규칙은 같은 슬롯에 겹쳐 넣어야만 드러난다.
+//
+// Firestore 구현은 CanBook 호출 자체가 없었고, Memory 구현에만 있었다 — 전 테스트가 Memory를
+// 타므로 초록불이었다. 컨포먼스 스위트의 존재 이유가 이 계열의 구현 간 격차다.
+func testBookAtomicSlotRules(t *testing.T, st Store) {
+	ctx := context.Background()
+	center := conformanceCenter(t)
+	const slot = "20260915-10"
+	const capacity = 3
+
+	book := func(memberID, trainerID string) error {
+		return st.BookAtomic(ctx, center, slot, capacity, &domain.Booking{
+			SlotKey: slot, MemberID: memberID, TrainerID: trainerID,
+			Kind: domain.BookingKindPT, Status: domain.BookingConfirmed,
+		})
+	}
+
+	// 검사 순서에 주의: CanBook은 **정원을 먼저** 본다. 그래서 중복 두 건은 자리가 남아 있는
+	// 동안(1팀 상태) 확인해야 한다 — 만석에서 부르면 무엇을 검사하든 ErrSlotFull이 돌아와
+	// 중복 규칙이 살아 있는지 증명하지 못한다.
+	if err := book("mem_a", "t1"); err != nil {
+		t.Fatalf("1팀: %v", err)
+	}
+	// 같은 코치가 같은 시간에 두 수업 — 사람이 물리적으로 못 한다.
+	if err := book("mem_c", "t1"); !errors.Is(err, domain.ErrTrainerBusy) {
+		t.Errorf("코치 중복 = %v, want ErrTrainerBusy", err)
+	}
+	// 같은 회원이 같은 슬롯 두 번 — 예약 확정 중 끊겨 재시도하면 실제로 일어나고, 세션이 두 번 깎인다.
+	if err := book("mem_a", "t3"); !errors.Is(err, domain.ErrMemberBusy) {
+		t.Errorf("회원 중복 = %v, want ErrMemberBusy", err)
+	}
+	// 자리를 채운다(2팀 → 3팀 = 정원).
+	if err := book("mem_b", "t2"); err != nil {
+		t.Fatalf("2팀: %v", err)
+	}
+	if err := book("mem_c", "t3"); err != nil {
+		t.Fatalf("3팀: %v", err)
+	}
+	// 정원 초과 — 어드민·앱이 "만석"이라고 그린 슬롯이 실제로 만석이어야 한다.
+	if err := book("mem_d", "t4"); !errors.Is(err, domain.ErrSlotFull) {
+		t.Errorf("정원 초과 = %v, want ErrSlotFull", err)
+	}
+
+	// 저장 상태로도 확인한다(반환값만 보면 커밋된 초과분을 놓친다).
+	got, err := st.GetSlot(ctx, center, slot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || len(got.Teams) != capacity {
+		t.Errorf("슬롯 팀 수 = %v, want %d(거부된 예약이 커밋됐다)", got, capacity)
+	}
+}
+
+// ListPaymentsByPass / ListPaymentsByMember(v2.38, P74)는 무필터 ListPayments의 **부분집합이며 같은
+// 순서**여야 한다 — Memory는 맵을 훑고 Firestore는 Where로 거르는데, 두 답이 갈리면 환불 정산
+// (refundBasis)이 스토어에 따라 다른 실수납을 낸다. 다른 패스·다른 회원·다른 센터의 결제가
+// 섞여 들지 않는 것까지 본다.
+func testPaymentsFiltered(t *testing.T, st Store) {
+	ctx := context.Background()
+	center := conformanceCenter(t)
+	other := center + "_other"
+	// ID는 스토어가 정한다(Firestore는 NewDoc으로 덮어쓴다) — 기대값은 돌려받은 ID로 만든다.
+	create := func(c string, p domain.Payment) string {
+		id, err := st.CreatePayment(ctx, c, &p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	a1 := create(center, domain.Payment{MemberID: "m1", PassID: "p1", Total: 100})
+	a2 := create(center, domain.Payment{MemberID: "m1", PassID: "p1", Total: 200})
+	b1 := create(center, domain.Payment{MemberID: "m1", PassID: "p2", Total: 300})
+	_ = create(center, domain.Payment{MemberID: "m2", PassID: "p3", Total: 400})
+	// 다른 센터의 같은 pass_id·member_id — 센터 경계를 넘어 섞이면 안 된다.
+	_ = create(other, domain.Payment{MemberID: "m1", PassID: "p1", Total: 999})
+
+	ids := func(list []domain.Payment) []string {
+		out := make([]string, 0, len(list))
+		for _, p := range list {
+			out = append(out, p.ID)
+		}
+		return out
+	}
+	sorted := func(v ...string) []string { sort.Strings(v); return v }
+
+	all, err := st.ListPayments(ctx, center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 4 {
+		t.Fatalf("ListPayments = %v, want 4건(다른 센터 제외)", ids(all))
+	}
+	byPass, err := st.ListPaymentsByPass(ctx, center, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := ids(byPass), sorted(a1, a2); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("ListPaymentsByPass(p1) = %v, want %v(부분집합·문서 ID 순서)", got, want)
+	}
+	byMember, err := st.ListPaymentsByMember(ctx, center, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := ids(byMember), sorted(a1, a2, b1); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("ListPaymentsByMember(m1) = %v, want %v", got, want)
+	}
+	// 없는 키는 빈 목록(nil 아님·오류 아님) — 호출부가 len()만 본다.
+	none, err := st.ListPaymentsByPass(ctx, center, "p_none")
+	if err != nil || none == nil || len(none) != 0 {
+		t.Errorf("ListPaymentsByPass(없는 패스) = %v, %v, want 빈 슬라이스", none, err)
+	}
+}
+
+// ListHwChecksByMember(v2.38, P74부터 앱 홈 탭·통계 HW 완료율의 읽기 경로) — 그 회원 것만, 같은 순서,
+// 센터 경계 유지, 없으면 빈 슬라이스(null 아님). Memory는 키 접두사(center/member/)로, Firestore는
+// member_id 등호 쿼리로 거르므로 "m1"과 "m10"처럼 접두사가 겹치는 회원 ID가 갈리는 자리도 함께 본다.
+func testHwChecksByMember(t *testing.T, st Store) {
+	ctx := context.Background()
+	center := conformanceCenter(t)
+	other := center + "_other"
+	save := func(c string, hc domain.HwCheck) {
+		if err := st.SaveHwCheck(ctx, c, &hc); err != nil {
+			t.Fatalf("SaveHwCheck: %v", err)
+		}
+	}
+	save(center, domain.HwCheck{MemberID: "m1", HwID: "hw_b", Date: "2026-09-02", Done: []bool{true, false}})
+	save(center, domain.HwCheck{MemberID: "m1", HwID: "hw_a", Date: "2026-09-01", Done: []bool{false}})
+	save(center, domain.HwCheck{MemberID: "m10", HwID: "hw_a", Date: "2026-09-01", Done: []bool{true}})
+	save(other, domain.HwCheck{MemberID: "m1", HwID: "hw_a", Date: "2026-09-03", Done: []bool{true}})
+
+	got, err := st.ListHwChecksByMember(ctx, center, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := make([]string, 0, len(got))
+	for _, c := range got {
+		keys = append(keys, c.MemberID+"/"+c.HwID+"/"+c.Date)
+	}
+	if want := []string{"m1/hw_a/2026-09-01", "m1/hw_b/2026-09-02"}; fmt.Sprint(keys) != fmt.Sprint(want) {
+		t.Errorf("ListHwChecksByMember(m1) = %v, want %v(그 회원만 · 문서 ID 순 · m10·다른 센터 제외)", keys, want)
+	}
+	for _, c := range got {
+		if c.HwID == "hw_b" && fmt.Sprint(c.Done) != "[true false]" {
+			t.Errorf("done 배열이 왕복에서 바뀌었다: %v", c.Done)
+		}
+	}
+	none, err := st.ListHwChecksByMember(ctx, center, "m_nobody")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if none == nil || len(none) != 0 {
+		t.Errorf("체크 없는 회원 = %#v, want 빈 슬라이스(null이면 와이어가 [] 대신 null)", none)
+	}
 }

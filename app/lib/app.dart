@@ -25,8 +25,13 @@ import 'package:rise_member/features/auth/presentation/session_restore.dart';
 /// **상한 1.35** — 감사 지시는 1.3이었지만 0.05를 올렸다. 1.35는 iOS Dynamic Type
 /// 의 **비접근성 최대치(xxxLarge)** 와 정확히 같고, 안드로이드 '가장 크게'(1.3)도
 /// 함께 덮는다. 1.3에서 끊으면 xxxLarge 사용자만 한 단계 축소된 화면을 보는데,
-/// 아래 [_maxTextScale] 회귀 테스트(test/core/widgets/text_scale_overflow_test.dart)
-/// 로 1.35에서 주요 화면에 오버플로가 없음을 확인했으므로 얻는 쪽이 크다.
+/// 1.35에서 주요 화면에 오버플로가 없음은 화면별 회귀 테스트가 실측한다 —
+/// `test/features/shell/app_shell_overflow_test.dart`(탭바 · 실제 번들 폰트로 1.0/1.15/1.35),
+/// `test/core/widgets/long_label_overflow_test.dart`, `test/features/home/presentation/home_screen_test.dart`,
+/// `test/features/my/presentation/widgets/my_cards_layout_test.dart` 등(`grep -rl 1.35 test`).
+/// (종전 주석이 가리키던 `text_scale_overflow_test.dart`는 존재한 적이 없는 경로였다 — P73 정정.)
+/// 위 고정 높이 셋 중 탭바는 `minHeight`(고정 아님), 체형 사진은 `AspectRatio`로 바뀌었고
+/// 인바디 차트 80만 고정으로 남아 있다(`inbody_chart_legend_test`가 1.35 케이스를 잰다).
 ///
 /// 접근성 배율(iOS AX1~AX5, 최대 ~3.1배)은 여전히 잘린다 — 이건 의도한 타협이
 /// 아니라 **남은 빚**이다. 상한을 더 올리려면 위 고정 높이 세 곳을 내용 기반

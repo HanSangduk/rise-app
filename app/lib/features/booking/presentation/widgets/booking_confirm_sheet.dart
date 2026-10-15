@@ -6,6 +6,7 @@ import 'package:rise_member/core/result/result.dart';
 import 'package:rise_member/core/theme/app_colors.dart';
 import 'package:rise_member/core/utils/coach_label.dart';
 import 'package:rise_member/core/widgets/rise_button.dart';
+import 'package:rise_member/core/widgets/rise_snack_bar.dart';
 import 'package:rise_member/core/widgets/trainer_avatar.dart';
 import 'package:rise_member/features/booking/presentation/booking_view_model.dart';
 
@@ -148,7 +149,13 @@ class _BookingConfirmSheetState extends ConsumerState<_BookingConfirmSheet> {
     if (!mounted) return;
     switch (result) {
       case Ok():
+        // 성공도 말한다(P73) — 취소·홀딩 신청·삭제는 스낵바를 띄우는데 예약 **확정**만 무음으로
+        // 닫혔다. 시트가 사라지는 것만으로는 "된 건가"를 알 수 없어(느린 와이파이에서 목록
+        // 갱신이 늦게 오면 더욱) 중복 탭·재시도로 이어진다. messenger를 먼저 잡고 pop 뒤에
+        // 띄운다(hold_request_sheet와 같은 순서 — 시트 위가 아니라 상위 Scaffold에 뜬다).
+        final messenger = ScaffoldMessenger.of(context);
         Navigator.of(context).pop();
+        messenger.showSnackBar(riseSnackBar('예약했어요', kind: RiseSnackKind.ok));
       case Err(:final failure):
         setState(() {
           widget.submitting.value = false;

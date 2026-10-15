@@ -37,10 +37,26 @@ Duration? lobbyAutoCheckInterval(Ref ref) => const Duration(seconds: 30);
 ///
 /// 401은 여기서 다루지 않는다 — dio 인터셉터가 세션을 비우고 리스너가 로그인으로 보낸다.
 class LobbyAutoCheck extends ConsumerStatefulWidget {
-  const LobbyAutoCheck({super.key, required this.onConnected});
+  const LobbyAutoCheck({
+    super.key,
+    required this.onConnected,
+    this.onMatched,
+    this.immediate = true,
+  });
 
   /// 자동 확인이 `connected`를 받았다 — 화면이 홈으로 보낸다.
   final VoidCallback onConnected;
+
+  /// 자동 확인이 `nowMatched`를 받았다 — 데스크가 그 사이 등록·정정해서 회원을 찾았다(P72 C1).
+  /// 화면은 `matched`로 바뀌고 이름 확인 1탭이 남는다. 홈으로 보내지 **않는다**.
+  final VoidCallback? onMatched;
+
+  /// 마운트 직후 1회를 도는가. `false`면 첫 확인은 주기 뒤다.
+  ///
+  /// 빈 상태(`notFound`·`declined`)는 **false**로 마운트한다(P72 C1) — 그 화면에 선 직후는
+  /// 코드 인증의 `join/match`가 방금 같은 질문에 답한 참이라, 즉시 틱은 200ms 전 답을 다시
+  /// 묻는 것이다. 대기(`pending`)의 즉시 틱 규칙은 종전대로 [JoinRequestTrace]가 정한다.
+  final bool immediate;
 
   @override
   ConsumerState<LobbyAutoCheck> createState() => _LobbyAutoCheckState();
@@ -66,7 +82,8 @@ class _LobbyAutoCheckState extends ConsumerState<LobbyAutoCheck> with WidgetsBin
     _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
     if (_interval == null) return;
 
-    if (ref.read(authViewModelProvider).joinRequestTrace != JoinRequestTrace.pending) {
+    if (widget.immediate &&
+        ref.read(authViewModelProvider).joinRequestTrace != JoinRequestTrace.pending) {
       // 마운트 중에 뷰모델 상태를 바꾸면 이 화면이 build 도중 리빌드 표시된다 — 프레임 뒤로 미룬다.
       WidgetsBinding.instance.addPostFrameCallback((_) => _tick());
     } else {
@@ -120,19 +137,28 @@ class _LobbyAutoCheckState extends ConsumerState<LobbyAutoCheck> with WidgetsBin
       _schedule();
       return;
     }
-    if (ref.read(authViewModelProvider).busy) {
+    if (ref.read(authViewModelProvider).busy ||
+        ref.read(authViewModelProvider).anyCheckInFlight) {
       // 겹쳐서 건너뜀은 실패가 아니다 — 백오프도 실패 시각도 건드리지 않는다.
       _schedule();
       return;
     }
     _ticking = true;
-    final result = await ref.read(authViewModelProvider.notifier).checkConnection();
+    // auto: true — 이 틱은 화면 컨트롤을 잠그지 않는다(P72 C10).
+    final result =
+        await ref.read(authViewModelProvider.notifier).checkConnection(auto: true);
     _ticking = false;
     if (!mounted) return;
     switch (result) {
       case ConnectionCheck.connected:
         _cancel();
         widget.onConnected();
+        return;
+      case ConnectionCheck.nowMatched:
+        // 화면이 `matched`로 바뀌면 이 위젯은 그 분기에 없어 곧 dispose된다 — 그래도 여기서
+        // 먼저 끊는다(그 사이 틱이 하나 더 나가면 방금 찾은 매칭을 다시 묻는다).
+        _cancel();
+        widget.onMatched?.call();
         return;
       case ConnectionCheck.notYet:
         _failures = 0;

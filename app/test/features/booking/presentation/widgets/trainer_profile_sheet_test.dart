@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rise_member/core/api/dto/staff_dto.dart';
 import 'package:rise_member/core/theme/app_theme.dart';
@@ -22,17 +23,20 @@ void main() {
     bool profileUnavailable = false,
   }) async {
     await tester.pumpWidget(
-      MaterialApp(
-        theme: buildAppTheme(),
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => showTrainerProfileSheet(
-                context,
-                staff: staff,
-                profileUnavailable: profileUnavailable,
+      // showRiseSheet는 세션 감시자(_SessionSheetGuard)를 달아 연다 — 앱과 같은 DI 루트가 필요하다.
+      ProviderScope(
+        child: MaterialApp(
+          theme: buildAppTheme(),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showTrainerProfileSheet(
+                  context,
+                  staff: staff,
+                  profileUnavailable: profileUnavailable,
+                ),
+                child: const Text('열기'),
               ),
-              child: const Text('열기'),
             ),
           ),
         ),

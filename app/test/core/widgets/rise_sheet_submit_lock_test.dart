@@ -13,6 +13,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rise_member/core/widgets/rise_sheet.dart';
 
@@ -24,20 +25,23 @@ void main() {
 
   Future<void> openSheet(WidgetTester tester) async {
     await tester.pumpWidget(
-      MaterialApp(
-        home: Builder(
-          builder: (context) => Scaffold(
-            body: Center(
-              child: ElevatedButton(
-                onPressed: () => showRiseSheet<void>(
-                  context,
-                  submitting: submitting,
-                  builder: (_) => const SizedBox(
-                    height: 240,
-                    child: Center(child: Text('본문')),
+      // showRiseSheet는 세션 감시자(_SessionSheetGuard)를 달아 연다 — 앱과 같은 DI 루트가 필요하다.
+      ProviderScope(
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () => showRiseSheet<void>(
+                    context,
+                    submitting: submitting,
+                    builder: (_) => const SizedBox(
+                      height: 240,
+                      child: Center(child: Text('본문')),
+                    ),
                   ),
+                  child: const Text('열기'),
                 ),
-                child: const Text('열기'),
               ),
             ),
           ),
@@ -138,16 +142,19 @@ void main() {
     testWidgets('쓸기·스크림·백 전부 닫힌다', (tester) async {
       Future<void> openPlain() async {
         await tester.pumpWidget(
-          MaterialApp(
-            home: Builder(
-              builder: (context) => Scaffold(
-                body: Center(
-                  child: ElevatedButton(
-                    onPressed: () => showRiseSheet<void>(
-                      context,
-                      builder: (_) => const SizedBox(height: 240, child: Center(child: Text('본문'))),
+          // showRiseSheet는 세션 감시자(_SessionSheetGuard)를 달아 연다 — 앱과 같은 DI 루트가 필요하다.
+          ProviderScope(
+            child: MaterialApp(
+              home: Builder(
+                builder: (context) => Scaffold(
+                  body: Center(
+                    child: ElevatedButton(
+                      onPressed: () => showRiseSheet<void>(
+                        context,
+                        builder: (_) => const SizedBox(height: 240, child: Center(child: Text('본문'))),
+                      ),
+                      child: const Text('열기'),
                     ),
-                    child: const Text('열기'),
                   ),
                 ),
               ),

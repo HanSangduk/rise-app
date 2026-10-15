@@ -33,8 +33,12 @@ class RiseButton extends StatelessWidget {
     final padding = small
         ? const EdgeInsets.symmetric(horizontal: 10, vertical: 6)
         : const EdgeInsets.symmetric(horizontal: 14, vertical: 12);
+    // small 라벨 10.5 → 11.5(P72). iOS HIG 최소 권장 11pt·Material 최소 본문 12sp에
+    // **양쪽 다 미달**이었다. 앱 전역 23곳이 함께 움직이지만, 전부 짧은 라벨(다시 시도 ·
+    // 새로고침 · 예약 · 지금 확인)이라 버튼이 텍스트 폭에 맞춰 커질 뿐이다 —
+    // 전체 스위트의 오버플로 단언이 그 사실을 확인한다.
     final textStyle = small
-        ? AppTypography.button.copyWith(fontSize: 10.5)
+        ? AppTypography.button.copyWith(fontSize: 11.5)
         : AppTypography.button;
 
     // 라벨에 회원 이름이 들어가는 전폭 CTA가 있다("네, $memberName 본인이에요 —

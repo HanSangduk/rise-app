@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ramsang/rise-backend/internal/domain"
 )
@@ -74,6 +75,67 @@ func TestGuardsDoNotSilentlyOpenOnStoreFailure(t *testing.T) {
 			t.Fatal("GetUserIndex가 실패했는데 승인이 통과했다 — 좀비 승인 방어선이 꺼졌다")
 		} else if !errors.Is(err, boom) && !strings.Contains(err.Error(), "store unavailable") {
 			t.Fatalf("인프라 에러가 그대로 올라와야 한다: %v", err)
+		}
+	})
+
+	// v2.37(P73) — 예약 생성 경로 2곳에 같은 형(`err == nil`)이 남아 있었다. 퇴사자·휴무일 거부는
+	// "스태프 레코드가 없는 미시딩 dev"를 통과시키려는 것이지 스토어 장애를 통과시키려는 것이
+	// 아니다. 픽스처는 정상(현직 코치)이고 조회만 실패시킨다 — 가드가 살아 있으면 멈추고,
+	// 꺼져 있으면 예약이 **성공한다**.
+	t.Run("CreateBooking — 퇴사자·휴무일 방어선", func(t *testing.T) {
+		s, h := newHookedService(t)
+		ctx := context.Background()
+		mem, pass := seedMemberWithPass(t, s, 10)
+
+		h.reset()
+		h.fail = func(op string, _ int) error {
+			if op == "GetStaff" {
+				return boom
+			}
+			return nil
+		}
+		_, err := s.CreateBooking(ctx, ownerP(), BookingCreateRequest{
+			SlotKey: slotKeyDaysAhead(1, 9), MemberID: mem.ID, PassID: pass.ID,
+		})
+		if err == nil {
+			t.Fatal("GetStaff가 실패했는데 예약이 성립했다 — 퇴사자·휴무일 거부가 함께 꺼졌다")
+		} else if !errors.Is(err, boom) {
+			t.Fatalf("인프라 에러가 그대로 올라와야 한다: %v", err)
+		}
+		if got := countConfirmedForPass(t, s, mem.ID, pass.ID); got != 0 {
+			t.Fatalf("실패한 요청이 예약 %d건을 남겼다", got)
+		}
+	})
+
+	t.Run("CreateRecurring — 규칙 저장 전 방어선(유령 규칙 없음)", func(t *testing.T) {
+		s, h := newHookedService(t)
+		ctx := context.Background()
+		mem, pass := seedMemberWithPass(t, s, 10)
+		until := time.Now().In(domain.KST).AddDate(0, 0, 60).Format("2006-01-02")
+
+		h.reset()
+		h.fail = func(op string, _ int) error {
+			if op == "GetStaff" {
+				return boom
+			}
+			return nil
+		}
+		_, err := s.CreateRecurring(ctx, ownerP(), RecurringCreateRequest{
+			MemberID: mem.ID, TrainerID: "t1", PassID: pass.ID,
+			Days: []string{"mon", "wed"}, Hour: 19, Until: until,
+		})
+		if err == nil {
+			t.Fatal("GetStaff가 실패했는데 고정 스케줄이 성립했다")
+		} else if !errors.Is(err, boom) {
+			t.Fatalf("인프라 에러가 그대로 올라와야 한다: %v", err)
+		}
+		// 방어선은 규칙 저장 **앞**에 있어야 한다 — 뒤면 예약 0건의 유령 규칙이 남는다.
+		rules, err := s.store.ListRecurrings(ctx, testCenter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rules) != 0 {
+			t.Fatalf("실패한 요청이 규칙 %d건을 남겼다(유령 규칙)", len(rules))
 		}
 	})
 }

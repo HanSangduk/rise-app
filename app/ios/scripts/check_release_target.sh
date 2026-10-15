@@ -41,6 +41,19 @@ else
   fi
 fi
 
+# 버전 단일 소스 가드(P73) — pubspec.yaml `version:`이 유일한 출처다. Xcode "General" 탭에서 버전을
+# 손으로 고치면 project.pbxproj의 buildSettings에 `FLUTTER_BUILD_NAME = x.y.z;`/`FLUTTER_BUILD_NUMBER = n;`
+# 리터럴이 박히고, 이 리터럴은 Generated.xcconfig(pubspec에서 재생성)보다 **우선**한다 — 즉 pubspec을
+# 올려도 Archive는 옛 값(또는 Xcode에 적힌 값)으로 나간다. P60·P67에서 걷어낸 자리가 P73에서 세 번째로
+# 재발했다(1.0.1/9 리터럴 vs pubspec 1.0.0+8). showBuildSettings는 병합된 값만 보여 주므로 pbxproj 원문을
+# 본다. 모든 구성에서 검사한다 — 리터럴은 구성별로 박히고 Debug에 남은 것도 다음 사람을 속인다.
+pbxproj="${PROJECT_FILE_PATH:-${SRCROOT:-.}/Runner.xcodeproj}/project.pbxproj"
+if [ -f "$pbxproj" ] && grep -qE '^[[:space:]]*FLUTTER_BUILD_(NAME|NUMBER) = ' "$pbxproj"; then
+  echo "error: [check_release_target] project.pbxproj에 FLUTTER_BUILD_NAME/FLUTTER_BUILD_NUMBER 리터럴이 박혀 있다 — 버전은 pubspec.yaml version: 한 줄만이 출처다. 해당 줄을 지우면 Generated.xcconfig 값이 다시 쓰인다(P67·P73):" >&2
+  grep -nE '^[[:space:]]*FLUTTER_BUILD_(NAME|NUMBER) = ' "$pbxproj" >&2
+  exit 1
+fi
+
 case "$cfg$mode" in
   *release*) ;;
   *) exit 0 ;;   # Debug·Profile(flutter run · drive · 시뮬레이터)는 로컬 주소가 정상 사용이다.

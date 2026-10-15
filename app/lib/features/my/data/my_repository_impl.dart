@@ -4,6 +4,7 @@ import 'package:rise_member/core/api/staff_directory.dart';
 import 'package:rise_member/core/network/api_result_guard.dart';
 import 'package:rise_member/core/result/result.dart';
 import 'package:rise_member/core/utils/date_format.dart';
+import 'package:rise_member/core/utils/settled.dart';
 import 'package:rise_member/features/my/data/my_remote_data_source.dart';
 import 'package:rise_member/features/my/domain/account_deletion.dart';
 import 'package:rise_member/features/my/domain/my_models.dart';
@@ -25,13 +26,29 @@ class MyRepositoryImpl implements MyRepository {
   final MyRemoteDataSource _remote;
   final MemberApi _memberApi;
 
+  /// 패스별 원장을 동시에 묻는 상한(P74) — [settleEach] 주석.
+  static const ledgerConcurrency = 4;
+
   @override
   Future<Result<MySummary>> load(String memberId) {
     return guardApi(() async {
+      // ── 서로 독립인 조회는 **동시에** 띄운다(P74) — 홈 탭(home_repository_impl)과 같은 이유 ──
+      // 종전엔 staffMap → passes → 원장×K → contracts → payments → profile이 전부 직렬이라 마이 탭
+      // 한 번에 왕복이 4+K회 이어졌고, 재등록을 반복한(패스가 많은) 회원일수록 더 느렸다. 의존은
+      // 응답을 *가공할 때*만 생긴다(원장은 패스 목록이 있어야 패스별로 조회한다). best-effort 규약
+      // (실패는 플래그로, "없음"으로 위장 금지)은 그대로 — 바뀌는 것은 기다리는 시점뿐이다.
+      // `settle`로 감싸는 이유도 홈과 같다: 패스 조회가 실패해 중간에 빠져나갈 때 남은 future가
+      // 아무도 받지 않는 비동기 예외가 되면 안 된다.
+      final staffMapF = settle(_readStaffMap());
+      final passesF = settle(_passesApi.fetchMyPasses(memberId));
+      final contractsF = settleCall(() => _remote.fetchContracts(memberId));
+      final paymentsF = settleCall(() => _remote.fetchPayments(memberId));
+      final profileF = settleCall(() => _memberApi.fetchMyProfile());
+
       // 이름 해석 실패가 회원권·원장·계약을 통째로 가리지 않게 best-effort
       // (staffMapReaderProvider 주석).
-      final staffMap = await _readStaffMap();
-      final passDtos = await _passesApi.fetchMyPasses(memberId);
+      final staffMap = (await staffMapF).valueOr(const {});
+      final passDtos = (await passesF).valueOrThrow(); // 패스는 필수 — 종전대로 guardApi가 Err로 접는다
       final passes = passDtos
           .map((p) => PassDetail(
                 id: p.id,
@@ -58,9 +75,18 @@ class MyRepositoryImpl implements MyRepository {
       // 빈 상태 문구 대신 "불러오지 못했어요 + 새로고침"을 보여준다.
       final ledgerByPass = <String, List<LedgerEntry>>{};
       final ledgerFailedPassIds = <String>{};
-      for (final p in passes) {
+      // 패스별 원장은 서로 독립 — 동시에, 단 4개씩(P74). 패스 수는 회원 이력에 비례해 자란다(재등록마다
+      // 하나) — 상한 없이 띄우면 오래 다닌 회원일수록 연결이 그 수만큼 한꺼번에 열린다. 실패는 그 패스만
+      // 표시(종전과 같은 단위).
+      final ledgerResults = await settleEach(
+        passes,
+        (p) => _remote.fetchLedger(memberId: memberId, passId: p.id),
+        limit: ledgerConcurrency,
+      );
+      for (var i = 0; i < passes.length; i++) {
+        final p = passes[i];
         try {
-          final dtos = await _remote.fetchLedger(memberId: memberId, passId: p.id);
+          final dtos = ledgerResults[i].valueOrThrow();
           final entries = dtos
               .map((d) => LedgerEntry(
                     id: d.id,
@@ -87,7 +113,7 @@ class MyRepositoryImpl implements MyRepository {
       var contracts = const <ContractItem>[];
       var contractsFailed = false;
       try {
-        final contractDtos = await _remote.fetchContracts(memberId);
+        final contractDtos = (await contractsF).valueOrThrow();
         contracts = contractDtos
             .map((d) => ContractItem(
                   id: d.id,
@@ -127,7 +153,7 @@ class MyRepositoryImpl implements MyRepository {
       var payments = const <PaymentItem>[];
       var paymentsFailed = false;
       try {
-        final dtos = await _remote.fetchPayments(memberId);
+        final dtos = (await paymentsF).valueOrThrow();
         payments = dtos
             .map((d) => PaymentItem(
                   id: d.id,
@@ -157,7 +183,7 @@ class MyRepositoryImpl implements MyRepository {
       var consent = const ConsentState(general: false, sensitive: false);
       var consentFailed = false;
       try {
-        final profile = await _memberApi.fetchMyProfile();
+        final profile = (await profileF).valueOrThrow();
         final c = profile.consent;
         if (c != null) {
           consent = ConsentState(

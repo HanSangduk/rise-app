@@ -206,6 +206,8 @@ class CameraViewModel extends _$CameraViewModel {
 
     try {
       final profile = await ref.read(myProfileProvider.future);
+      // 왕복 중 화면이 내려갔으면 여기서 끝낸다 — `_persist`와 같은 규약.
+      if (!ref.mounted) return;
       if (profile.consent?.sensitive != true) {
         state = state.copyWith(
           submitting: false,
@@ -216,8 +218,11 @@ class CameraViewModel extends _$CameraViewModel {
     } catch (_) {
       // 프로필 조회 실패해도 서버가 최종 검증하므로 촬영 자체는 계속 진행.
     }
+    // 위 catch가 "폐기된 ref로 read했다"까지 함께 삼키므로, 다음 read 전에 한 번 더 본다.
+    if (!ref.mounted) return;
 
     final bytes = await ref.read(bodyCameraProvider.notifier).takeJpeg();
+    if (!ref.mounted) return;
     if (bytes == null || bytes.isEmpty) {
       state = state.copyWith(
         submitting: false,
@@ -310,6 +315,12 @@ class CameraViewModel extends _$CameraViewModel {
 
   /// Storage 업로드 → 서버 메타데이터 기록. 어느 단계에서 실패하든 [pendingRetry]에
   /// 진행 상태를 남겨, 재시도가 이미 끝난 단계를 다시 밟지 않게 한다.
+  ///
+  /// **await마다 `ref.mounted`를 본다**(auth_view_model와 같은 규약). 이 메서드는
+  /// 화면이 살아 있는 동안만 의미가 있는데, 왕복 중에 화면이 내려가면(세션 리스너가
+  /// 라우트째 내리는 경우, 회원이 확인 대화상자에서 "나가기"를 고른 경우) 이 뷰모델은
+  /// autoDispose로 사라진다. 그 뒤의 `state =`는 상태를 갱신하는 게 아니라 **던진다** —
+  /// 업로드 실패가 화면에 닿지도 못한 채 zone error로 새는 자리다.
   Future<void> _persist(PendingBodyPhoto pending, {required String memberId}) async {
     var current = pending;
 
@@ -318,6 +329,7 @@ class CameraViewModel extends _$CameraViewModel {
             storagePath: current.storagePath,
             bytes: current.bytes,
           );
+      if (!ref.mounted) return;
       if (uploaded case Err(:final failure)) {
         state = state.copyWith(submitting: false, error: failure, pendingRetry: current);
         return;
@@ -332,6 +344,7 @@ class CameraViewModel extends _$CameraViewModel {
           date: current.capturedAt,
           storagePath: current.storagePath,
         );
+    if (!ref.mounted) return;
 
     result.fold(
       (photo) {

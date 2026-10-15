@@ -121,6 +121,9 @@ class _CodeScreenState extends ConsumerState<CodeScreen> {
                 TextField(
                   controller: _controller,
                   keyboardType: TextInputType.number,
+                  // iOS는 Firebase 자동 회수가 없어 알림을 내려 6자리를 외워 와야 했다(P72).
+                  // 이 힌트 한 줄이면 키보드 위 추천 탭 한 번으로 끝난다.
+                  autofillHints: const [AutofillHints.oneTimeCode],
                   textAlign: TextAlign.center,
                   maxLength: 6,
                   onChanged: (v) => ref.read(authViewModelProvider.notifier).setCode(v),

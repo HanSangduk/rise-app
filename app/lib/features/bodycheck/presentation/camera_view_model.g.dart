@@ -44,7 +44,7 @@ final class CameraViewModelProvider
   }
 }
 
-String _$cameraViewModelHash() => r'ddf3739079ba63d323947f6a2c7480c72af07b99';
+String _$cameraViewModelHash() => r'd81e53fb0c96c5a0668e36826d1f5e18a8c9b4cc';
 
 /// 셔터 → 실촬영 → Firebase Storage 업로드 → `POST /v1/body-photos`.
 

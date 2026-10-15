@@ -68,6 +68,33 @@ void main() {
     expect(gate.openedSettings, isTrue);
   });
 
+  // 영구 거부에서 이 화면이 주는 유일한 다음 행동은 "설정 열기"다. 켜고 돌아왔는데
+  // 옛 판정이 그대로면 회원은 **이미 켠 설정을 또 여는 버튼** 앞에 갇혀, 체크인을
+  // 포기하거나 앱을 강제 종료한다 — 돌아오는 것만으로 복구돼야 한다.
+  //
+  // 뮤테이션: `didChangeAppLifecycleState`의 재확인 분기를 지우면 요청 수가 1에 멈춘다.
+  testWidgets('영구 거부 — 설정에서 켜고 돌아오면 권한을 다시 확인한다', (tester) async {
+    final gate = _FakeGate(CameraPermissionResult.permanentlyDenied);
+    await pushScanner(tester, gate: gate);
+    expect(gate.requests, 1);
+
+    await backgroundAndReturn(tester);
+
+    expect(gate.requests, 2, reason: '복귀 시 다시 묻지 않으면 화면이 스스로 못 푼다');
+  });
+
+  // 일시 거부에는 살아 있는 "권한 허용하기" 버튼이 있어 갇히지 않는다 — 복귀할 때마다
+  // 부르지도 않은 시스템 프롬프트를 띄우는 쪽이 나쁘다(ensureGranted는 곧바로 묻는다).
+  testWidgets('일시 거부 — 복귀만으로 권한을 다시 묻지 않는다', (tester) async {
+    final gate = _FakeGate(CameraPermissionResult.denied);
+    await pushScanner(tester, gate: gate);
+    expect(gate.requests, 1);
+
+    await backgroundAndReturn(tester);
+
+    expect(gate.requests, 1);
+  });
+
   testWidgets('취소하면 null로 닫힌다 — 체크인 요청을 보내지 않는다', (tester) async {
     String? popped = 'sentinel';
     await tester.pumpWidget(
@@ -140,13 +167,35 @@ void main() {
   });
 }
 
+/// 홈 버튼 → 설정 → 앱 복귀. 수명주기 전이는 **건너뛸 수 없다**(프레임워크가 인접
+/// 전이만 허용한다) — resumed에서 곧장 paused로 보내면 단언에 걸린다.
+Future<void> backgroundAndReturn(WidgetTester tester) async {
+  const path = [
+    AppLifecycleState.inactive,
+    AppLifecycleState.hidden,
+    AppLifecycleState.paused,
+    AppLifecycleState.hidden,
+    AppLifecycleState.inactive,
+    AppLifecycleState.resumed,
+  ];
+  for (final state in path) {
+    tester.binding.handleAppLifecycleStateChanged(state);
+    await tester.pump();
+  }
+  await tester.pumpAndSettle();
+}
+
 class _FakeGate implements CameraPermissionGate {
   _FakeGate(this.result);
   final CameraPermissionResult result;
   bool openedSettings = false;
+  int requests = 0;
 
   @override
-  Future<CameraPermissionResult> ensureGranted() async => result;
+  Future<CameraPermissionResult> ensureGranted() async {
+    requests++;
+    return result;
+  }
 
   @override
   Future<void> openSettings() async => openedSettings = true;

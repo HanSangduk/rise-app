@@ -65,10 +65,16 @@ class PassOption {
   /// 만료까지 남은 일수 — 날짜 단위(dateOnly) 비교. 시각까지 비교하면 만료 당일
   /// D-0이 자정 이후 음수로 표기되는 문제가 있어 날짜만 비교한다.
   /// 기준일은 센터(KST) 오늘 — 서버의 만료 판정과 같은 날짜를 본다.
+  ///
+  /// 달력 날짜 차이는 **UTC 생성자**로 센다(P73). 로컬 플래그 `DateTime`끼리의 `difference`는
+  /// 절대 시각 차라, 기기가 서머타임 지역이면 전환일을 낀 하루가 23시간 → `inDays` 0으로
+  /// 하루가 사라진다(한국엔 DST가 없지만 이 값은 **기기** 타임존 규칙을 탄다). 필드만 옮겨
+  /// UTC로 만들면 기기 규칙이 개입할 자리가 없다.
   int get daysUntilExpiry {
     final today = DateFmt.todayKst();
-    final untilDate = DateTime(validUntil.year, validUntil.month, validUntil.day);
-    return untilDate.difference(today).inDays;
+    final from = DateTime.utc(today.year, today.month, today.day);
+    final until = DateTime.utc(validUntil.year, validUntil.month, validUntil.day);
+    return until.difference(from).inDays;
   }
 
   /// 유효기간 표기 라벨 — 이미 만료된 패스는 "D--3" 같은 음수 D-day 대신 "만료".

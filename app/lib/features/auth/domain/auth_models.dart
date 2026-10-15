@@ -34,12 +34,20 @@ class PhoneVerificationSession {
 
 /// POST /v1/join/match 응답.
 class JoinMatch {
-  const JoinMatch({this.member, required this.needsConfirm});
+  const JoinMatch({this.member, required this.needsConfirm, this.centerName = ''});
 
   final MatchedMember? member;
   final bool needsConfirm;
 
+  /// 매칭된 **그 회원의 센터** 상호(계약 v2.32 `center.name`). 미매칭·상호 미등록·구서버면 ''.
+  ///
+  /// 대기실의 매칭 카드는 종전에 `GET /v1/public/center`(무인증이라 **기본 센터 고정**)의
+  /// 상호를 찍었다 — 2호점 회원에게 1호점 이름을 보여줬다(P65 후속 3, P73에서 반영). 매칭
+  /// 응답이 "당신의 센터"를 아는 유일한 지점이라 서버가 여기 실어 준다.
+  final String centerName;
+
   bool get found => member != null;
+  bool get hasCenterName => centerName.trim().isNotEmpty;
 }
 
 /// GET /v1/join/centers 응답 한 건 — 가입 요청을 보낼 수 있는 센터(계약 v2.33).

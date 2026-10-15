@@ -434,10 +434,21 @@ function ApproveJoinModal({
   const phoneDup = duplicate?.kind === "phone" ? duplicate : null;
   const blockedByLinked = !!phoneDup && phoneDup.member.app_linked;
   const needsAck = !!phoneDup && !phoneDup.member.app_linked;
+  // **승인이 도는 중에는 창을 닫을 수 없다.** 종전엔 실행 버튼만 잠그고 [취소]·배경 클릭·ESC·×는
+  // 열어둬서, 승인 요청이 날아간 뒤 창을 닫으면 컴포넌트가 언마운트돼 성공 콜백(onApproved —
+  // 새 회원 자동 선택)과 onClose가 **둘 다 실행되지 않았다**. 서버에서는 회원이 만들어졌는데
+  // 화면은 아무 말도 하지 않아, 대표는 큐에서 같은 요청을 다시 눌렀다(승인은 되돌릴 수 없다).
+  // 실행 버튼이 이미 잠겨 있는 그 시간 동안 닫기 경로도 같이 잠그는 것이 일관된 규칙이다 —
+  // 성공·실패 어느 쪽이든 결과가 이 창 안에서 말해지고, 그 뒤에 사람이 닫는다.
+  const closeGuarded = () => {
+    if (approveJoin.isPending) return;
+    onClose();
+  };
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={closeGuarded}
+      closeDisabled={approveJoin.isPending}
       title={phoneDup ? "이미 있는 회원과 번호가 같아요" : "가입 요청 승인"}
     >
       <div className="space-y-3">
@@ -526,9 +537,20 @@ function ApproveJoinModal({
         >
           <Check className="h-4 w-4" /> {approveJoin.isPending ? "승인 중…" : "승인하기"}
         </Button>
-        <Button className="w-full" variant="outline" onClick={onClose}>
+        {/* 실행 버튼과 **같은 조건**으로 잠근다 — 한쪽만 잠그면 대표는 잠기지 않은 쪽을 누른다. */}
+        <Button
+          className="w-full"
+          variant="outline"
+          disabled={approveJoin.isPending}
+          onClick={closeGuarded}
+        >
           취소
         </Button>
+        {approveJoin.isPending && (
+          <p className="text-[10.5px] text-muted">
+            승인이 서버에 전달되는 중이라 창을 닫을 수 없어요 — 결과가 여기 표시됩니다.
+          </p>
+        )}
       </div>
     </Modal>
   );
@@ -555,8 +577,15 @@ function RejectJoinModal({
 }) {
   const rejectJoin = useRejectJoin();
   const [understood, setUnderstood] = useState(false);
+  // 승인 창과 **같은 잠금**(ApproveJoinModal closeGuarded 주석). 거절도 도는 중에 창이 사라지면
+  // onSuccess(onClose)가 떨어지지 않아 "지워졌는지 아닌지"를 화면이 말하지 못한다 — 거절은
+  // 이름·번호가 지워지는 동작이라 그 침묵의 대가가 승인보다 크다.
+  const closeGuarded = () => {
+    if (rejectJoin.isPending) return;
+    onClose();
+  };
   return (
-    <Modal open onClose={onClose} title="가입 요청 거절">
+    <Modal open onClose={closeGuarded} closeDisabled={rejectJoin.isPending} title="가입 요청 거절">
       <div className="space-y-3">
         <p className="text-[12.5px]">
           <b>{request.name}</b>{" "}
@@ -628,9 +657,19 @@ function RejectJoinModal({
         >
           <UserX className="h-4 w-4" /> {rejectJoin.isPending ? "거절 중…" : "거절하기"}
         </Button>
-        <Button className="w-full" variant="outline" onClick={onClose}>
+        <Button
+          className="w-full"
+          variant="outline"
+          disabled={rejectJoin.isPending}
+          onClick={closeGuarded}
+        >
           취소
         </Button>
+        {rejectJoin.isPending && (
+          <p className="text-[10.5px] text-muted">
+            거절이 서버에 전달되는 중이라 창을 닫을 수 없어요 — 결과가 여기 표시됩니다.
+          </p>
+        )}
       </div>
     </Modal>
   );

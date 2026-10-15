@@ -271,15 +271,25 @@ class SignaturePad extends StatelessWidget {
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: controller.isEmpty ? null : controller.clear,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 12, left: 12, bottom: 10),
-                child: Text(
-                  '다시 쓰기',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
-                    color: controller.isEmpty ? AppColors.muted : AppColors.brand,
-                    decoration: TextDecoration.underline,
+              // 터치 영역 44dp 하한(P73) — 종전 세로 12+10 패딩 + 11.5px 글자는 ≈36dp라
+              // 오획을 지우는 유일한 길이 앱 최소 타깃(`touch_target_test`)에 못 미쳤다.
+              // RiseUnderlineLink와 같은 방식(ConstrainedBox minHeight).
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 44),
+                child: Center(
+                  widthFactor: 1,
+                  heightFactor: 1,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 12),
+                    child: Text(
+                      '다시 쓰기',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: controller.isEmpty ? AppColors.muted : AppColors.brand,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
                   ),
                 ),
               ),

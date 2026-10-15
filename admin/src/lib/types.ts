@@ -101,6 +101,9 @@ export interface Pass {
   valid_until: string;
   status: PassStatus;
   holds: PassHold[];
+  // v2.37(P73): 환불 마감이 정산한 실제 환불액(원)·마감 시각. 환불 전·구서버 문서엔 없다(omitempty).
+  refunded_amount?: number;
+  refunded_at?: string;
 }
 
 // ── Ledger(세션 원장) ───────────────────────────────────────────────────
@@ -285,11 +288,25 @@ export interface Staff {
   payout: Payout;
   offdays: string[];
   profile: StaffProfile; // v1.6 — GET /v1/staff 응답에 항상 포함(하위호환 추가)
+  // 로그인 ID(v2.36). **owner에게만** 전원 분이 오고, 트레이너는 자기 것만, 회원에게는 오지
+  // 않는다(서버 ListStaff 마스킹 — 이 목록은 회원 앱의 코치 소개도 함께 쓴다).
+  // 없을 수 있는 두 경우가 같은 모양이다: 마스킹됐거나, v2.36 이전에 만들어진 레코드거나.
+  // 그래서 화면은 빈 값을 "이메일 없음"이 아니라 **"모름"**으로 그려야 한다.
+  email?: string;
   // v2.0 — GET /v1/staff는 inactive도 계속 반환한다(이름 해석을 잃으면 회원·스케줄·정산의
   // uid 참조가 통째로 붕괴한다). 필터는 클라이언트가 이 필드로 한다.
   status: StaffStatus;
   // 퇴사 시각(RFC3339). 서버가 기록하며 inactive일 때만 실린다(백엔드 omitempty).
   left_at?: string | null;
+}
+
+/** POST /v1/staff 응답(계약 v2.36) — Staff의 모든 필드가 **최상위 그대로** 오고 한 칸이 늘었다.
+ *  서버가 *domain.Staff를 임베딩해 직렬화하므로 구버전 파싱이 그대로 동작한다.
+ *
+ *  initial_password는 **새로 만든 계정에만** 실린다. 비어 있으면 재초대·재고용이라 그 사람이
+ *  이미 쓰던 비밀번호가 살아 있다는 뜻이다(CenterCreated와 같은 규약). */
+export interface StaffCreated extends Staff {
+  initial_password?: string;
 }
 
 // v2.0 PUT /v1/staff/{uid} — **머지 시맨틱**(보낸 필드만 갱신). status는 의도적으로 없다:
@@ -360,6 +377,8 @@ export interface StaffTransferResult {
 // color 생략 = 서버가 기본색 배정 · payout 생략 = 미설정(대표는 정산 개념이 없어 항상 생략).
 // 비밀번호는 서버가 임시로 만들고 응답에 담지 않는다 — 초대는 클라이언트가 이어 보내는
 // 비밀번호 설정 메일(sendPasswordResetEmail)로 완결된다(Settings.tsx InviteStaffModal).
+// v2.36부터는 그 응답이 **최초 비밀번호(initial_password)도 함께** 싣는다(StaffCreated) —
+// 메일이 스팸함으로 가거나 도메인 메일이 막힌 곳에서도 구두로 전달할 수 있게.
 export interface CreateStaffRequest {
   name: string;
   email: string;
@@ -394,6 +413,11 @@ export interface Contract {
   signer_ip: string | null;
   sha256: string | null;
   pdf_path: string | null;
+  // v2.36에서 타입에 들여왔다(P71). 서버 domain.Contract는 처음부터 omitempty 없이 항상
+  // 내려보내는데 어드민 타입에만 없어서, 계약 목록이 **본문이 찍혔는지**를 알 수 없었다.
+  // 빈 문자열 = 스탬프 전(요약 고지만 나간 상태) — 발급 직후가 정확히 그 상태이고, 결제 기록
+  // 뒤 [재발송]에서 비로소 채워진다(backend service.go SendContract 주석).
+  template_version: string;
 }
 
 // ── Payment ─────────────────────────────────────────────────────────────
@@ -1115,4 +1139,9 @@ export interface CenterCreateBody {
 export interface CenterCreated {
   center: AdminCenter;
   owner: Staff;
+  /** 대표 계정의 **최초 비밀번호**(계약 v2.36). 서버가 이번 요청으로 계정을 새로 만들었을 때만
+   *  채워진다 — 비어 있으면 이미 있던 계정을 재사용한 것이고, 그 사람이 정한 비밀번호가 그대로
+   *  살아 있다. 그래서 화면은 두 경우를 **다르게** 그려야 한다(빈 값에 기본 비밀번호를 적으면
+   *  관리자가 틀린 값을 불러 주고 상대는 원인 모른 채 로그인에 실패한다). */
+  initial_password?: string;
 }

@@ -79,6 +79,7 @@ class AuthState {
     this.submitting = false,
     this.resending = false,
     this.checkingConnection = false,
+    this.autoChecking = false,
     this.connectionUnknown = false,
     this.error,
     this.match,
@@ -158,7 +159,21 @@ class AuthState {
   /// 마지막으로 **실패한** 연결 확인(네트워크 등). [lastCheckedAt]보다 뒤면 "12:14 확인 못 함".
   final DateTime? lastCheckFailedAt;
 
-  /// 발송/확인/재전송/연결확인 중 어느 하나라도 진행 중 — 동시 요청 차단용.
+  /// **자동 확인 틱**이 도는 중(P72 C10). [checkingConnection]과 갈라 둔 이유는 [busy]다:
+  /// 종전엔 자동 틱도 `checkingConnection`을 켰고, 그게 `busy`를 통해 화면의 **모든** 컨트롤을
+  /// 동시에 잠갔다 — 30초마다 "번호 다시 인증하기"(모든 stage의 유일한 탈출구)·"본인이
+  /// 아니에요"·"계정 삭제"가 함께 회색이 됐다. 사용자가 시작한 적 없는 동작이고, 느린 회선에선
+  /// 그 잠금이 5~10초씩 이어져 "확인 중"이 아니라 "얼었다"로 읽힌다.
+  ///
+  /// 뷰모델의 재진입 방지는 [anyCheckInFlight]가 겸한다 — 잠그는 범위만 좁혔지 같은 조회가
+  /// 두 번 나가지는 않는다.
+  final bool autoChecking;
+
+  /// 연결 확인이 수동이든 자동이든 날아가는 중 — 뷰모델의 중복 호출 가드가 이것을 본다.
+  bool get anyCheckInFlight => checkingConnection || autoChecking;
+
+  /// 발송/확인/재전송/**수동** 연결확인 중 — 화면 컨트롤을 함께 잠그는 기준.
+  /// 자동 틱([autoChecking])은 여기 들어오지 않는다.
   bool get busy => submitting || resending || checkingConnection;
 
   /// 대기 화면에 "다시 요청" 버튼을 둘지(P69 C2).
@@ -231,6 +246,7 @@ class AuthState {
     bool? submitting,
     bool? resending,
     bool? checkingConnection,
+    bool? autoChecking,
     bool? connectionUnknown,
     Failure? error,
     bool clearError = false,
@@ -255,6 +271,7 @@ class AuthState {
       submitting: submitting ?? this.submitting,
       resending: resending ?? this.resending,
       checkingConnection: checkingConnection ?? this.checkingConnection,
+      autoChecking: autoChecking ?? this.autoChecking,
       connectionUnknown: connectionUnknown ?? this.connectionUnknown,
       error: clearError ? null : (error ?? this.error),
       // `match ?? this.match`만으로는 null 클리어가 불가능(본인 아님 거부가 무반응이 되는 버그)

@@ -46,6 +46,16 @@ expect "DART_DEFINES localhost -> fail"                     1 run_check CONFIGUR
 expect "DART_DEFINES last item (no trailing newline) seen"  1 run_check CONFIGURATION=Release PODS_ROOT="$T/good" DART_DEFINES="$(b64 FOO=bar),$(b64 DEV_SESSION=true)"
 expect "DART_DEFINES http LAN API_BASE_URL -> fail"         1 run_check CONFIGURATION=Release PODS_ROOT="$T/good" DART_DEFINES="$(b64 API_BASE_URL=http://192.168.0.10:8080)"
 expect "DART_DEFINES https API_BASE_URL ok"                 0 run_check CONFIGURATION=Release PODS_ROOT="$T/good" DART_DEFINES="$(b64 API_BASE_URL=https://example.com),$(b64 DEV_SESSION=false)"
+# 버전 단일 소스(P73) — pbxproj에 FLUTTER_BUILD_NAME/NUMBER 리터럴이 박히면 Generated.xcconfig(pubspec)보다 우선해
+# Archive가 옛 번호로 나간다. 가드는 **모든 구성**에서 막는다. P73이 가드를 넣고 이 하네스엔 칸이 없었다(P74에서 추가).
+mkdir -p "$T/proj_name" "$T/proj_num" "$T/proj_clean"
+printf '\t\t\t\tFLUTTER_BUILD_NAME = 1.0.1;\n' > "$T/proj_name/project.pbxproj"
+printf '\t\t\t\tFLUTTER_BUILD_NUMBER = 9;\n' > "$T/proj_num/project.pbxproj"
+printf '\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.han.rise;\n' > "$T/proj_clean/project.pbxproj"
+expect "pbxproj FLUTTER_BUILD_NAME literal -> fail (Debug too)"  1 run_check CONFIGURATION=Debug PODS_ROOT="$T/good" PROJECT_FILE_PATH="$T/proj_name"
+expect "pbxproj FLUTTER_BUILD_NUMBER literal -> fail (Release)"  1 run_check CONFIGURATION=Release PODS_ROOT="$T/good" PROJECT_FILE_PATH="$T/proj_num"
+expect "pbxproj without version literals passes"              0 run_check CONFIGURATION=Release PODS_ROOT="$T/good" PROJECT_FILE_PATH="$T/proj_clean"
+expect "repo Runner pbxproj carries no version literal"        0 run_check CONFIGURATION=Debug PODS_ROOT="$T/good" PROJECT_FILE_PATH="$REPO/app/ios/Runner.xcodeproj"
 # Known gaps (documented as findings; expected values reflect CURRENT behaviour so the harness is green until the script is patched):
 expect "[gap] CONFIGURATION=Release but FLUTTER_BUILD_MODE=debug" "$(g 0 1)" run_check CONFIGURATION=Release FLUTTER_BUILD_MODE=debug PODS_ROOT="$T/good"
 expect "[gap] both PODS_ROOT and SRCROOT unset -> raw 'unbound variable'"     1 run_check CONFIGURATION=Release
@@ -53,9 +63,19 @@ expect "[gap] both PODS_ROOT and SRCROOT unset -> raw 'unbound variable'"     1 
 echo "== verify-ios-archive.sh =="
 # Copy the script into a fake tree so ROOT/app/pubspec.yaml is under our control.
 mkdir -p "$T/tree/store/scripts" "$T/tree/app"; cp "$VERIFY" "$T/tree/store/scripts/"; printf 'name: x\nversion: 1.0.0+8\n' > "$T/tree/app/pubspec.yaml"
-mk_archive() { # mk_archive <dir> <ver> <build> <runner-marker-mode: good|nomacro|photosonly|none>
+mk_archive() { # mk_archive <dir> <ver> <build> <runner-marker-mode: good|nomacro|photosonly|none> [recaptcha: ok|noflag|flagtrue|noscheme|wrongscheme|noservice]
   local a="$1/Products/Applications/Runner.app"; mkdir -p "$a/Frameworks/App.framework"
   /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $2" -c "Add :CFBundleVersion string $3" -c "Add :CFBundleIdentifier string com.han.rise" "$a/Info.plist" >/dev/null
+  # 전화 인증 reCAPTCHA 복귀 경로(P46·P75) — 기본은 실제 앱과 같게: GoogleService-Info.plist 앱 ID에서 유도한 스킴 + 딥링크 스위치 끔.
+  local rc_mode="${5:-ok}" scheme="app-1-773077624928-ios-3b39ab1c6c889eb0b0fb05"
+  [ "$rc_mode" = noservice ] || /usr/libexec/PlistBuddy -c "Add :GOOGLE_APP_ID string 1:773077624928:ios:3b39ab1c6c889eb0b0fb05" "$a/GoogleService-Info.plist" >/dev/null
+  [ "$rc_mode" = wrongscheme ] && scheme="app-1-773077624928-ios-00000000000000000000aa"   # 다른 Firebase 앱 ID의 스킴(P46 패키지명 변경 사고형)
+  [ "$rc_mode" = noscheme ] || /usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" -c "Add :CFBundleURLTypes:0 dict" -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string $scheme" "$a/Info.plist" >/dev/null
+  case "$rc_mode" in
+    noflag)   ;;
+    flagtrue) /usr/libexec/PlistBuddy -c "Add :FlutterDeepLinkingEnabled bool true" "$a/Info.plist" >/dev/null ;;
+    *)        /usr/libexec/PlistBuddy -c "Add :FlutterDeepLinkingEnabled bool false" "$a/Info.plist" >/dev/null ;;
+  esac
   printf 'https://rize-api-773077624928.asia-northeast3.run.app/v1\n+821000000000\nlocalhost\n' > "$a/Frameworks/App.framework/App"
   case "$4" in
     good)       printf 'extern const void *AVMediaTypeVideo; const char *s="requestAccessForMediaType:completionHandler:", *t="permissionStatus:", *u="AudioVideoPermissionStrategy"; void *f(void){return (void*)AVMediaTypeVideo;}\n' | xcrun clang -x c -c - -o "$a/Runner" ;;  # real Mach-O: strings + nm -u both work
@@ -73,6 +93,18 @@ expect "good archive passes"                                0 bash "$V" "$T/arch
 expect "old archive: version + camera both flagged, summary printed" 1 bash "$V" "$T/arch_old"
 out=$(bash "$V" "$T/arch_old" 2>&1 || true); grep -q '2건 실패' <<<"$out" && echo "  ok   summary counts 2 failures (no early abort)" || { echo "  FAIL summary missing: $out"; fail=$((fail+1)); }
 expect "[gap] PERMISSION_PHOTOS-only binary (false pass)"     "$(g 0 1)" bash "$V" "$T/arch_photos"
+# reCAPTCHA 복귀 경로(P75): rc만 보면 다른 검사가 실패해도 초록이다 — 그 메시지로 **1건만** 실패하는지 본다.
+expect_one() { # expect_one <label> <archive> <message-pattern>
+  local out rc=0; out=$(bash "$V" "$2" 2>&1) || rc=$?
+  if [ "$rc" = 1 ] && grep -q -- "$3" <<<"$out" && grep -q '1건 실패' <<<"$out"; then pass=$((pass+1)); printf '  ok   %-64s rc=%s\n' "$1" "$rc"
+  else fail=$((fail+1)); printf '  FAIL %-64s rc=%s\n       %s\n' "$1" "$rc" "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)"; fi
+}
+for m in noflag flagtrue noscheme wrongscheme noservice; do mk_archive "$T/arch_rc_$m" 1.0.0 8 good "$m"; done
+expect_one "deep link switch missing -> flagged (P75)"        "$T/arch_rc_noflag"      'FlutterDeepLinkingEnabled=없음'
+expect_one "deep link switch true -> flagged (P75)"           "$T/arch_rc_flagtrue"    'FlutterDeepLinkingEnabled=true'
+expect_one "reCAPTCHA scheme missing -> flagged (P46)"        "$T/arch_rc_noscheme"    'reCAPTCHA 복귀 스킴이 없다'
+expect_one "scheme of another Firebase app ID -> flagged"     "$T/arch_rc_wrongscheme" 'reCAPTCHA 복귀 스킴이 없다'
+expect_one "GoogleService-Info.plist missing -> flagged"      "$T/arch_rc_noservice"   'GOOGLE_APP_ID=없음'
 before=$(ls "${TMPDIR:-/tmp}" | grep -c '^tmp\.' || true)
 expect "[gap] Runner binary missing -> aborts before summary"   1 bash "$V" "$T/arch_norunner"
 after=$(ls "${TMPDIR:-/tmp}" | grep -c '^tmp\.' || true)

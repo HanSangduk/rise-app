@@ -245,27 +245,38 @@ export function Modal({
   title,
   children,
   wide,
+  closeDisabled,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
   wide?: boolean;
+  /**
+   * 되돌릴 수 없는 요청이 서버로 가는 중 — 닫기 경로(배경 클릭·ESC·×)를 전부 막는다.
+   *
+   * 왜 필요했나: 확인 창들은 실행 버튼만 isPending으로 잠그고 닫기는 열어뒀는데, 요청이 도는
+   * 사이에 창을 닫으면 컴포넌트가 언마운트돼 mutate-레벨 onSuccess가 떨어지지 않는다 —
+   * 서버에서는 처리됐는데 화면은 아무 말도 하지 않고, 사람은 같은 동작을 다시 누른다
+   * (JoinRequests.tsx 승인·거절 창). onClose를 호출부에서 가드해도 ×는 눌리는 것처럼 보이므로
+   * 여기서 시각적으로도 잠근다 — 잠긴 것을 잠긴 것처럼 보이게 하는 게 이 prop의 몫이다.
+   */
+  closeDisabled?: boolean;
 }) {
   // ESC로 닫기(접근성) — 훅은 조건부 return보다 앞에 있어야 하므로 open 가드는 리스너 안에서.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !closeDisabled) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, closeDisabled]);
   if (!open) return null;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-      onClick={onClose}
+      onClick={closeDisabled ? undefined : onClose}
       role="presentation"
     >
       <div
@@ -282,7 +293,8 @@ export function Modal({
           <h3 className="text-sm font-bold">{title}</h3>
           <button
             onClick={onClose}
-            className="rounded-lg p-1 text-muted transition hover:bg-panel-2 hover:text-ink"
+            disabled={closeDisabled}
+            className="rounded-lg p-1 text-muted transition hover:bg-panel-2 hover:text-ink disabled:pointer-events-none disabled:opacity-40"
             aria-label="닫기"
           >
             <X className="h-4 w-4" />

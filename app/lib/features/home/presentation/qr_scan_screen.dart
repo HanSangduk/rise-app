@@ -61,6 +61,22 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> with WidgetsBinding
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // **영구 거부에서 돌아왔으면 권한부터 다시 본다.** 이 상태에서 이 화면이 주는
+    // 유일한 다음 행동은 "설정 열기"인데, 켜고 돌아와도 `_permission`이 옛 판정을
+    // 들고 있으면 같은 안내가 그대로 남는다 — 누를 수 있는 건 이미 켠 설정을 또 여는
+    // 버튼뿐이라 회원이 갇힌다(체형 촬영 화면과 같은 결함·같은 처방).
+    //
+    // 일시 거부는 여기서 다시 묻지 **않는다**. `ensureGranted()`가 곧바로 시스템
+    // 프롬프트를 띄우는데, 그 상태의 화면에는 이미 살아 있는 "권한 허용하기" 버튼이
+    // 있어 회원이 갇히지 않는다 — 복귀할 때마다 부르지도 않은 팝업이 뜨는 쪽이 나쁘다.
+    // 요청이 아직 진행 중이면 `_permission`이 null이라 여기 걸리지 않는다(중복 요청 방지).
+    if (state == AppLifecycleState.resumed &&
+        _permission == CameraPermissionResult.permanentlyDenied) {
+      setState(() => _permission = null);
+      unawaited(_requestPermission());
+      return;
+    }
+
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
     switch (state) {

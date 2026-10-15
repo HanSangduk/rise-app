@@ -9,6 +9,7 @@ import 'package:rise_member/core/session/app_session.dart';
 import 'package:rise_member/features/auth/domain/auth_models.dart';
 import 'package:rise_member/features/auth/domain/auth_repository.dart';
 import 'package:rise_member/features/auth/domain/join_request_store.dart';
+import 'package:rise_member/features/auth/presentation/auth_state.dart';
 import 'package:rise_member/features/auth/presentation/auth_view_model.dart';
 import 'package:rise_member/features/auth/presentation/widgets/lobby_auto_check.dart';
 
@@ -39,6 +40,7 @@ void main() {
   });
 
   AuthViewModel notifier() => container.read(authViewModelProvider.notifier);
+  AuthState read() => container.read(authViewModelProvider);
 
   Future<void> mount(WidgetTester tester) async {
     await tester.pumpWidget(
@@ -55,6 +57,40 @@ void main() {
   }
 
   Future<void> unmount(WidgetTester tester) => tester.pumpWidget(const SizedBox());
+
+  // ── P72 C10: 자동 틱이 화면의 **모든** 컨트롤을 30초마다 잠갔다 ──
+  //
+  // `checkingConnection`이 `busy`를 켰고, 화면의 탈출구 링크("번호 다시 인증하기" — 모든
+  // stage의 유일한 출구)·"본인이 아니에요"·"계정 삭제"가 전부 그 하나를 봤다. 사용자가
+  // 시작한 적 없는 동작이고, 느린 회선에선 그 잠금이 5~10초씩 이어져 "확인 중"이 아니라
+  // "얼었다"로 읽힌다. 자동 틱은 자기 줄만 잠근다.
+  //
+  // 뮤테이션: `checkConnection(auto: true)`의 `auto`를 지워 종전처럼 `checkingConnection`을
+  // 켜면 아래 두 건이 죽는다.
+  testWidgets('C10 — 자동 틱이 도는 동안 busy는 꺼져 있다 (탈출구가 살아 있다)', (tester) async {
+    final gate = Completer<Result<AppSession>>();
+    repo.pendingLoadSession = gate.future;
+    await mount(tester);
+
+    expect(read().autoChecking, isTrue, reason: '틱은 날아가는 중이다');
+    expect(read().busy, isFalse, reason: '화면 컨트롤을 잠그는 플래그는 꺼져 있어야 한다');
+    expect(read().checkingConnection, isFalse);
+
+    repo.pendingLoadSession = null;
+    gate.complete(const Err(MemberNotLinkedFailure()));
+    await tester.pump();
+    expect(read().autoChecking, isFalse);
+    await unmount(tester);
+  });
+
+  testWidgets('C10 — 자동 틱 실패는 빨간 문구를 남기지 않는다 (30초마다 깜빡이던 자리)', (tester) async {
+    repo.sessionResult = const Err(NetworkFailure());
+    await mount(tester);
+
+    expect(read().error, isNull, reason: '실패 사실은 확인 상태 줄의 "HH:mm 확인 못 함"이 말한다');
+    expect(read().lastCheckFailedAt, isNotNull);
+    await unmount(tester);
+  });
 
   testWidgets('마운트 시 서버 미확답(unknown)이면 즉시 1회', (tester) async {
     await mount(tester);

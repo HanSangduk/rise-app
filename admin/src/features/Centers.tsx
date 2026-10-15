@@ -22,6 +22,7 @@
 
 import { useState } from "react";
 import { Building2, Plus } from "lucide-react";
+import { sendPasswordResetEmail } from "firebase/auth";
 import {
   Badge,
   Button,
@@ -41,6 +42,9 @@ import {
   TR,
   Table,
 } from "../components/ui";
+import { auth } from "../lib/firebase";
+import { mailErrorKo } from "../lib/firebaseErrorKo";
+import { InitialPasswordNotice } from "./InitialPasswordNotice";
 import { useAdminCenters, useCreateCenter } from "../lib/queries";
 import { CENTER_ID_PATTERN, type CenterCreated } from "../lib/types";
 
@@ -55,6 +59,14 @@ export function Centers() {
   const centers = useAdminCenters();
   const [open, setOpen] = useState(false);
   const [created, setCreated] = useState<CenterCreated | null>(null);
+  // 대표 이메일은 **서버 응답에 없다**(domain.Staff에 email 필드가 없어 계정 발급 후 버려진다).
+  // 그래서 폼이 알고 있는 값을 위로 올려 받는다 — 로그인 ID라 화면에서 사라지면 안 된다.
+  const [createdOwnerEmail, setCreatedOwnerEmail] = useState("");
+  // 비밀번호 설정 메일 발송 결과. null=아직/해당없음, ""=성공, 그 외=실패 사유(v2.36).
+  // 계정 생성과 **분리해서** 들고 있는 이유는 트레이너 초대(Settings.tsx InviteStaffModal)가
+  // 세운 규약과 같다: 메일 실패는 초대 실패가 아니다 — 계정은 이미 만들어졌고, 화면이 그
+  // 사실과 대안(구두 전달)을 함께 말해야 한다.
+  const [mailError, setMailError] = useState<string | null>(null);
 
   return (
     <div className="space-y-4">
@@ -126,9 +138,11 @@ export function Centers() {
       <CreateCenterModal
         open={open}
         onClose={() => setOpen(false)}
-        onCreated={(res) => {
+        onCreated={(res, ownerEmail, mailErr) => {
           setOpen(false);
           setCreated(res);
+          setCreatedOwnerEmail(ownerEmail);
+          setMailError(mailErr);
         }}
       />
 
@@ -142,17 +156,35 @@ export function Centers() {
               닫기
             </Button>
           </CardHeader>
-          <CardContent className="space-y-2 text-[13.5px] leading-relaxed">
+          <CardContent className="space-y-3 text-[13.5px] leading-relaxed">
             <p>
               센터 <b className="text-ink">{created.center.name}</b>(
               <span className="font-mono">{created.center.id}</span>)와 대표{" "}
               <b className="text-ink">{created.owner.name}</b> 계정을 만들었습니다.
             </p>
+
+            {/* v2.36 — 이 카드의 핵심. 종전엔 "비밀번호 재설정을 받으라고 안내하세요"라는 문장뿐이라
+                superadmin이 대표에게 줄 수 있는 것이 아무것도 없었다(메일도 안 나갔다). */}
+            <InitialPasswordNotice
+              email={createdOwnerEmail}
+              password={created.initial_password}
+              who="대표"
+            />
+
+            {mailError === "" ? (
+              <p className="text-[12.5px] text-ok">
+                비밀번호 설정 메일도 함께 보냈어요 — 대표가 메일로 직접 정해도 됩니다.
+              </p>
+            ) : mailError ? (
+              <p className="text-[12.5px] text-warn">
+                비밀번호 설정 메일은 보내지 못했어요({mailError}). 위 비밀번호로 로그인하면 되고,
+                메일이 필요하면 대표가 로그인 화면의 "비밀번호를 잊으셨나요"를 누르면 됩니다.
+              </p>
+            ) : null}
+
             <p className="text-muted">
-              대표에게 다음을 안내하세요. ① 어드민 주소로 접속 ② 방금 등록한 이메일로{" "}
-              <b className="text-ink">비밀번호 재설정</b>을 받아 로그인 ③ 로그인 후{" "}
-              <b className="text-ink">설정</b>에서 센터 신원·사업자 정보·운영 정책을 채우고 직원과
-              회원을 등록. 회원이 앱에서 연결되는 데 필요한 것은{" "}
+              대표가 로그인한 뒤 <b className="text-ink">설정</b>에서 센터 신원·사업자 정보·운영
+              정책을 채우고 직원과 회원을 등록하면 됩니다. 회원이 앱에서 연결되는 데 필요한 것은{" "}
               <b className="text-ink">회원 등록 시 입력한 휴대폰 번호</b>뿐입니다.
             </p>
           </CardContent>
@@ -169,7 +201,7 @@ function CreateCenterModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onCreated: (res: CenterCreated) => void;
+  onCreated: (res: CenterCreated, ownerEmail: string, mailError: string | null) => void;
 }) {
   const [id, setId] = useState("");
   const [name, setName] = useState("");
@@ -195,23 +227,34 @@ function CreateCenterModal({
   const canSubmit =
     idOk && name.trim() !== "" && ownerName.trim() !== "" && emailOk && !create.isPending;
 
-  function submit() {
+  // v2.36 — 생성 뒤 **비밀번호 설정 메일까지** 보낸다. 종전엔 이 호출이 없어서(트레이너 초대
+  // 화면에만 있었다) 새 센터 대표는 메일도 못 받고 비밀번호도 모르는 계정만 받았다.
+  //
+  // 메일 실패를 생성 실패로 되돌리지 않는다(InviteStaffModal이 세운 규약): 계정은 이미
+  // 만들어졌고, 이제는 최초 비밀번호라는 대체 경로가 응답에 실려 오므로 메일이 실패해도
+  // 대표는 로그인할 수 있다. 실패 사유는 화면이 그대로 말한다.
+  async function submit() {
     if (!canSubmit) return;
-    create.mutate(
-      {
+    const email = ownerEmail.trim().toLowerCase();
+    try {
+      const res = await create.mutateAsync({
         id: id.trim().toLowerCase(),
         name: name.trim(),
         phone: phone.trim(),
         address: address.trim(),
-        owner: { name: ownerName.trim(), email: ownerEmail.trim().toLowerCase() },
-      },
-      {
-        onSuccess: (res) => {
-          reset();
-          onCreated(res);
-        },
-      },
-    );
+        owner: { name: ownerName.trim(), email },
+      });
+      let mailError: string | null = "";
+      try {
+        await sendPasswordResetEmail(auth, email);
+      } catch (e) {
+        mailError = mailErrorKo(e);
+      }
+      reset();
+      onCreated(res, email, mailError);
+    } catch {
+      // 생성 실패는 useCreateCenter의 error 상태가 이미 화면에 그린다(아래 ErrorState).
+    }
   }
 
   return (
@@ -221,6 +264,7 @@ function CreateCenterModal({
         reset();
         onClose();
       }}
+      closeDisabled={create.isPending}
       title="새 센터 등록"
     >
       <div className="space-y-4">

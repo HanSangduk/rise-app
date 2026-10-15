@@ -10,9 +10,21 @@ import (
 
 // Staff — 직원(대표|트레이너, API계약 v1 + v1.6 profile + v2.0 생애주기).
 type Staff struct {
-	UID     string   `json:"uid"`
-	Role    string   `json:"role"` // owner|trainer
-	Name    string   `json:"name"`
+	UID  string `json:"uid"`
+	Role string `json:"role"` // owner|trainer
+	Name string `json:"name"`
+	// Email — 이 사람이 **로그인할 때 쓰는 ID**(Firebase 이메일 계정, v2.36).
+	//
+	// 종전엔 저장하지 않았다("계정 발급용 일회성 입력"). 그 결과 "트레이너가 로그인이 안 돼요"
+	// 연락을 받은 대표가 그 사람의 등록 이메일을 확인할 방법이 제품 안에 없었다 — Firebase
+	// 콘솔뿐이고, 오타로 만들었어도 알 길이 없었다(P71 검수).
+	//
+	// **마스킹 대상이다**: ListStaff는 회원 앱의 코치 소개도 쓰는 응답이라, owner가 아니면
+	// 자기 것만 보이고 회원에게는 아예 안 나간다(payout 마스킹과 같은 자리·같은 규율).
+	// omitempty인 이유: 마스킹된 응답과 **v2.36 이전에 만들어진 레코드**가 같은 모양이어야
+	// 한다(마이그레이션 없이 동작 — Status 빈 값 승격과 같은 규약). 빈 값 = "모른다"이지
+	// "이메일이 없다"가 아니다.
+	Email   string   `json:"email,omitempty"`
 	Color   string   `json:"color"`
 	Payout  Payout   `json:"payout"`
 	Offdays []string `json:"offdays"` // "YYYY-MM-DD" 목록

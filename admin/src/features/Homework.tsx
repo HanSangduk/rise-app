@@ -87,6 +87,36 @@ export function Homework() {
   // manuallyIncluded는 scope를 바꿔도 남는 state다 — 지금 실제로 부상 제외 대상인 사람만 싣는다.
   const includeIds = injuredInScope.filter((m) => manuallyIncluded.has(m.id)).map((m) => m.id);
 
+  // 센터 공지형(전 회원) 배정의 2단 확인. 서버에 Home Work **삭제 API가 없다**
+  // (router.go: GET·POST /homeworks 둘뿐) — 한 번 나간 배정은 전 회원 앱 홈에 그대로 남고
+  // 회수할 방법이 어드민에도 서버에도 없다. 개인·담당 전체 배정과 달리 "잘못 보냈으면 그
+  // 회원에게 말하면 되는" 범위를 넘어서므로, 되돌릴 수 없는 다른 동작들(노쇼·환불·납부 확정)과
+  // 같은 인라인 2단 확인을 건다.
+  const [assignConfirm, setAssignConfirm] = useState(false);
+  const needsAssignConfirm = scope === "center_notice";
+
+  // 템플릿 칩이 입력분을 덮어쓰기 전에 받는 확인(=고른 템플릿 이름). null이면 확인 대기 없음.
+  const [templateConfirm, setTemplateConfirm] = useState<string | null>(null);
+  // "지금 입력분이 있다" 판정. 이름·횟수·메모 어느 칸이든 손댔으면 덮어쓰기가 손실이다 —
+  // sets는 초기값 3이 들어 있어 판정에서 뺀다(안 건드린 새 행도 dirty로 잡히면 확인이 늘 뜬다).
+  const itemsDirty = items.some(
+    (it) => it.name.trim() !== "" || it.reps.trim() !== "" || it.note.trim() !== "",
+  );
+  const filledItemCount = items.filter(
+    (it) => it.name.trim() !== "" || it.reps.trim() !== "" || it.note.trim() !== "",
+  ).length;
+
+  function applyTemplate(name: string, mode: "replace" | "append") {
+    const tpl = TEMPLATES[name].map((it) => ({ ...it }));
+    setItems((prev) =>
+      mode === "replace"
+        ? tpl
+        : // 빈 행(아직 아무것도 안 적은 마지막 줄)까지 남기면 배정 항목 사이에 구멍이 생긴다.
+          [...prev.filter((it) => it.name.trim() !== ""), ...tpl],
+    );
+    setTemplateConfirm(null);
+  }
+
   function toggleManualInclude(id: string) {
     setManuallyIncluded((prev) => {
       const next = new Set(prev);
@@ -141,6 +171,11 @@ export function Homework() {
         onSuccess: () => {
           setItems([{ name: "", sets: 3, reps: "", note: "" }]);
           setManuallyIncluded(new Set());
+          // 확인 패널을 닫는다 — 남겨두면 폼이 비워진 상태에서 "확정" 버튼이 계속 떠 있어
+          // 같은 배정을 한 번 더 보낸 것처럼 읽힌다(회수 수단이 없는 동작이라 더 위험하다).
+          setAssignConfirm(false);
+          // 템플릿 확인도 함께 닫는다 — 항목이 비워졌으니 "0개 항목을 덮어쓴다"는 물음만 남는다.
+          setTemplateConfirm(null);
         },
       },
     );
@@ -157,15 +192,46 @@ export function Homework() {
         <Card>
           <CardHeader>
             <CardTitle>새 Home Work 배정</CardTitle>
+            {/* 센터 공지형(전 회원)은 확인을 한 단계 거친다 — 아래 assignConfirm 주석. */}
             <Button
               size="sm"
               disabled={submitBlocked || createHomework.isPending}
-              onClick={submit}
+              onClick={() => (needsAssignConfirm ? setAssignConfirm(true) : submit())}
             >
               <Send className="h-3.5 w-3.5" /> {createHomework.isPending ? "배정 중…" : "배정 → 앱 전송"}
             </Button>
           </CardHeader>
           <CardContent>
+            {/* needsAssignConfirm까지 함께 보는 이유: 확인을 띄운 뒤 배정 대상 칩을 바꾸면
+                패널만 남아 "무엇을 확인하는 중인지"가 화면과 어긋난다. */}
+            {assignConfirm && needsAssignConfirm && (
+              <div className="mb-2.5 rounded-[10px] border border-danger/40 bg-danger/[0.08] p-3">
+                <p className="text-[11.5px] leading-relaxed text-danger">
+                  <AlertTriangle className="mr-1 -mt-0.5 inline h-3.5 w-3.5" />
+                  센터 <b>전 회원 {finalTargets.length}명</b>의 앱 홈에 이 과제가 뜹니다.{" "}
+                  <b>배정 후에는 취소할 수 없어요</b> — 배정을 지우는 기능이 아직 없어서, 잘못
+                  보내도 회수하거나 수정할 수 없습니다. 대상·항목·기간을 한 번만 더 봐주세요.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={submitBlocked || createHomework.isPending}
+                    onClick={submit}
+                  >
+                    {createHomework.isPending ? "배정 중…" : "전 회원에게 배정 확정"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={createHomework.isPending}
+                    onClick={() => setAssignConfirm(false)}
+                  >
+                    돌아가기
+                  </Button>
+                </div>
+              </div>
+            )}
             {weeklyDaysMissing && (
               <p className="mb-2 text-[11px] text-warn">매주 반복은 요일을 1개 이상 선택해야 배정할 수 있어요.</p>
             )}
@@ -274,16 +340,56 @@ export function Homework() {
             <div className="mt-2.5 text-[11.5px]">
               <span className="text-muted">템플릿: </span>
               {Object.keys(TEMPLATES).map((name) => (
-                <Chip key={name} onClick={() => setItems(TEMPLATES[name].map((it) => ({ ...it })))}>
+                <Chip
+                  key={name}
+                  active={templateConfirm === name}
+                  onClick={() => {
+                    // 빈 폼이면 종전대로 즉시 채운다 — 잃을 것이 없는 자리에 마찰을 더하지 않는다.
+                    if (!itemsDirty) {
+                      applyTemplate(name, "replace");
+                      return;
+                    }
+                    setTemplateConfirm((cur) => (cur === name ? null : name));
+                  }}
+                >
                   {name}
                 </Chip>
               ))}
             </div>
+            {/* 템플릿 칩이 **손으로 넣던 항목을 통째로 덮어쓰던 자리**다. 칩이 에디터 아래에
+                있어 더 잘 눌리는데 되돌리기(undo)가 없어, 한 번의 오클릭이 방금 적은 과제를
+                지웠다. 빈 폼이 아니면 무엇이 일어나는지 먼저 말하고 두 갈래를 준다 —
+                "덮어쓰기"는 잃는 것을 수로 밝히고, "뒤에 추가"는 아무것도 잃지 않는 쪽이다.
+                Modal 대신 인라인 패널인 이유는 이 폼의 다른 확인들(예약 화면 노쇼·취소 패널)과
+                같은 규약이고, window.confirm은 이 어드민 어디에도 쓰지 않기 때문이다. */}
+            {templateConfirm && (
+              <div className="mt-1.5 rounded-[10px] border border-warn/40 bg-warn/[0.08] p-2.5">
+                <p className="text-[11px] leading-relaxed text-warn">
+                  <b>{templateConfirm}</b> 템플릿 {TEMPLATES[templateConfirm].length}항목을
+                  넣습니다. 지금 입력한 {filledItemCount}개 항목을 <b>덮어쓰면 되돌릴 수 없어요</b>.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <Button size="sm" variant="danger" onClick={() => applyTemplate(templateConfirm, "replace")}>
+                    덮어쓰기
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => applyTemplate(templateConfirm, "append")}>
+                    뒤에 추가
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setTemplateConfirm(null)}>
+                    취소
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* 배정 실패 메시지는 폼 상단(성공 문구 옆) 1곳에서만 — 같은 에러 이중 표시 제거. */}
+            {/* 이 폼의 비가역성을 한자리에 적는다 — 배정도, 템플릿 덮어쓰기도 되돌리는 버튼이
+                없다. 확인 패널은 누른 뒤에야 보이지만 이 문장은 누르기 전부터 보인다. */}
             <p className="mt-2.5 text-[10.5px] leading-relaxed text-muted">
-              배정하면 회원 앱 홈에 뜨고, 회원이 체크하면 완료율로 집계됩니다. 리마인드 푸시
-              발송은 준비 중이에요.
+              배정하면 회원 앱 홈에 뜨고, 회원이 체크하면 완료율로 집계됩니다.{" "}
+              <b className="text-warn">배정을 취소·수정하는 기능이 아직 없어요</b> — 보내기 전에
+              대상과 항목을 확인해주세요. 템플릿 칩도 지금 입력한 항목을 덮어쓰면 되돌릴 수
+              없습니다(덮어쓰기 전에 한 번 물어봐요). 리마인드 푸시 발송은 준비 중이에요.
             </p>
           </CardContent>
         </Card>
@@ -330,11 +436,20 @@ function ItemsEditor({
   return (
     <div className="space-y-1.5">
       {items.map((it, i) => (
-        <div key={i} className="grid grid-cols-[1fr_70px_90px_1fr_28px] items-center gap-1.5">
+        // 폰 폭(375px)에서 5열 고정 grid는 각 칸이 50px 아래로 찌그러져 placeholder조차 안 보였다
+        // — 이 저장소는 "폰 브라우저에서 Home Work까지 가능합니다"라고 약속하고 있다(README).
+        // 좁을 땐 2열로 접어(항목명·메모는 전폭, 세트/횟수는 반반) 각 칸이 실제 입력 가능한
+        // 폭을 갖게 하고, sm(640px) 이상에서만 종전의 한 줄 5열로 편다. 행 경계가 사라지면
+        // 어느 줄이 한 항목인지 알 수 없으므로 좁을 때만 테두리를 준다.
+        <div
+          key={i}
+          className="grid grid-cols-2 items-center gap-1.5 rounded-[10px] border border-line/60 p-1.5 sm:grid-cols-[1fr_70px_90px_1fr_28px] sm:border-0 sm:p-0"
+        >
           <Input
             value={it.name}
             onChange={(e) => onUpdate(i, { name: e.target.value })}
             placeholder="항목명(예: 밴드 외회전)"
+            className="col-span-2 sm:col-span-1"
           />
           <Input
             type="number"
@@ -343,10 +458,15 @@ function ItemsEditor({
             placeholder="세트"
           />
           <Input value={it.reps} onChange={(e) => onUpdate(i, { reps: e.target.value })} placeholder="15 / 30분" />
-          <Input value={it.note} onChange={(e) => onUpdate(i, { note: e.target.value })} placeholder="메모" />
+          <Input
+            value={it.note}
+            onChange={(e) => onUpdate(i, { note: e.target.value })}
+            placeholder="메모"
+            className="col-span-2 sm:col-span-1"
+          />
           <button
             onClick={() => onRemove(i)}
-            className="flex h-8 w-7 items-center justify-center rounded-lg text-muted hover:bg-panel-2 hover:text-danger"
+            className="col-span-2 flex h-8 w-7 items-center justify-center justify-self-end rounded-lg text-muted hover:bg-panel-2 hover:text-danger sm:col-span-1"
             aria-label="항목 삭제"
           >
             <Trash2 className="h-3.5 w-3.5" />

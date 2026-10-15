@@ -170,8 +170,11 @@ func writeAccessLine(out io.Writer, project string, r *http.Request, ww middlewa
 		}
 	}
 	p := e.principal
-	denied := status == http.StatusUnauthorized || status == http.StatusForbidden
-	// 스태프 전부 + 미인증(401 경로) + 역할 무관 거부. 회원 요청은 401·403 외(400·404·5xx 포함) 여기서 빠진다.
+	// 거부 = 401·403·429. 429(빈도 제한, v2.38)는 403과 같은 "오·남용 신호"라 회원 요청도 남긴다 —
+	// 제한기가 언제 무엇을 막았는지가 로그에 없으면 상한을 조정할 근거도, 앱의 호출 루프 버그를
+	// 알아챌 길도 없다(회원 쓰기 429는 uid 키라 이 라인이 유일한 관측점이다).
+	denied := status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusTooManyRequests
+	// 스태프 전부 + 미인증(401 경로) + 역할 무관 거부. 회원 요청은 401·403·429 외(400·404·5xx 포함) 여기서 빠진다.
 	if !(p.IsStaff() || p.IsSuperadmin() || !e.resolved || denied) {
 		return
 	}

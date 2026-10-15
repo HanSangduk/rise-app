@@ -16,15 +16,17 @@ import 'package:rise_member/core/api/staff_directory.dart';
 import 'package:rise_member/core/config/legal_links.dart';
 import 'package:rise_member/core/icons/rise_icon.dart';
 import 'package:rise_member/core/icons/rise_icons.dart';
+import 'package:rise_member/core/brand/rise_mark.dart';
 import 'package:rise_member/core/theme/app_colors.dart';
+import 'package:rise_member/core/utils/phone_format.dart';
 import 'package:rise_member/core/config/app_config.dart';
 import 'package:rise_member/features/auth/domain/auth_models.dart';
 import 'package:rise_member/core/theme/app_radius.dart';
 import 'package:rise_member/core/theme/app_typography.dart';
 import 'package:rise_member/core/utils/coach_label.dart';
-import 'package:rise_member/core/widgets/rise_badge.dart';
 import 'package:rise_member/core/widgets/legal_document_link.dart';
 import 'package:rise_member/core/widgets/rise_button.dart';
+import 'package:rise_member/core/widgets/underline_link.dart';
 import 'package:rise_member/core/widgets/rise_snack_bar.dart';
 import 'package:rise_member/core/widgets/trainer_avatar.dart';
 import 'package:rise_member/features/auth/presentation/auth_state.dart';
@@ -91,15 +93,37 @@ class CenterConfirmScreen extends ConsumerWidget {
         // 만든다(Flutter의 표준 관용구). 내용이 뷰포트보다 짧을 때의 그림은 종전과 같다.
         body: SafeArea(
           child: LayoutBuilder(
-            builder: (context, viewport) => SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 34, 20, 34),
+            builder: (context, viewport) {
+              // 세로가 빠듯한가 — 걸리면 **장식이 먼저 빠진다**(P72): 브랜드 마크·코치 줄이
+              // 사라지고 스텝퍼 행간이 좁아진다. 목적은 하나다 — 주 CTA를 접힘 **안**에 둔다.
+              //
+              // 임계가 미리보기의 `compact`(P69, 600)보다 **느슨한 640**인 이유: 이쪽은
+              // "장식을 버릴 것인가"라 더 일찍 발동해도 잃는 것이 분위기뿐이고, 미리보기
+              // 접힘은 P69가 시험으로 고정한 동작이라 그 임계를 움직이면 남의 결정을 덮는다.
+              // 640은 구형 5인치(360×640)와 iPhone SE(375×667의 SafeArea 차감분)를 덮고,
+              // 현역 6.1인치(844)는 종전 그림 그대로다.
+              final tight = viewport.maxHeight < 640 ||
+                  MediaQuery.textScalerOf(context).scale(1) >= 1.3;
+              return SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 34),
               child: ConstrainedBox(
                 // 34+34 = 세로 패딩만큼을 뺀 높이가 Column의 하한이다.
-                constraints: BoxConstraints(minHeight: math.max(0, viewport.maxHeight - 68)),
+                constraints: BoxConstraints(minHeight: math.max(0, viewport.maxHeight - 58)),
                 child: IntrinsicHeight(
                   child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // 브랜드 표식(P72) — 로그인 3화면이 `마크/워드마크 → 제목 → 부제` 한 문법으로
+                // 묶인다. 앱 전체에서 `RiseMark`를 쓰던 곳은 스플래시 하나뿐이었다.
+                //
+                // **가장 작은 화면·가장 큰 글자에서는 먼저 빠진다.** 320×568은 이 화면이
+                // 명시적으로 지키는 최소 조건이고, 거기서 46dp는 주 CTA를 접힘 아래로
+                // 밀어낸다 — 장식이 행동을 가리면 안 된다. `_AfterConnectPreview.compact`가
+                // 쓰는 임계와 같은 값을 쓴다(작은 화면에서 먼저 버리는 대상 = 부가 요소).
+                if (!tight) ...[
+                  const Center(child: RiseMark(size: 34)),
+                  const SizedBox(height: 12),
+                ],
                 // **제목·부제·본문을 `stage` 하나가 정한다**(P55).
                 //
                 // 종전엔 판별자가 다섯이었다: 제목은 고정 문자열, 부제는 `stage`,
@@ -116,14 +140,17 @@ class CenterConfirmScreen extends ConsumerWidget {
                     // "취소"라 쓰지 않는다 — 취소할 연결이 없었다. 이 단계는 "본인이 아니에요"로
                     // 연결을 **하지 않은** 것이고, "취소했어요"는 끊긴 계정으로 읽힌다(P63).
                     CenterConfirmStage.declined => '이 번호로는 연결하지 않았어요',
-                    CenterConfirmStage.connectionUnknown => '연결 상태를 확인하지 못했어요',
+                    CenterConfirmStage.connectionUnknown => '센터에 연결됐는지 확인하지 못했어요',
                     // "센터 선택"이라 쓰지 않는다 — 고를 목록이 없다. 화면 이름이
                     // 기능을 앞지른 것이 이 화면 문제의 절반이었다.
                     CenterConfirmStage.rejected => '센터에서 연결하지 않았어요',
                     CenterConfirmStage.notFound => '아직 연결된 센터가 없어요',
                   },
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                  // 16 → 19(P72). 본문 12.5의 1.28배로는 위계가 서지 않아, 눈에 먼저 들어오는
+                  // 순서가 (1) 네이비 CTA (2) 미리보기 아이콘 (3) 스텝퍼 (4) **제목**이었다 —
+                  // "무슨 일이 일어났는가"가 네 번째였다.
+                  style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 4),
                 // **제목+부제는 사실만**(P63) — 서버가 아는 만큼만 말한다. 원인 가설("번호가
@@ -137,15 +164,34 @@ class CenterConfirmScreen extends ConsumerWidget {
                     // 말하고, 백그라운드 승인은 앱을 다시 열 때 안다. 부제는 서버가 아는 사실만.
                     CenterConfirmStage.pendingApproval => '센터가 승인하면 연결돼요',
                     CenterConfirmStage.declined => '이 번호로 찾은 회원이 본인이 아니라고 하셨어요',
-                    CenterConfirmStage.connectionUnknown => '네트워크가 돌아오면 다시 확인해주세요',
+                    CenterConfirmStage.connectionUnknown => '잠시 뒤 다시 확인해주세요',
                     // "다른 센터로 보낸 요청"이라 쓰지 않는다 — v1은 단일 센터라 그 선택지가 없다
                     // (계약 v2.27 center_id 규약). 성립하는 가설은 번호 하나뿐이다.
                     CenterConfirmStage.rejected => '요청에 적힌 번호가 등록된 번호와 다를 수 있어요',
                     CenterConfirmStage.notFound => '인증한 번호로 등록된 회원을 찾지 못했어요',
                   },
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                  style: const TextStyle(fontSize: 11.5, height: 1.45, color: AppColors.muted),
                 ),
+                const SizedBox(height: 4),
+                // **인증한 번호를 보여준다**(P72). 부제가 "인증한 번호로 등록된 회원을 찾지
+                // 못했어요"라고 말하는데 그 번호가 화면 어디에도 없었다(`state.phone` 사용 0건).
+                // 미연결의 다수 원인이 "센터엔 다른 번호를 적었다"인데, 문제 해결의 첫 단계가
+                // "내가 방금 무슨 번호로 인증했지?"라 그 한 줄이 없으면 힌트가 추상적으로 읽힌다.
+                // 대기(pending)는 스텝퍼가 자리를 차지하므로 생략한다.
+                if (switch (stage) {
+                  CenterConfirmStage.notFound ||
+                  CenterConfirmStage.declined ||
+                  CenterConfirmStage.rejected =>
+                    formatKoreanPhoneForDisplay(state.phone),
+                  _ => '',
+                } case final shown when shown.isNotEmpty) ...[
+                  Text(
+                    '$shown로 인증했어요',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 ...switch (stage) {
                   // 매칭됨 — 이름 확인이 본체. "제가 아니에요"(가입 요청)는 부차 경로로 남긴다.
@@ -154,6 +200,7 @@ class CenterConfirmScreen extends ConsumerWidget {
                       memberName: member!.name,
                       trainerName: state.trainerName,
                       trainer: trainer,
+                      matchedCenterName: state.match?.centerName ?? '',
                     ),
                     const SizedBox(height: 10),
                     _NotMeCard(
@@ -167,10 +214,17 @@ class CenterConfirmScreen extends ConsumerWidget {
                   // 확인했나·지금 확인)이 흡수한다. "다시 요청"은 서버가 pending을 확답하지 않은
                   // 상태에서만 남는다([AuthState.canRetryJoinRequest] — 확답 뒤 재요청은 100% 409).
                   CenterConfirmStage.pendingApproval => [
-                    LobbyAutoCheck(onConnected: () => _goHome(context)),
+                    // `onMatched`가 여기 있는 것이 P72 C1의 핵심이다: 요청을 보낸 뒤 데스크가
+                    // 그 사람을 직접 등록하면 대표는 큐에서 승인할 수 없고(중복 번호 409),
+                    // `/v1/me`는 uid만 보므로 이 화면은 영원히 "기다리는 중"이었다.
+                    LobbyAutoCheck(
+                      onConnected: () => _goHome(context),
+                      onMatched: () => _announceMatched(context, ref),
+                    ),
                     LobbyProgress(
                       step: state.lobbyStep ?? LobbyStep.waiting,
                       availableWidth: viewport.maxWidth - 40,
+                      dense: tight,
                       requestedAt: state.joinRequestedAt,
                       requestConfirmed: state.joinRequestTrace == JoinRequestTrace.pending,
                     ),
@@ -178,8 +232,12 @@ class CenterConfirmScreen extends ConsumerWidget {
                     CheckStatusLine(
                       lastCheckedAt: state.lastCheckedAt,
                       lastCheckFailedAt: state.lastCheckFailedAt,
-                      checking: state.checkingConnection,
-                      busy: state.busy,
+                      // 자동 틱은 **이 줄만** 잠근다(P72 C10) — 같은 조회를 겹쳐 보낼 수 있는
+                      // 유일한 컨트롤이 [지금 확인]이고, 나머지(탈출구 링크·계정 삭제)는
+                      // 자동 틱과 아무 관계가 없다. 종전엔 셋이 함께 30초마다 회색이 됐다.
+                      // 문구가 '확인 중'으로 바뀌는 것이 곧 "화면이 살아 있다"는 신호다.
+                      checking: state.checkingConnection || state.autoChecking,
+                      busy: state.busy || state.autoChecking,
                       onCheck: () => _check(context, ref),
                       autoEnabled: autoEnabled,
                     ),
@@ -200,7 +258,10 @@ class CenterConfirmScreen extends ConsumerWidget {
                   // 연결된 회원일 수 있고, 그 요청은 대표 화면에 중복 줄을 만든다.
                   // 자동 확인은 여기서도 돈다(앱 재개·네트워크 복귀가 곧 재확인이다).
                   CenterConfirmStage.connectionUnknown => [
-                    LobbyAutoCheck(onConnected: () => _goHome(context)),
+                    LobbyAutoCheck(
+                      onConnected: () => _goHome(context),
+                      onMatched: () => _announceMatched(context, ref),
+                    ),
                     const _ConnectionUnknownCard(),
                   ],
                   // **본인 아님·거절·빈 상태는 연락 카드 한 장이다**(P63). 종전엔 세 단계마다
@@ -220,9 +281,29 @@ class CenterConfirmScreen extends ConsumerWidget {
                   // notFound·declined는 스텝퍼 `● 가입 요청`이 "당신은 2단계 앞에 서 있다"로 CTA를
                   // 설명한다. 확인 상태 줄은 없다 — 확인할 요청이 없다.
                   CenterConfirmStage.declined => [
+                    LobbyAutoCheck(
+                      immediate: false,
+                      onConnected: () => _goHome(context),
+                      onMatched: () => _announceMatched(context, ref),
+                    ),
                     LobbyProgress(
                       step: state.lobbyStep ?? LobbyStep.requested,
                       availableWidth: viewport.maxWidth - 40,
+                      dense: tight,
+                    ),
+                    const SizedBox(height: 12),
+                    CheckStatusLine(
+                      awaiting: CheckAwaiting.registration,
+                      lastCheckedAt: state.lastCheckedAt,
+                      lastCheckFailedAt: state.lastCheckFailedAt,
+                      // 자동 틱은 **이 줄만** 잠근다(P72 C10) — 같은 조회를 겹쳐 보낼 수 있는
+                      // 유일한 컨트롤이 [지금 확인]이고, 나머지(탈출구 링크·계정 삭제)는
+                      // 자동 틱과 아무 관계가 없다. 종전엔 셋이 함께 30초마다 회색이 됐다.
+                      // 문구가 '확인 중'으로 바뀌는 것이 곧 "화면이 살아 있다"는 신호다.
+                      checking: state.checkingConnection || state.autoChecking,
+                      busy: state.busy || state.autoChecking,
+                      onCheck: () => _check(context, ref),
+                      autoEnabled: autoEnabled,
                     ),
                     const SizedBox(height: 14),
                     _CenterCard(hint: _Hints.declined, centerId: lobbyCenterId),
@@ -233,35 +314,75 @@ class CenterConfirmScreen extends ConsumerWidget {
                     const SizedBox(height: 10),
                     _CenterCard(hint: _Hints.rejected, centerId: lobbyCenterId),
                   ],
+                  // 확인 줄이 여기 있어야 하는 이유(P72 C1): 이 화면의 힌트가 지시하는 행동이
+                  // "데스크에서 번호를 고치거나 등록한 뒤"인데, 그게 끝났는지 물어볼 버튼이
+                  // 종전엔 화면에 없었다. `번호 다시 인증하기`(SMS 왕복)만이 유일한 길이었다.
                   CenterConfirmStage.notFound => [
+                    LobbyAutoCheck(
+                      immediate: false,
+                      onConnected: () => _goHome(context),
+                      onMatched: () => _announceMatched(context, ref),
+                    ),
                     LobbyProgress(
                       step: state.lobbyStep ?? LobbyStep.requested,
                       availableWidth: viewport.maxWidth - 40,
+                      dense: tight,
+                    ),
+                    const SizedBox(height: 12),
+                    CheckStatusLine(
+                      awaiting: CheckAwaiting.registration,
+                      lastCheckedAt: state.lastCheckedAt,
+                      lastCheckFailedAt: state.lastCheckFailedAt,
+                      // 자동 틱은 **이 줄만** 잠근다(P72 C10) — 같은 조회를 겹쳐 보낼 수 있는
+                      // 유일한 컨트롤이 [지금 확인]이고, 나머지(탈출구 링크·계정 삭제)는
+                      // 자동 틱과 아무 관계가 없다. 종전엔 셋이 함께 30초마다 회색이 됐다.
+                      // 문구가 '확인 중'으로 바뀌는 것이 곧 "화면이 살아 있다"는 신호다.
+                      checking: state.checkingConnection || state.autoChecking,
+                      busy: state.busy || state.autoChecking,
+                      onCheck: () => _check(context, ref),
+                      autoEnabled: autoEnabled,
                     ),
                     const SizedBox(height: 14),
                     _CenterCard(hint: _Hints.notFound, centerId: lobbyCenterId),
                   ],
                 },
+                // 코치 줄을 `tight`로 접지 **않는다**(P72에서 검토 후 기각): P69가 stage별
+                // 노출 규칙을 시험 6건으로 고정한 기능이라, 세로 예산을 벌자고 그 결정을
+                // 덮으면 남의 근거를 지우는 것이다. 필요한 공간은 마크 제거(46dp) +
+                // 스텝퍼 dense(18dp)로 이미 나왔다.
                 if (coachRowAllowed) const _CoachPreviewRow(),
                 if (showroom) ...[
                   const SizedBox(height: 10),
                   _AfterConnectPreview(
                     // 작은 화면·큰 배율에서는 접힌다(plan B §4) — 데이터가 없으면 사라지고, 공간이
                     // 없으면 접힌다. 절대 넘치지 않는다.
+                    // 미리보기 접힘은 P69가 정한 임계 그대로(위 `tight`와 분리).
                     compact: viewport.maxHeight < 600 ||
                         MediaQuery.textScalerOf(context).scale(1) >= 1.3,
                   ),
                 ],
                 const Spacer(),
                 if (state.error != null) ...[
-                  Text(
-                    state.error!.message,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 11.5, color: AppColors.danger),
+                  // liveRegion — 이 줄은 사용자가 포커스를 옮기지 않아도 알아야 하는 사실이다
+                  // (요청이 왜 안 나갔는지를 말하는 유일한 문장).
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      state.error!.message,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 11.5, color: AppColors.danger),
+                    ),
                   ),
                   const SizedBox(height: 8),
                 ],
-                _CtaBlock(
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 220),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  // stage가 CTA의 **정체**를 정한다 — 키를 주지 않으면 같은 위젯 타입이라
+                  // 교체로 인식되지 않아 크로스페이드가 일어나지 않는다.
+                  child: _CtaBlock(
+                  key: ValueKey(stage),
                   stage: stage,
                   memberName: member?.name,
                   busy: state.busy,
@@ -270,6 +391,7 @@ class CenterConfirmScreen extends ConsumerWidget {
                   onRestart: () => _restart(context, ref),
                   onCheck: () => _check(context, ref),
                   onRequestJoin: () => _showJoinRequestSheet(context),
+                  ),
                 ),
                 const SizedBox(height: 10),
                 // 종전 문구의 뒷부분("한 계정으로 여러 센터 이용 가능 — 홈 상단에서
@@ -282,7 +404,7 @@ class CenterConfirmScreen extends ConsumerWidget {
                 // "바로 홈으로"의 "바로"도 뺐다(P69 C1) — 확인 주기만큼 늦는다.
                 if (switch (stage) {
                   CenterConfirmStage.matched => '번호가 잘못 등록됐을 때 남의 계정에 연결되지 않도록 이름을 한 번 확인해요.',
-                  CenterConfirmStage.pendingApproval => '앱을 껐다 켜도 이 화면으로 돌아와요. 연결되면 홈으로 들어가요.',
+                  CenterConfirmStage.pendingApproval => '앱을 껐다 켜도 이 화면으로 돌아와요. 승인되면 다음에 앱을 열 때 홈으로 들어가요.',
                   _ => showroom ? null : '연결되면 예약·운동 기록·체형 사진을 여기서 볼 수 있어요.',
                 } case final note?) ...[
                   Text(note, textAlign: TextAlign.center, style: AppTypography.note),
@@ -308,7 +430,8 @@ class CenterConfirmScreen extends ConsumerWidget {
                   ),
                 ),
               ),
-            ),
+            );
+            },
           ),
         ),
       ),
@@ -359,24 +482,53 @@ class CenterConfirmScreen extends ConsumerWidget {
   }
 
   /// 연결이 확인됐다 — 수동 확인([_check])과 자동 확인([LobbyAutoCheck])이 같은 경로로 홈에 간다.
+  ///
+  /// **승인된 순간에만 침묵이었다**(P72 C9): 아무 일도 안 일어난 쪽(`notYet`)은 토스트를 띄우고,
+  /// 정작 기다리던 일이 일어난 쪽은 0ms 만에 화면이 사라졌다. 주머니 속에서 승인됐다면 흔적이
+  /// 남지 않는다. `ScaffoldMessenger`는 라우터 위에 있어 홈으로 간 뒤에도 이 줄이 남는다.
   void _goHome(BuildContext context) {
-    if (context.mounted) context.go('/home');
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(riseSnackBar('센터와 연결됐어요', kind: RiseSnackKind.ok));
+    context.go('/home');
+  }
+
+  /// 데스크가 그 사이 등록·정정해서 회원을 찾았다(P72 C1) — 화면은 이미 `matched`로 바뀌었고
+  /// 이름 확인 1탭이 남는다. 자동 확인이 조용히 바꿔 놓으면 **왜 화면이 달라졌는지** 알 수
+  /// 없으므로 한 줄로 말한다. 수동 확인([_check])도 같은 문장을 쓴다.
+  void _announceMatched(BuildContext context, WidgetRef ref) {
+    if (!context.mounted) return;
+    final name = ref.read(authViewModelProvider).match?.member?.name;
+    ScaffoldMessenger.of(context).showSnackBar(riseSnackBar(
+      name == null ? '센터에 등록된 회원 정보를 찾았어요' : '$name 님으로 등록된 정보를 찾았어요',
+      kind: RiseSnackKind.ok,
+    ));
   }
 
   /// "지금 확인" — 대표 승인 여부를 읽기만 한다(가입 요청과 달리 대표 화면에
   /// 아무 줄도 더 쌓지 않는다). 실패해도 대기 상태는 그대로 유지된다.
   /// 스낵바는 **수동 확인에만** — 자동 틱이 30초마다 토스트를 띄우면 소음이다.
   Future<void> _check(BuildContext context, WidgetRef ref) async {
+    // 누르기 **전** 단계를 기억한다 — 확인이 끝나면 stage가 바뀌어 있을 수 있고(그게 이
+    // 버튼의 목적이다), 그때 "아직 ~ 전이에요"를 새 stage로 고르면 방금 일어난 변화를
+    // 가리키게 된다.
+    final awaiting = ref.read(authViewModelProvider).centerConfirmStage;
     final messenger = ScaffoldMessenger.of(context);
     final result = await ref.read(authViewModelProvider.notifier).checkConnection();
     if (!context.mounted) return;
     switch (result) {
       case ConnectionCheck.connected:
         _goHome(context);
+      case ConnectionCheck.nowMatched:
+        _announceMatched(context, ref);
       case ConnectionCheck.notYet:
         // 실패가 아니다 — 조회는 성공했고 답이 "아직"일 뿐이라 중립색. "승인되면 바로 연결돼요"는
         // 뺐다(P69 C1) — 확인 주기만큼 늦고, 백그라운드에선 다음에 열 때 안다.
-        messenger.showSnackBar(riseSnackBar('아직 승인 전이에요'));
+        // 빈 상태에서 기다리는 것은 승인이 아니라 **등록**이다(P72 C1) — 보낸 적 없는 요청을
+        // 가리키지 않는다.
+        messenger.showSnackBar(riseSnackBar(
+          awaiting == CenterConfirmStage.pendingApproval ? '아직 승인 전이에요' : '아직 등록 전이에요',
+        ));
       case ConnectionCheck.failed:
         break; // 사유는 화면 인라인 문구(state.error)로 이미 보인다.
     }
@@ -448,23 +600,23 @@ class _LobbyFooterLinks extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const dot = Text(' · ', style: TextStyle(fontSize: 11, color: AppColors.muted));
+    const dot = Text(' · ', style: TextStyle(fontSize: 11.5, color: AppColors.muted));
     // Wrap: 글자 배율 1.35·320dp 폭에서 세 링크가 한 줄에 안 들어가면 줄바꿈된다.
     return Wrap(
       alignment: WrapAlignment.center,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        _UnderlineLink(
+        RiseUnderlineLink(
           label: '이용약관',
           onTap: () => openLegalDocument(context, LegalLinks.terms),
         ),
         dot,
-        _UnderlineLink(
+        RiseUnderlineLink(
           label: '개인정보처리방침',
           onTap: () => openLegalDocument(context, LegalLinks.privacy),
         ),
         dot,
-        _UnderlineLink(
+        RiseUnderlineLink(
           label: '계정 삭제',
           color: AppColors.danger,
           onTap: busy ? null : onDeleteAccount,
@@ -478,6 +630,7 @@ class _LobbyFooterLinks extends StatelessWidget {
 /// [_CtaBlock._restartLabel]("번호 다시 인증하기")이 함께 남는다(빈 CTA 블록이 나올 수 없는 구조).
 class _CtaBlock extends StatelessWidget {
   const _CtaBlock({
+    super.key,
     required this.stage,
     required this.memberName,
     required this.busy,
@@ -517,9 +670,9 @@ class _CtaBlock extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _UnderlineLink(label: '본인이 아니에요', onTap: busy ? null : () => onConfirm(false)),
-              const Text(' · ', style: TextStyle(fontSize: 11, color: AppColors.muted)),
-              _UnderlineLink(label: _restartLabel, onTap: busy ? null : onRestart),
+              RiseUnderlineLink(label: '본인이 아니에요', onTap: busy ? null : () => onConfirm(false)),
+              const Text(' · ', style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
+              RiseUnderlineLink(label: _restartLabel, onTap: busy ? null : onRestart),
             ],
           ),
         ],
@@ -540,7 +693,7 @@ class _CtaBlock extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Center(
-            child: _UnderlineLink(label: _restartLabel, onTap: busy ? null : onRestart),
+            child: RiseUnderlineLink(label: _restartLabel, onTap: busy ? null : onRestart),
           ),
         ],
       );
@@ -550,7 +703,7 @@ class _CtaBlock extends StatelessWidget {
     // (대기 카드 안에 [연결됐는지 확인]·[다시 요청]이 이미 있다.)
     if (stage == CenterConfirmStage.pendingApproval) {
       return Center(
-        child: _UnderlineLink(label: _restartLabel, onTap: busy ? null : onRestart),
+        child: RiseUnderlineLink(label: _restartLabel, onTap: busy ? null : onRestart),
       );
     }
 
@@ -574,7 +727,7 @@ class _CtaBlock extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Center(
-          child: _UnderlineLink(label: _restartLabel, onTap: busy ? null : onRestart),
+          child: RiseUnderlineLink(label: _restartLabel, onTap: busy ? null : onRestart),
         ),
       ],
     );
@@ -596,10 +749,24 @@ abstract final class _Hints {
   // "고치거나 등록한 뒤" — notFound의 원인 가설은 둘(번호 다름 / 등록 전)인데 종전 문장은 "고친
   // 뒤"만 말해 등록 전인 사람에게 고칠 번호가 있는 것처럼 읽혔다. "이름 확인 한 번으로"는 재인증
   // 뒤 실제로 오는 화면(matched의 "네, OO 본인이에요")이다 — 승인 큐를 거치지 않는다는 사실.
+  // **행동 주체를 명시한다**(P72). 종전 '데스크에서 번호를 고치거나 등록한 뒤'는 무주어라
+  // "(내가) 데스크에 가서"로도 "(직원이) 해주는 것"으로도 읽혔고, 같은 파일의 declined 힌트는
+  // 같은 행위를 '데스크에서 고쳐드려요'로 주체를 밝혀 두 문장이 서로 달랐다. 더 중요한 건
+  // `_Hints.pending`이 이미 세운 기준이다 — "연락 카드에 전화·주소가 비어 있어도 참인
+  // 문장이어야 한다". notFound에만 그 기준이 적용되지 않아, 전화 버튼이 없는 오늘 프로덕션
+  // 화면에서 이 문장은 내가 지금 할 수 있는 행동을 하나도 지시하지 못했다.
+  // '알려주면'은 수단을 묻지 않는다(전화·방문·메신저 무엇이든 참).
   static const notFound =
       '센터에 등록된 번호가 다르거나 아직 등록 전이면 자동 연결이 안 돼요. '
-      '데스크에서 번호를 고치거나 등록한 뒤 같은 번호를 다시 인증하면 이름 확인 한 번으로 연결돼요.';
+      '센터 데스크에 이 번호를 알려주면 등록·수정해 드려요 — 그 뒤 이 화면에서 [지금 확인]을 '
+      '누르면 이름 확인 한 번으로 연결돼요.';
   static const rejected = '데스크에 확인한 뒤 다시 요청할 수 있어요.';
+
+  /// 연락 카드에 전화·주소가 **둘 다 없을 때**의 마지막 수단은 문구가 아니라 링크다
+  /// (P72 C13 — `_CenterCard`의 '문의 방법 보기'). 거절 화면은 양방향 연락이 동시에 끊긴
+  /// 유일한 상태다: 서버가 거절 시 이름·번호를 지우므로 센터가 먼저 연락할 수 없고,
+  /// 센터 신원 세 칸은 대표가 어드민에서 채워야 생긴다. 그 조합에서 "데스크에 확인한 뒤"는
+  /// 막다른 길이라, 닿을 문을 하나는 남긴다.
   // "다른 센터 회원이면"이라 쓰지 않는다 — v1은 단일 센터다(rejected 부제와 같은 이유).
   // 재인증 단계를 빼먹지 않는다 — 데스크가 고쳐도 이 화면의 어떤 버튼도 매칭을 다시 하지
   // 않으므로(`join/match`는 코드 인증 직후에만), 고친 뒤의 행동까지 말해야 문장이 닫힌다.
@@ -610,46 +777,6 @@ abstract final class _Hints {
   // "문의할 수 있어요"가 아니라 "문의해주세요" — 연락 카드에 전화·주소가 비어 있어도(오늘
   // 프로덕션) 참인 문장이어야 한다. "할 수 있어요"는 이 카드에 수단이 있다는 뜻으로 읽힌다.
   static const pending = '승인이 늦으면 센터 데스크에 문의해주세요.';
-}
-
-class _UnderlineLink extends StatelessWidget {
-  const _UnderlineLink({required this.label, required this.onTap, this.color});
-
-  final String label;
-  final VoidCallback? onTap;
-
-  /// 활성 색(기본 muted). 되돌릴 수 없는 동작(계정 삭제)은 danger로 구분한다.
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    // 로그인 플로우의 최종 탈출구("번호 다시 인증하기", "본인이 아니에요") — 글자 상자만
-    // 누르면 ≈15dp였다. 투명 히트 영역을 GestureDetector 안쪽에 두고 opaque로 받는다.
-    // 높이는 **44dp 하한을 명시**한다 — 종전 세로 패딩 14×2 + 11px 글자는 43dp 남짓이라
-    // 글꼴·배율에 따라 44에 못 미쳤다(touch_target_test의 기준).
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 44),
-        child: Center(
-          widthFactor: 1,
-          heightFactor: 1,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                color: onTap == null ? AppColors.line : (color ?? AppColors.muted),
-                decoration: TextDecoration.underline,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 /// 가입 요청 시트 — 예약 확정 시트와 같은 Stateful 패턴:
@@ -699,8 +826,8 @@ class _JoinRequestSheetState extends ConsumerState<_JoinRequestSheet> {
           const Text('가입 요청', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
           const SizedBox(height: 6),
           const Text(
-            '이름·연락처로 가입 요청 → 센터에서 승인하면 연결돼요 (코드 입력 없음)',
-            style: TextStyle(fontSize: 11, color: AppColors.muted, height: 1.5),
+            '이름과 인증한 번호로 요청해요 → 센터에서 승인하면 연결돼요',
+            style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.5),
           ),
           // 센터 선택 — **고를 것이 2곳 이상일 때만 나타난다**(계약 v2.33). 한 곳뿐이면
           // 선택지가 없는 선택 화면이 되고, 회원에게 "고를 수 있다"는 거짓 인상만 준다.
@@ -715,7 +842,15 @@ class _JoinRequestSheetState extends ConsumerState<_JoinRequestSheet> {
           const SizedBox(height: 12),
           TextField(
             controller: _nameController,
-            decoration: const InputDecoration(hintText: '이름 입력 (연락처는 인증한 번호로 전송돼요)'),
+            // labelText·helperText로 나눈다(P72). hintText만 두면 한 글자라도 치는 순간
+            // 필드 이름이 semantics에서 빠지고, 괄호 안의 **유일한 고지**("연락처는 인증한
+            // 번호로 전송돼요")도 같이 사라진다 — 눈으로도, 스크린리더로도.
+            decoration: const InputDecoration(
+              labelText: '이름',
+              hintText: '이름 입력',
+              helperText: '연락처는 인증한 번호로 전송돼요',
+              helperMaxLines: 2,
+            ),
           ),
           if (_error != null) ...[
             const SizedBox(height: 8),
@@ -760,8 +895,8 @@ class _JoinRequestSheetState extends ConsumerState<_JoinRequestSheet> {
       // 않는다(P69 C1).
       messenger.showSnackBar(riseSnackBar(
         outcome == JoinRequestOutcome.alreadyPending
-            ? '이미 보낸 요청이 있어요 — 센터가 확인하면 연결돼요'
-            : '가입 요청 완료 — 센터가 승인하면 연결돼요',
+            ? '이미 보낸 요청이 있어요'
+            : '센터로 요청을 보냈어요',
         kind: RiseSnackKind.ok,
       ));
     } else {
@@ -813,7 +948,11 @@ class _CenterPicker extends ConsumerWidget {
             padding: const EdgeInsets.only(bottom: 6),
             child: GestureDetector(
               onTap: enabled ? () => onSelect(c.id) : null,
+              // 주소가 없는 센터는 상호 한 줄뿐이라 37.5dp였다(P72) — 44dp 규약은 이
+              // 화면의 밑줄 링크·코치 줄·미리보기가 이미 지키고 있던 값이다.
               child: Container(
+                constraints: const BoxConstraints(minHeight: 44),
+                alignment: Alignment.centerLeft,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
                 decoration: BoxDecoration(
                   color: c.id == selected ? AppColors.brandLight : Colors.transparent,
@@ -833,8 +972,10 @@ class _CenterPicker extends ConsumerWidget {
                               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
                           if (c.address.isNotEmpty) ...[
                             const SizedBox(height: 2),
+                            // 선택된 행의 면이 brandLight라 muted는 4.26:1이다(P72).
                             Text(c.address,
-                                style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+                                style: const TextStyle(
+                                    fontSize: 11.5, color: AppColors.badgeMutFg)),
                           ],
                         ],
                       ),
@@ -852,17 +993,30 @@ class _CenterPicker extends ConsumerWidget {
 }
 
 class _MatchedCenterCard extends ConsumerWidget {
-  const _MatchedCenterCard({required this.memberName, this.trainerName, this.trainer});
+  const _MatchedCenterCard({
+    required this.memberName,
+    this.trainerName,
+    this.trainer,
+    this.matchedCenterName = '',
+  });
   final String memberName;
   final String? trainerName;
 
   /// 스태프 캐시에서 보강한 담당 코치(P05) — 아바타·직함 표시용(best-effort).
   final StaffDto? trainer;
 
+  /// 매칭 응답이 실어 준 **그 회원의 센터** 상호(계약 v2.32, P65 후속 3 · P73). 비어 있으면
+  /// 종전대로 기본 센터의 상호(`centerDisplayNameProvider`) — 구서버·상호 미등록과 같은 취급.
+  final String matchedCenterName;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // 상호는 서버 값(어드민 "센터 신원")이 우선 — 없을 때만 임시 상수(P56 L10).
-    final centerName = ref.watch(centerDisplayNameProvider);
+    // 상호는 매칭된 센터(서버가 매칭 응답에 실은 값) → 기본 센터의 서버 값 → 임시 상수 순.
+    // 세션이 없는 대기실에서 `GET /v1/public/center`는 기본 센터 고정이라, 2호점 회원의
+    // 카드가 1호점 상호를 찍던 자리다.
+    final centerName = matchedCenterName.trim().isNotEmpty
+        ? matchedCenterName.trim()
+        : ref.watch(centerDisplayNameProvider);
     // 캐시의 이름이 ""면 state의 이름으로 넘어가야 한다(??는 ""를 통과시킨다).
     // 둘 다 미해석(null·""·공백)이면 null — 예전엔 공백뿐인 이름이 non-null로
     // 살아남아 "담당    코치" + 빈 이니셜 아바타(TrainerAvatar는 isEmpty만 본다)가 됐다.
@@ -897,13 +1051,12 @@ class _MatchedCenterCard extends ConsumerWidget {
                   style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
                 ),
               ),
-              const RiseBadge('자동 매칭', variant: RiseBadgeVariant.ok),
             ],
           ),
           const SizedBox(height: 4),
           Text.rich(
             TextSpan(
-              style: const TextStyle(fontSize: 11, color: AppColors.muted),
+              style: const TextStyle(fontSize: 11.5, color: AppColors.badgeMutFg),
               children: [
                 TextSpan(
                   text: memberName,
@@ -926,7 +1079,10 @@ class _MatchedCenterCard extends ConsumerWidget {
                 profileUnavailable: trainer == null,
               ),
               borderRadius: BorderRadius.circular(AppRadius.chip),
-              child: Row(
+              // 아바타 26dp가 행 높이를 정해 탭 타깃이 26dp였다(P72).
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 44),
+                child: Row(
                 children: [
                   TrainerAvatar(
                     name: coachName,
@@ -955,12 +1111,16 @@ class _MatchedCenterCard extends ConsumerWidget {
                         if (coachSubtitle.isNotEmpty)
                           Text(
                             coachSubtitle,
-                            style: const TextStyle(fontSize: 10, color: AppColors.muted),
+                            // brandLight 면 위에서 muted는 4.26:1 — AA 미달이다(P72).
+                            // `app_colors.dart`가 "면이 회색이면 한 단계 내린다"며 마련해 둔
+                            // 토큰이 badgeMutFg(5.27:1)인데 이 카드에만 적용이 안 됐다.
+                            style: const TextStyle(fontSize: 11, color: AppColors.badgeMutFg),
                           ),
                       ],
                     ),
                   ),
                 ],
+              ),
               ),
             ),
           ],
@@ -1124,6 +1284,10 @@ class _CenterCard extends ConsumerWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.surfaceMuted,
+        // 흰 배경(Scaffold) 위의 #F7F7F8은 **1.07:1** — 경계가 사실상 안 보인다(P72).
+        // 같은 화면의 `_ConnectionUnknownCard`·`_NotMeCard`·`_MatchedCenterCard`는 전부
+        // 1.5px 보더를 갖고 있었고, 정작 네 stage가 공유하는 본문 카드만 없었다.
+        border: Border.all(color: AppColors.line, width: 1.5),
         borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       child: Column(
@@ -1132,7 +1296,7 @@ class _CenterCard extends ConsumerWidget {
           if (multiCenter) ...[
             const Text(
               '요청한 센터',
-              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.muted),
+              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppColors.muted),
             ),
             const SizedBox(height: 2),
           ],
@@ -1147,10 +1311,14 @@ class _CenterCard extends ConsumerWidget {
             InkWell(
               onTap: () => _openMap(context, contact.address),
               borderRadius: BorderRadius.circular(AppRadius.chip),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
+              // 18dp였다(P72) — 문장 속 링크가 아니라 독립된 행이라 인라인 예외에도
+              // 해당하지 않는다. 44dp는 이 화면이 이미 쓰는 규약이다.
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 44),
+                child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     const Padding(
                       padding: EdgeInsets.only(top: 1),
@@ -1163,15 +1331,18 @@ class _CenterCard extends ConsumerWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 11,
+                          fontSize: 11.5,
                           color: AppColors.muted,
                           decoration: TextDecoration.underline,
-                          decorationColor: AppColors.line,
+                          // line(1.16:1)은 안 보인다 — 탭 가능함을 나르는 유일한 신호가
+                          // 장식 색이면 그 신호는 없는 것과 같다.
+                          decorationColor: AppColors.muted,
                         ),
                       ),
                     ),
                   ],
                 ),
+              ),
               ),
             ),
           ],
@@ -1192,8 +1363,20 @@ class _CenterCard extends ConsumerWidget {
           const SizedBox(height: 8),
           Text(
             hint,
-            style: const TextStyle(fontSize: 11, color: AppColors.muted, height: 1.5),
+            style: const TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.5),
           ),
+          // 전화·주소가 둘 다 없으면(오늘 프로덕션) 이 카드에 닿을 수단이 0이다 — 힌트가
+          // 지시하는 "데스크에 확인"이 막다른 길이 되지 않게 다음 문을 가리킨다.
+          if (!contact.hasPhone && !contact.hasAddress) ...[
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: RiseUnderlineLink(
+                label: '문의 방법 보기',
+                onTap: () => openLegalDocument(context, LegalLinks.support),
+              ),
+            ),
+          ],
           if (contact.hasPhone) ...[
             const SizedBox(height: 10),
             RiseButton(
@@ -1351,7 +1534,7 @@ class _AfterConnectPreview extends StatelessWidget {
       children: [
         const Text(
           title,
-          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.muted),
+          style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: AppColors.muted),
         ),
         const SizedBox(height: 8),
         Row(
@@ -1367,7 +1550,7 @@ class _AfterConnectPreview extends StatelessWidget {
                       textAlign: TextAlign.center,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 10.5, color: AppColors.ink),
+                      style: const TextStyle(fontSize: 11.5, color: AppColors.ink),
                     ),
                   ],
                 ),

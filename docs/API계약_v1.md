@@ -6,7 +6,7 @@ Base: `/v1` · 인증: `Authorization: Bearer <Firebase ID token>` (로컬 개�
 ## 엔티티 JSON (json 태그 = 이 이름 그대로)
 ```jsonc
 Member   {id, name, phone, channel, trainer_id, flags:[{type:"injury",note}], consent:{general,sensitive,signed_at,revoked_at}, app_linked, status:"active|dormant", last_visit_at}
-Pass     {id, member_id, trainer_id, product, paid_amount, total_sessions, remaining, valid_from, valid_until, status:"active|scheduled|expired|refunded", holds:[{from,to,reason}]}
+Pass     {id, member_id, trainer_id, product, paid_amount, total_sessions, remaining, valid_from, valid_until, status:"active|scheduled|expired|refunded", holds:[{from,to,reason}], refunded_amount?, refunded_at?}  // refunded_*는 v2.37, 환불 마감 후에만
 Ledger   {id, pass_id, member_id, delta, reason:"issue|complete|noshow|noshow_waived|revert|refund|hold|resume|transfer", ref_booking_id, by, at}
 Slot     {slot_key, capacity, teams:[{booking_id, trainer_id, member_id, kind}]}
 Booking  {id, slot_key, member_id, trainer_id, pass_id, kind:"pt|group|ot", status:"confirmed|waitlist|cancelled|noshow|completed", recurring_id, created_at}
@@ -48,10 +48,14 @@ POST /v1/hw-checks {hw_id, date, done:[...]}
 
 GET  /v1/stats?range=ytd&scope=me|center   scope=me → 본인 스코프(P45), by_trainer는 owner만
 POST /v1/payments  POST /v1/payments/{id}/installments/{i}/pay
-GET  /v1/body-photos?member=  POST /v1/body-photos (동의 검증 P8)
+GET  /v1/body-photos?member=  POST /v1/body-photos (동의 검증 P8 · storage_path는 members/{member_id}/body/{file}만 v2.38)
 DELETE /v1/body-photos/{id}  POST /v1/body-photos/{id}/restore  POST /v1/body-photos/purge (v2.14)
 GET  /v1/inbody?member=  POST /v1/inbody
 GET  /v1/staff  POST /v1/staff/{uid}/offdays
+
+요청 빈도 제한(v2.38): POST join/match·join/confirm·join/request·consult-requests 는 회원 uid당 분당 30(순간 15),
+POST checkin·hw-checks 는 회원 uid당 분당 120(순간 40), 무인증 GET public/business·public/center 는 IP당 분당 60(순간 30).
+스태프·superadmin 요청은 세지 않는다. 넘으면 429 {error, code:"rate_limited"} + Retry-After(초, 올림). 그 외 경로는 제한 없음.
 ```
 
 핵심 골든값(테스트 고정): 환불 1,000,000·20회·7회사용·10% → per 50,000 / usage 350,000 / penalty 100,000 / **refund 550,000**. 재등록 2/8+1/6+1/6=4/20=20%. 슬롯 용량 3, 동일 트레이너 중복 예약 거부.
@@ -3515,7 +3519,7 @@ privacy.html이 "개인정보처리시스템 접속기록 2년 이상 보관·�
 
 ```
 {"log_type":"access",                  ← sink 필터 키(jsonPayload.log_type="access"). 고정.
- "severity":"INFO",                    ← 2xx/3xx/4xx INFO · 401/403 WARNING · 5xx ERROR (항상 명시)
+ "severity":"INFO",                    ← 2xx/3xx/4xx INFO · 401/403/429 WARNING · 5xx ERROR (항상 명시)
  "time":"2026-09-06T03:09:38.681Z",    ← RFC3339Nano UTC → LogEntry.timestamp
  "message":"access owner1 PUT /v1/members/{id} 200",
  "request_id":"…",                     ← middleware.RequestID (auth reject 로그·recoverJSON 로그와 같은 값)
@@ -3553,8 +3557,8 @@ privacy.html이 "개인정보처리시스템 접속기록 2년 이상 보관·�
 
 ```
 스태프(owner·trainer·superadmin)   모든 요청 — 성공·실패·404·패닉(500)·타임아웃(504) 포함
-회원(member)                        401·403 외에는 기록하지 않는다(400·404·5xx 포함) (§8① "정보주체는 제외한다" + 최소수집)
-역할 무관                            401(토큰 없음/무효 — auth 앞에서 기록) · 403(스코프 위반) 은 항상 기록
+회원(member)                        401·403(·429 v2.38) 외에는 기록하지 않는다(400·404·5xx 포함) (§8① "정보주체는 제외한다" + 최소수집)
+역할 무관                            401(토큰 없음/무효 — auth 앞에서 기록) · 403(스코프 위반) · 429(빈도 제한, v2.38) 은 항상 기록
 클로저 밖                            /healthz · /health · /api/health · /v1/public/* (+/api 미러) 는 기록하지 않는다
 ```
 
@@ -4016,3 +4020,372 @@ GET /v1/admin/centers   → 200 [Center]
   그대로 적용된다 — 목록에 `name:""`로 오른다. 없다고 숨기지 않는다.
 - **created_at 제로값을 서버에서 지워야 하나?** 응답 타입이 domain.Center라 `time.Time`은 omitempty가
   안 듣는다. 어드민이 "0001-"을 "—"로 접는다. 다른 소비자가 생기면 그때 전용 응답 타입으로.
+
+## v2.36 초대 계정의 최초 비밀번호 · 예약 슬롯 규칙의 프로덕션 강제 · 회원 검증 (2026-09-09, P71, 이 섹션도 계약의 일부)
+
+람의 보고 한 줄에서 시작했다 — "센터 등록은 하는데 **비밀번호가 없어서** 문제". 그 자리를 파고
+같은 계열(**말한 대로 동작하지 않는 곳**)을 3팀 병렬로 검수한 결과다.
+
+### ① 최초 비밀번호를 응답에 싣는다
+
+```
+POST /v1/admin/centers → 201 {center, owner, initial_password?}
+POST /v1/staff         → 201 {…Staff 필드 전부 최상위…, initial_password?}
+
+initial_password   이번 요청이 **계정을 새로 만들었을 때만** 채운다.
+                   비어 있음(omitempty로 키 자체가 없음) = 이미 있던 계정을 재사용했다는 뜻이고,
+                   그 사람이 정한 비밀번호가 살아 있다. 화면은 두 경우를 다르게 그려야 한다.
+값                 config.InitialStaffPassword (env INITIAL_STAFF_PASSWORD, 기본 "123456")
+```
+
+**왜 4자리가 아닌가**: Firebase Admin SDK가 요청 전에 로컬 검증으로 거부한다 —
+`auth/user_mgt.go` *"password must be a string at least 6 characters long"*. 6자가 물리적 바닥이라
+람이 요청한 "1234"는 계정 생성 자체가 실패한다. 그래서 기본값이 그 바닥에 맞춘 6자리이고,
+`Config.Validate`가 **기동에서** 6자 미만을 거부한다(요청 경로로 내리면 센터 문서·정책이 이미
+저장된 뒤 대표 생성만 실패해 "센터는 있는데 대표가 없는" 반쪽 상태가 남는다).
+
+**왜 이 값이 필요했나**: 종전 설계는 "난수를 걸고 어드민 프론트가 sendPasswordResetEmail을 보낸다"
+였고, 그 규약을 지키는 화면은 **트레이너 초대 하나뿐**이었다. 센터 생성 화면에는 그 호출이 아예
+없어서 새 센터 대표는 메일도 비밀번호도 없이 계정만 받았다 — 로그인할 방법이 0인 계정이다.
+메일 경로도 단독으로는 약했다(스팸함·도메인 메일 차단·오타 주소면 초대가 통째로 멈추고 대표에게
+손쓸 수단이 없다). 이제 **둘 다** 한다: 메일을 보내고, 값도 화면에 띄운다.
+
+**보안 상충을 적어 둔다**: 기본값은 공개 저장소에 적힌 상수다. 최초 로그인 후 변경이 전제이고
+어드민 화면이 그 문장을 함께 띄운다. 운영에서 강화하려면 `INITIAL_STAFF_PASSWORD`를 덮어쓴다.
+
+### ② 예약 슬롯 규칙이 프로덕션에서 강제되지 않고 있었다 (CRITICAL, 이미 배포돼 있던 결함)
+
+`store/firestore.go`의 `BookAtomic`이 **`domain.CanBook`을 호출하지 않았다.** 그 함수의 머리
+주석은 처음부터 *"슬롯 읽기 → CanBook 판정 → 예약 생성"*이라고 적고 있었고, 판정만 없었다.
+호출은 `store/memory.go`에만 있었고 **전 테스트가 Memory를 타므로 초록불이었다.**
+
+에뮬레이터 실측(정원 3 슬롯):
+
+```
+수정 전   코치 중복 = nil · 회원 중복 = nil · 정원 초과 = nil → 슬롯에 6팀 커밋(t1 2회, mem_a 2회)
+수정 후   ErrTrainerBusy · ErrMemberBusy · ErrSlotFull  → 3팀에서 멈춤
+```
+
+즉 프로덕션에서 **정원이 무제한**이었고, 같은 코치가 같은 시간에 두 수업을 받았고, 예약 확정 중
+네트워크가 끊겨 재시도하면 같은 회원이 같은 슬롯에 두 번 들어가 세션이 두 번 차감됐다.
+어드민·앱이 그리던 "3/3 만석"은 참이 아니었다.
+
+컨포먼스 스위트에 `BookAtomicEnforcesSlotRules`를 넣었다. 기존 커버리지가 비껴간 이유가 정확히
+하나다: `testBookAtomicBudget`·`testConcurrentBookings`는 잔여 회차를 겨냥해 goroutine마다 **다른
+slotKey**를 쓴다 — 슬롯 규칙은 같은 슬롯에 겹쳐 넣어야만 드러난다.
+
+**배포 시 유의**: 이미 정원을 넘겨 있는 슬롯은 그대로 남고, 그 슬롯의 **새 예약만** 거부된다.
+데이터 마이그레이션은 없다(과거 예약을 서버가 임의로 취소하지 않는다).
+
+### ③ 회원 레코드 검증 신설
+
+```
+POST /v1/members · PUT /v1/members/{id}(스태프 경로)
+  이름     필수, 40자 이내
+  전화번호  필수, 정규화 후 10~11자리
+  status   active | dormant 만 허용
+  withdrawn 레코드는 검증 면제(Anonymized가 이름·번호를 비운 상태로 보존된다)
+```
+
+회원만 도메인 검증이 없어(Staff·Center·Business·Facility·Policy는 전부 있었다) 이름도 번호도 빈
+회원이 200으로 저장됐다. v2.32부터 **번호가 센터를 정하므로** 번호가 비거나 자릿수가 틀리면 그
+회원은 앱 매칭이 영원히 실패하는데, 데스크에는 등록 성공만 보인다.
+
+`status` 화이트리스트가 닫는 것은 따로 있다: 이 경로는 body를 `domain.Member`에 그대로 언마샬해서
+`{"status":"withdrawn"}` 한 줄이면 그 회원이 종단 상태로 굳었다 — 되돌릴 API가 없고, **실제 파기는
+일어나지 않아** 개인정보는 그대로 남는 가짜 탈퇴였다. 진짜 탈퇴는 `DELETE /v1/me` 하나다(v2.11).
+
+**전화번호 표기는 바꾸지 않는다.** 저장을 정규화(숫자만)하려다 되돌렸다 — 두 스토어의
+`FindMemberByPhone`이 **비교 시점에 양쪽을 정규화**하므로 저장 형식은 매칭에 영향이 없고,
+바꾸면 기존 문서와 새 문서의 표기만 갈린다. 자릿수 검증만 정규화 값으로 한다.
+
+### ④ 되돌린 것 — 같은 번호 중복 등록은 계속 허용한다
+
+검수가 *"승인 경로(v2.34)에는 중복 번호 409가 있는데 데스크 손등록에는 없다"*를 결함으로 지적했고,
+실제로 409를 넣었다가 **철회했다.** 그 비대칭은 누락이 아니라 설계다:
+
+- 부모 번호로 자녀 둘을 등록하는 건 실제로 흔하다(`store/memory.go` `betterPhoneMatch` 주석).
+  이 저장소는 같은 번호 회원 여럿을 **지원하고**, 그 상태에서 매칭이 흔들리지 않도록 전순서 규칙
+  (미연결 우선 → ID 오름차순)을 두 스토어가 공유한다(`TestJoinMatchIsDeterministicForSharedPhone`).
+  데스크에서 막으면 가족 등록이 불가능해진다.
+- 승인 경로에만 409가 있는 이유는 거기서만 **앱 계정이 레코드에 붙기** 때문이다. 중복이 생기면 앱
+  연결은 한쪽에, 회원권·기록은 다른 쪽에 남는다. 데스크 등록에는 그 결합이 없다.
+
+### ⑤ `guardNotStaff`의 fail-open 교정
+
+모든 스토어 에러를 "신규 사용자"로 접고 있었다. Firestore 순단 중 대표 계정이 join 경로를 타면
+방어선이 조용히 꺼지고, 뒤이은 `SaveUserIndex`가 role을 member로 덮어 **그 대표가 자기 센터에서
+영구히 잠긴다**(되돌릴 API 없음). `ErrNotFound`만 부재로 접고 나머지는 그대로 올린다 —
+`guardIndexNotLinkedMember`·`JoinApprove`가 이미 지키던 규약에 이 함수만 맞춘 것이다.
+
+### ⑥ 스태프의 로그인 ID를 저장하고, owner에게만 보여준다
+
+```
+domain.Staff.email  (json:"email,omitempty")
+  저장    POST /v1/staff · POST /v1/admin/centers · 재고용 경로에서 req.Email을 그대로
+  마스킹  GET /v1/staff — owner: 전원 / trainer: 본인만 / member: 없음
+  빈 값   "이메일이 없다"가 아니라 **"모른다"**(마스킹됐거나 v2.36 이전 레코드거나)
+```
+
+종전엔 이메일을 계정 발급용 일회성 입력으로만 쓰고 버렸다. 그래서 "트레이너가 로그인이 안 돼요"
+연락을 받은 대표가 그 사람의 등록 이메일을 확인할 방법이 제품 안에 없었다(Firebase 콘솔뿐이고,
+오타로 만들었어도 알 길이 없었다).
+
+**마스킹이 필수인 이유**: `GET /v1/staff`는 어드민 직원 표만 쓰는 응답이 아니다 — **회원 앱의
+코치 소개**가 같은 목록을 읽는다(P40). payout과 같은 자리에서 같은 규칙으로 지운다.
+
+이 절은 종전 계약 하나를 **뒤집는다**: `TestCreateStaffHTTPContract`가 password·temp_password와
+함께 email까지 금지 목록에 두고 "초대는 재설정 메일로"라고 적고 있었다. 그 전제(재설정 메일만으로
+초대가 완결된다)가 ①에서 무너졌고, email은 애초에 **요청자가 방금 타이핑한 값**이라 감출 비밀이
+아니었다. 난수 임시 비밀번호(password·temp_password)는 여전히 나가지 않는다 — 그 값은 이제 존재하지도 않는다.
+
+### 무변경
+- 응답 모양은 **키 추가뿐**이다. `POST /v1/staff`는 `*domain.Staff` 임베딩이라 기존 필드가 전부
+  최상위에 그대로 온다(구버전 클라이언트 파싱 보호 — 와이어 테스트로 고정).
+- 비밀번호 재설정 메일 경로(`Login.tsx`·`Settings.tsx`)는 그대로다. 이 절은 그것을 **대체하지 않고
+  보완한다**.
+- 앱(Flutter)에서 이 절을 소비하는 경로는 없다.
+
+## v2.37 전면 재감사 후속 — 환불액 영속화 · 체형사진 입력 검증 · 동의 시각 서버 기록 · superadmin 관문 정밀화 · 스토어 대칭성 (2026-09-26, P73, 이 섹션도 계약의 일부)
+
+람의 "구멍·버그·사용자 편의성 전면 검수 → 교차검증 → 자문자답 반복"에서 3계층 7팀 병렬 감사 뒤
+직접 열어 확정한 것만 실었다. 와이어 변경은 **키 추가(①)와 400 확대(②·③)** 뿐이고 나머지는 서버
+내부 동작 정정이다. 앱·어드민 구버전은 전부 그대로 동작한다.
+
+### ① `Pass`에 환불액이 남는다 — `refunded_amount` · `refunded_at`
+
+```
+Pass {…기존 필드…, refunded_amount?: int, refunded_at?: RFC3339}
+
+refunded_amount   POST /v1/passes/{id}/refund 가 정산한 실제 환불액(원). RefundResult.refund와 같은 값.
+                  **0원 환불도 키가 있다**(`"refunded_amount":0`) — 사용분+위약금이 실수납을 넘어 정산이 0원으로
+                  끝나는 환불이 실재하므로 서버는 포인터(nil=모름 / &0=0원)로 들고 있다.
+refunded_at       마감 시각(UTC). status=refunded 와 **같은 트랜잭션**에서 함께 쓴다.
+없음(omitempty)   환불 전 · v2.37 이전에 환불된 문서. 클라이언트는 키 부재를 "0원 환불"로 그리지 않는다.
+```
+
+**왜**: 이 제품의 축이 "센터 돈 관리(원장)"인데, 돈이 **나가는** 유일한 사건(환불)의 액수는
+`RefundResult`(HTTP 응답)에만 있다가 응답 창을 닫는 순간 어디에도 남지 않았다. "이번 분기 환불
+총액"·"이 회원에게 얼마를 돌려줬나"에 서버가 답할 수 없었고, 사후 재구성은 원장·결제·계약을 손으로
+합쳐 `SettleRefund`를 다시 돌리는 일이었다. 정산은 이제 마감 트랜잭션 **안에서** 트랜잭션이 본
+원장으로 계산해 패스에 함께 기록한다(재시도 시 mutate가 다시 불려도 값이 원장과 어긋나지 않는다).
+응답의 `RefundResult`는 그 저장값과 같은 숫자다.
+
+어드민: 회원 상세의 환불된 회원권 카드에 `환불액 ₩… · YYYY-MM-DD 마감` 한 줄. 앱: 소비 경로 없음
+(freezed DTO는 미지 키를 무시한다).
+
+### ② `POST /v1/body-photos` — `date`·`direction` 검증 (400 확대)
+
+```
+date        "YYYY-MM-DD" 형식이 아니면 400 "date는 YYYY-MM-DD 형식이어야 해요"
+            서버(KST) 오늘보다 뒤면 400 "미래 날짜의 체형사진은 저장할 수 없어요"   — CreateInbody(v2.9)와 같은 규칙
+direction   front|side|back 외는 400 "direction은 front|side|back 중 하나여야 해요"
+```
+
+**왜**: 둘 다 무검증이었다. 앱은 목록의 `date`를 `DateTime.parse`(throw)로 읽어 형식이 깨진 레코드
+**하나**가 회원의 체형사진 타임라인 전체를 "불러오지 못했어요"로 접었다(인바디·수업 기록은
+tryParse+건너뛰기였고 체형사진만 예외). 앱도 v1.0.1+9부터 tryParse로 바뀌지만, 저장 단계에서
+막는 것이 먼저다. 앱 자체 업로드는 항상 KST 오늘·정해진 direction만 보내므로 정상 경로엔 영향이 없다.
+
+### ③ `POST /v1/members` — 동의 시각은 서버가 찍는다
+
+```
+consent.signed_at    요청 값은 **무시**된다. sensitive=true 이거나 클라이언트가 signed_at을 실었으면
+                     서버 시각(UTC)으로 기록, 둘 다 아니면 null.
+consent.revoked_at   신규 레코드는 항상 null(요청 값 무시).
+```
+
+**왜**: `PUT /v1/members/{id}`는 v1.2부터 "전이 시각은 서버가 기록한다"였는데 **최초 서명**만 예외였다.
+`CreateMember`는 `signed_at == nil`일 때만 채웠고, 어드민 등록 폼은 항상 데스크 PC 시계값을 실어
+보냈다 — 민감정보 동의의 "언제"라는 준법 기록이 PC 시계 오차만큼 틀린 채 영구 저장됐다. 클라이언트가
+값을 실었으면 "지금 동의했다"는 뜻만 취한다(어드민이 일반 동의만 켜도 시각을 싣는 현행 표시 규약 유지).
+
+### ④ superadmin 관문(auth.go)의 판정 정밀화
+
+```
+허용 경로   정확히 /v1/me · /api/v1/me,  그리고 /v1/admin/* · /api/v1/admin/*
+그 외       403 "forbidden: superadmin은 관리 평면(/v1/admin/*)만 사용할 수 있어요"  (변경 없음)
+```
+
+**왜**: 종전 판정은 `Contains("/admin/") || HasSuffix("/me")` 부분일치였다. `{id}`가 마지막 세그먼트인
+라우트에 id=`me`(`DELETE /v1/inbody/me`), `{id}` 뒤에 정적 세그먼트가 붙는 라우트에 id=`admin`
+(`POST /v1/bookings/admin/complete`)을 주면 관문을 지났다. 데이터는 새지 않았다 — CenterID=""로 내려간
+조회가 스토어에서 먼저 실패한다 — 하지만 결과가 403이 아니라 500이라, "관문 하나가 87곳을 대신한다"는
+불변식이 조용히 깨져 있었다. 이제 마운트 접두사(/api)만 벗기고 상수 비교다(`TestSuperadminPathBoundary`).
+
+### ⑤ 서버 내부 정정 (와이어 무변경)
+
+- **`GET /v1/stats`** — `expiring`(만료 임박)과 `hw_d`/`hw_rate`(Home Work 완료율)에서 **탈퇴 회원을
+  뺀다**(v2.11 "탈퇴 회원은 어느 KPI에도 들어가지 않는다"가 회원 루프에만 적용돼 있었다). 탈퇴 시
+  유효기간이 남은 패스가 "연장 제안" 대상으로 잡히고(연락처는 이미 파기), 배정에서 빠지지 않은
+  탈퇴자가 hw-check 전부 삭제된 채 분모만 채웠다. `rereg_d`·매출은 **그대로**다 — 만료 뒤 떠난 사람은
+  재등록하지 않은 사람이 맞고, 탈퇴자의 결제는 실제 매출이다. `by_trainer`도 같은 판정.
+- **`POST /v1/bookings` · `POST /v1/recurrings`** — 담당 코치 조회(`GetStaff`)가 **부재(ErrNotFound)일
+  때만** 퇴사자·휴무일 검사를 건너뛰고, 그 외 스토어 오류는 전파한다(500). 종전 `err == nil` 형은
+  순단 시 두 거부가 통째로 꺼져 퇴사자·휴무일 앞으로 예약이 조용히 성립했다(P56 B7~B9와 같은 클래스,
+  `TestGuardsDoNotSilentlyOpenOnStoreFailure`). 고정 스케줄의 휴무일도 규칙 저장 **전** 같은 조회에서
+  받아 두 번째 조회를 없앴다(그 조회도 fail-open이었다).
+- **스토어 대칭성** — `Firestore.GetBodyPhoto/SaveBodyPhoto/DeleteBodyPhoto`에 `checkDocID`(빈 id →
+  ErrNotFound, 다른 단건 13종과 같은 규칙) · `Memory.GetCenter/ListCenters`가 읽기 시점 `Normalize()`
+  (빈 status → active, Firestore·Policy·Business·Facility·CheckinQR와 같은 규칙). 둘 다
+  `conformance_test.go`에 케이스를 추가해 고정.
+
+### 클라이언트 · 문서 (계약 외 변경, 이 P에서 함께)
+
+- 앱: **v2.32 `join/match.center`를 드디어 읽는다**(P65 후속 3) — 대기실 매칭 카드가 매칭된 회원의
+  센터 상호를 찍고, 로그인 뒤 홈 헤더·마이 탭은 세션 `center_id`로 `GET /v1/public/center?center=`를
+  묻는다(종전엔 둘 다 기본 센터 고정 — 2호점 회원에게 1호점 상호) · 동의 저장 → 촬영 게이트
+  (`myProfileProvider`) 동반 갱신 · 예약 생성/취소 → 마이 탭 동반 갱신 ·
+  스태프 캐시를 세션 신원에 묶음(로그아웃 뒤 다음 계정이 이전 센터 명단을 15분 보던 문제) ·
+  체형사진 뷰어 삭제 중 닫기 잠금 · 성공 스낵바 3곳 · 서명 패드 44dp · 포즈 칩 Semantics · iOS
+  버전 단일 소스 복원(pbxproj 리터럴 제거 + 가드) · `pubspec 1.0.1+9`.
+- 어드민: 완료/노쇼 → stats 무효화 · 뮤테이션 중 모달 닫기 잠금 전면 · 만료 임박 이름 링크 ·
+  Firebase 오류 한국어 공용표 · 예약 그리드 최소 폭+가로 스크롤 · 환불액 표시.
+- 법정 문서: `account-deletion.html`·`privacy.html`의 "예약·체크인 기록 삭제"를 실제 동작(체크인·
+  **앞으로의** 예약 삭제, 지난 예약 이력 5년 보존)으로 정정 · `support.html` "자동으로 연결"(P72-3).
+- 배포·설정: `firebase.json`에 `/api/v1/public/center` 캐시 헤더 · `.env.example`에
+  `INITIAL_STAFF_PASSWORD` · README 3종 스테일 수치 정정.
+
+### 무변경
+- 엔드포인트 목록·인가 규칙·에러 포맷. ①은 키 추가, ②·③은 이미 거부돼야 했던 입력의 400 확대다.
+- 앱 DTO는 `refunded_*`를 파싱하지 않는다(필요해지면 그때 추가 — 미지 키는 무시된다).
+
+## v2.38 성능·보안·운영 감사 후속 — 요청 빈도 제한 · 체형사진 경로 소유 검증 · 접속기록 429 · 읽기 범위 축소 (2026-09-26, P74, 이 섹션도 계약의 일부)
+
+P73(정합·UX)이 끝난 뒤 "그럼 완성인가"에 대한 답으로 **한 번도 감사 축이 아니었던** 성능·보안·운영·
+의존성을 돌았다(work_log/P74). 와이어 변경은 **429 신설(①)과 400 확대(②)** 둘이고, 접속기록 범위가
+한 줄 넓어진다(③). 나머지는 같은 답을 더 적게 읽어 내는 서버 내부 정정이다(④). 앱·어드민 구버전은
+전부 그대로 동작한다 — 429는 앱의 기존 4xx 경로(`RejectedFailure`)로 떨어져 서버 문구가 그대로 보인다.
+
+### ① 요청 빈도 제한 — 429 `rate_limited`
+
+```
+대상 경로                                                       키          정상 속도    순간(burst)
+POST /v1/join/match · /join/confirm · /join/request · /consult-requests   회원 uid    분당 30      15
+POST /v1/checkin · /hw-checks  (두 경로가 한 버킷을 나눠 쓴다)   회원 uid    분당 120     40
+GET  /v1/public/business · /v1/public/center (+ /api/v1 미러)   IP          분당 60      30
+스태프(owner·trainer)·superadmin 요청                           세지 않음   — 어드민 원탭 체크인(POST /v1/checkin) 포함
+그 외 전 경로                                                    제한 없음
+
+응답   429  {error:"요청이 너무 잦아요 — 잠시 후 다시 시도해주세요", code:"rate_limited"}
+       Retry-After: <초>  (다음 토큰까지 남은 시간을 올림, 최소 1)   ·   Cache-Control: no-store (writeJSON 규약)
+순서   /v1 그룹은 accessLog → auth → (경로별) 제한 → 핸들러. 인증 실패는 여전히 401이 먼저고, 제한은 **핸들러
+       보다 앞**이라 429가 난 요청은 본문 검증·저장에 닿지 않는다(400이 될 요청도 429가 될 수 있다).
+```
+
+**왜**: 종전 미들웨어 체인엔 "같은 사람이 얼마나 자주 불러도 되는가"를 재는 층이 없었다. P55의 멱등성은
+*같은 내용의 중복 제출*을 막는 축이고 빈도는 다른 축이다 — 상담 요청은 인증만 되면 무한히 쌓였고,
+무인증 공개 경로는 Hosting 경유(`/api/v1/public/*`, CDN 5분 캐시)와 달리 앱이 직접 부르는 Cloud Run
+URL(`/v1/public/*`)엔 완충이 전혀 없어 호출이 그대로 Firestore 읽기였다.
+
+**수치의 근거**: 요청 큐 4종은 사람이 한 번 누르는 일이고 대기실 자동 확인은 30초 간격이라 정상 사용은
+한 자릿수/분이다. 체크인·hw-check는 **탭 하나가 POST 하나**라 하루치 홈워크(개인+담당+공지 합쳐 15개
+안팎)를 한 번에 훑으면 15에 닿는다 — 그래서 따로 두고 순간 40으로 잡았다. 공개 경로는 센터 와이파이 뒤
+회원 수십 명이 동시에 앱을 켜는 경우(공유 IP)를 burst가 흡수하도록 한 사람 기준보다 후하다. 목적은
+**폭주 루프(스크립트·앱 버그)의 상한**이지 사람 손의 제한이 아니다.
+
+**왜 스태프는 세지 않나**: 어드민의 원탭 체크인이 회원 셀프 체크인과 같은 `POST /v1/checkin`을 쓴다.
+데스크 한 명이 수업 시작 전에 몰아서 누르는 것은 폭주가 아니라 업무이고, 스태프 토큰은 이보다 훨씬
+강한 쓰기(회원·결제·환불)를 원래 제한 없이 하므로 이 경로만 세어서는 방어 가치가 없다.
+
+**한계(계약의 일부)**: 프로세스 내 토큰 버킷이라 Cloud Run 인스턴스가 n개면 상한도 n배로 느슨하다.
+무인증 경로의 키(chi `middleware.RealIP` — `True-Client-IP` → `X-Real-IP` → `X-Forwarded-For` 첫 값 순)는
+클라이언트가 위조할 수 있으므로 공개 경로 제한은 "선의의 폭주 방지"이지 적대적 방어선이 아니다 — 그 자리는
+App Check(후속, work_log P74)다. 같은 값이 접속기록(v2.30)의 `remote_ip`에도 쓰인다. chi는 v5.3.0에서
+RealIP를 폐기 표시하고 신뢰 프록시를 받는 `ClientIPFrom*`를 냈다(GHSA-3fxj 외 2건 — **버전만 올려서는
+RealIP 동작이 같다**). 이전은 Cloud Run 직결·Hosting 경유 두 경로의 XFF 홉 수를 실측한 뒤다(P74 후속). 위조 키가 메모리를
+키우지 못하도록 **키 표는 인스턴스당 1만 개가 상한**이고, 가득 차면 새 키는 추적 없이 통과한다
+(fail-open — 위조 키는 어차피 매번 가득 찬 새 버킷이라 거를 수 없었고, 이미 추적 중인 키의 제한은
+그대로이며, 정상 신규 사용자가 공격 때문에 429를 받지 않는다. 통과 건수는 분당 최대 한 줄로 서버 로그).
+버킷은 가득 찰 만큼(burst÷속도, 20~30초) 쉬면 지운다 — 새 버킷과 상태가 같아 제한 결과는 변하지 않는다.
+정확한 분산 제한이 필요해지면 Cloud Armor/Memorystore로 올린다.
+
+**클라이언트 규약**: `code === "rate_limited"`로만 판별한다(문구는 바뀌어도 되는 값). 429에 **자동
+재시도를 붙이지 않는다** — 사람이 보는 리듬으로만 다시 부른다. 앱은 현재 429를 `RejectedFailure(서버
+문구)`로 보여 주고 원상복구(홈워크 역토글)하므로 **앱 변경 없음**. 대기실 자동 확인은 30초 일회성 타이머이고
+(30→60→120초 물러남은 `GET /v1/me` 실패에만 걸린다), 그 안의 매칭 재조회(`POST /v1/join/match`)는 429를
+포함한 실패를 삼켜 "아직"으로 접는다 — 분당 2회라 한도(분당 30)에 닿지 않는다. 공개 연락처(`GET /v1/public/
+center`)의 429는 연락처 카드가 빈 값으로 접혀 임시 상호가 보이고, 화면을 다시 열면 다시 묻는다. 어드민이 부르는 제한 경로는 원탭 체크인(`POST /v1/checkin`) 하나인데 스태프 요청은
+세지 않으므로 **어드민은 429를 보지 않는다**.
+
+### ② `POST /v1/body-photos` — `storage_path`는 이 회원의 폴더 안이어야 한다 (400 확대)
+
+```
+storage_path   정확히 members/{member_id}/body/{fileName} — 세그먼트 4개, {member_id}는 요청의 member_id와 같아야
+               하고, {fileName}은 비어 있지 않은 한 조각(슬래시 없음, "."·".." 아님).
+               아니면 400 "storage_path는 이 회원의 체형사진 폴더(members/{member_id}/body/) 안이어야 해요"
+```
+
+**왜**: 레코드의 **소유**(member_id)는 P08 스코프로 지키면서, 그 레코드가 **가리키는 파일**은 "비어 있지
+않은 문자열"이면 무엇이든 받았다. 남의 경로(또는 임의 경로)를 가리키는 메타가 생기면 회원 타임라인이
+그 자리에서 깨지고, 소프트 삭제 뒤 파기(`purgeBodyPhoto`)가 **남의 파일**을 대상으로 삭제를 시도한다.
+접두사 규약은 `storage.rules`·앱(`BodyPhotoStoragePath`)이 이미 공유하던 것 그대로라 정상 경로엔 영향이
+없다(`domain.BodyPhotoPathOwnedBy`, 테스트 7케이스).
+
+### ③ 접속기록(v2.30) — 429를 거부로 기록한다
+
+```
+거부(역할 무관 기록, WARNING)     401 · 403 · **429**(v2.38 추가)
+회원(member)                        401·403·429 외에는 기록하지 않는다(400·404·5xx 포함)   ← 429 한 글자 추가
+```
+
+**왜**: 제한기가 언제 무엇을 막았는지가 로그에 없으면 상한을 조정할 근거도, 앱의 호출 루프 버그를 알아챌
+길도 없다. 회원 쓰기 경로의 429는 uid 키라 이 라인이 유일한 관측점이다. 403과 같은 "오·남용 신호"라
+§8② 취지에 맞고, 라인의 내용(uid·route·ip)도 403 라인과 같다 — 정상 본인 접속을 남기지 않는 원칙은
+그대로다(`TestAccessLogRecordsMemberRateLimited`). 무인증 공개 경로(`/v1/public/*`)는 종전대로 v1
+클로저 밖이라 접속기록을 지나지 않는다 — 그쪽 429는 Cloud Run 요청 로그(30일)의 status로 본다.
+
+### ④ 서버 내부 정정 (와이어 무변경 — 같은 답, 더 적은 읽기)
+
+- **`GET /v1/hw-checks?member=`·홈워크 완료 판정** — 회원 지정 조회가 센터 **전체** hwChecks를 읽고
+  메모리에서 거르던 것을 `ListHwChecksByMember`(Firestore `member_id ==` 쿼리)로. 회원 수 × 일수만큼
+  자라는 컬렉션이라 홈 탭 한 번이 센터 전체 기록을 읽고 있었다.
+- **`GET /v1/stats` HW 완료율** — **활성 배정(기간 안·스코프 안)의 대상 회원만, 회원당 1번**(중복 제거,
+  동시 8) 읽는다. 종전은 배정×대상회원 조합마다 그 회원 것을 다시 읽었고(scope=center면 트레이너 표가 한
+  번 더), P74 1차의 "센터 hwChecks 전량 1회"는 그 컬렉션이 회원×날짜로 자라는 데다 배정 없는 트레이너의
+  scope=me도 전량을 읽어 감사 실측 뒤 되돌렸다(활성 배정이 없으면 0회). 한 회원의 조회 실패는 **그 회원만**
+  분자에서 빠진다(종전과 같은 단위 — 1차는 한 번의 실패가 완료율 전체를 조용히 0으로 만들었다, 로그 한 줄).
+- **환불 기준액(`refundBasis`)·기록된 결제 합계·회원 결제 목록·계약서 템플릿·탈퇴 파기 집계** — 센터
+  전체 payments 스캔을 `ListPaymentsByPass` / `ListPaymentsByMember`(단일 필드 등호 — 복합 인덱스
+  불필요)로. 답은 같다(`TestRefundReadsOnlyThatPassPayments` — `quote.PaidSum == 1,000,000`).
+- **`GET /v1/members`(스태프)** — 회원별 패스 조회 + 패스별 원장 재계산이 **직렬 N+1**이었던 것을 병렬
+  (회원 8 · 패스 4 동시, `forEachParallel`: 첫 오류가 나머지를 취소, 부모 ctx 취소를 그대로 전파,
+  **워커 패닉은 오류로 바꿔 그 요청만 500** — 워커는 요청 고루틴 밖이라 recoverJSON이 닿지 않고, 잡지
+  않으면 인스턴스 전체가 죽는다)로. 순서·내용은 직렬과 같다(`TestListMembersParallelMatchesSequential`).
+- 스토어 인터페이스 `ListPaymentsByPass`·`ListPaymentsByMember` 추가 — Memory·Firestore 대칭,
+  `conformance_test.go`에 케이스 고정(`ListHwChecksByMember`도 같은 파일에 — 2026-10-16 에뮬레이터 통과).
+- **체형사진 파기는 그 회원 폴더 안의 파일만 지운다** — 회원 즉시 삭제·30일 유예 뒤·탈퇴 파기 공통
+  (`ownedBodyPhotoPath`). ②의 생성 검사보다 앞서 저장된 레코드가 남의 경로(`staff/photos/…` 등)를 가리키면
+  파기가 남의 파일을 지우는 원시 연산이 됐다 — 폴더 밖이면 파일은 두고 메타만 지운다(로그 한 줄).
+
+### 클라이언트 · 배포 (계약 외 변경, 이 P에서 함께)
+
+- 어드민: 9개 화면 `React.lazy` 코드 분할(첫 진입 번들 축소) · 로그아웃 시 체형사진 blob 캐시 비움
+  (`clearBodyPhotoBlobs` — 만들어 두고 한 번도 부르지 않았다: 데스크 PC를 다음 사람이 이어 쓰면 이전
+  세션의 민감 사진이 메모리에 남아 있었다) · 회원 목록 파생값 `useMemo`. 감사 후속: 배포 직후 열려 있던
+  탭이 아직 받지 않은 화면 조각을 부르다 실패하면(새 배포엔 옛 해시 파일이 없다) **1회 자동 새로고침**
+  (`vite:preloadError` — 10분 안에 또 실패하면 오류 카드) · blob 캐시 **30장 상한**(최근 사용 순, 밀려난
+  URL은 revoke) · 받는 **도중** 로그아웃되면 그 사진을 다음 세션 캐시에 넣지 않음 · 다른 탭에서 **다른 계정으로
+  곧장** 로그인하면(signOut 없이) 이 탭도 쿼리·blob 캐시를 비우고 me를 다시 읽음.
+- 앱: 홈·마이·기록 탭의 독립 요청을 **동시에** 띄움(`Settled` 공용화 — 마이 탭은 5왕복 직렬이었다) ·
+  수업 기록 목록 10건 + "더 보기" 20건씩 · 체형사진 로더 메모리 캐시 상한 40장(LRU). 감사 후속: 패스별
+  원장은 **동시 4개 상한**(`settleEach` — 패스 수는 재등록마다 늘어 상한 없이는 연결이 그만큼 한꺼번에 열렸다) ·
+  체형사진을 받는 **도중** 세션이 끝나면 캐시에 넣지 않음(세대 표식) · 펼침 행 2곳 버튼 의미(Semantics).
+- 배포·규칙: `firebase.json` 응답 헤더(nosniff · X-Frame-Options DENY · Referrer-Policy · HSTS 1년 ·
+  Permissions-Policy 카메라/마이크/위치 차단) · `storage.rules` 체형사진 contentType을 `image/*`에서
+  `image/(jpeg|png|webp)`로(SVG 등 스크립트를 품는 형식 배제 — 앱은 `image/jpeg`를 명시한다) · 감사 후속:
+  `/`에도 `Cache-Control: no-cache`(운영 실측 2026-10-16: `/index.html`만 no-cache이고 `/`는 Hosting 기본
+  `max-age=3600` — 새로 고친 탭이 1시간 동안 옛 index를 다시 받을 수 있었다).
+  **셋 다 `firebase deploy`가 있어야 반영된다**(코드 배포와 별개).
+- Hosting 헤더 규칙 vs 원본 `Cache-Control`(P35가 "문서상 불확실"로 남긴 것) — 운영 실측 2026-10-16:
+  `/api/v1/public/business`의 404·`/api/v1/me`의 401은 원본의 `no-store` 그대로 나간다(Hosting의
+  `public, max-age=300` 규칙이 오류를 캐시 가능하게 덮지 않는다). `/api/v1/public/center` 규칙은 지금
+  Hosting 경유 호출자가 없다(앱은 Cloud Run 직결) — 무해한 대비.
+- 의존성(govulncheck 2026-10-15, 호출 경로상 취약 11건+표준 라이브러리): 백엔드 grpc 1.84.0 · x/net 0.61.0 ·
+  otel 1.47.0 · `toolchain go1.26.9`. chi RealIP 3건은 위 ①의 한계(이전 대기), RedirectSlashes 1건은 미사용.
+
+### 무변경
+- 엔드포인트 목록·인가 규칙·기존 에러 포맷. ①은 새 status(429)와 기존 `{error, code}` 확장 본문의
+  세 번째 사용처(`route_not_found`·`media_not_configured`·`rate_limited`), ②는 이미 거부돼야 했던 입력의
+  400 확대다. **`rate_limited` 문자열은 바꾸지 말 것**(앱이 code로 분기하게 될 때의 판별자).
+- 제한 대상이 아닌 경로에는 429가 나지 않는다 — 어드민의 어떤 화면도 이번 변경으로 새 에러를 보지 않는다.

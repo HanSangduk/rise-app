@@ -231,10 +231,18 @@ func (s *Service) joinPhone(p Principal, body string) (string, error) {
 // UserIndex는 역할의 단일 출처다(auth.go의 enrich가 이것만 본다). join 계열이 이 문서를
 // role=member로 덮어쓰면 대표는 자기 권한을 잃고, 되돌릴 API가 없어 **센터가 영구히 잠긴다**
 // (Firestore를 직접 편집해야 복구된다). 스태프가 실수로든 고의로든 이 경로에 들어오면 거절한다.
+// v2.36: **부재와 장애를 가른다.** 종전엔 모든 에러를 "신규 사용자"로 접어 fail-open이었다 —
+// Firestore 순단 중 대표 계정이 join 경로를 타면 이 방어선이 조용히 꺼지고, 뒤이은
+// SaveUserIndex가 role을 member로 덮어 **그 대표가 자기 센터에서 영구히 잠긴다**(위 주석이
+// 말하는 바로 그 사고). 같은 파일의 guardIndexNotLinkedMember·JoinApprove는 이미
+// "인프라 에러를 조건 불성립으로 삼키지 않는다"는 규약을 지키고 있었고, 이 함수만 옛 형태였다.
 func (s *Service) guardNotStaff(ctx context.Context, uid string) error {
 	idx, err := s.store.GetUserIndex(ctx, uid)
-	if err != nil {
+	if errors.Is(err, store.ErrNotFound) {
 		return nil // 인덱스 없음 = 신규 사용자. 정상 경로다.
+	}
+	if err != nil {
+		return err // 장애는 장애로 — 못 본 것을 "스태프 아님"으로 단정하지 않는다
 	}
 	if idx.Role == domain.RoleOwner || idx.Role == domain.RoleTrainer {
 		return ErrForbidden
@@ -726,22 +734,38 @@ func (s *Service) ListMembers(ctx context.Context, p Principal, trainerQuery, q 
 	if err != nil {
 		return nil, err
 	}
-	out := make([]MemberWithPasses, 0, len(members))
-	for _, mem := range members {
+	// 회원별 패스·원장 조회는 **동시에**(v2.38, P74). 종전엔 회원 N명 × (패스 1 + 원장 K)회 왕복이
+	// 전부 직렬이라 어드민 회원 목록(가장 먼저 여는 화면)이 회원 수에 정비례해 느려졌다 — 위
+	// 주석의 "N+1 회피"는 클라이언트의 N+1을 서버 안으로 옮긴 것이었다. 결과 순서는 그대로
+	// (인덱스로 제자리에 쓴다), 첫 오류가 곧 전체 오류(종전 계약 유지).
+	out := make([]MemberWithPasses, len(members))
+	err = forEachParallel(ctx, len(members), memberFanOut, func(ctx context.Context, i int) error {
+		mem := members[i]
 		passes, err := s.store.ListPassesByMember(ctx, p.CenterID, mem.ID)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		passes, err = s.hydratePassesRemaining(ctx, p.CenterID, passes)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		mem.BodyPoses = mem.EffectiveBodyPoses() // 응답 사본에만(v2.10) — 어드민 포즈 편집기의 초기값
 		normalizeMemberWire(&mem)                // 읽기 정규화(v2.28) — 회원 목록은 어드민이 가장 먼저 여는 화면이다
-		out = append(out, MemberWithPasses{Member: mem, Passes: passes})
+		out[i] = MemberWithPasses{Member: mem, Passes: passes}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
+
+// 동시성 상한(v2.38, P74). Firestore 클라이언트는 고루틴 안전하지만 상한이 없으면 회원 수만큼
+// 스트림을 연다. 회원 8 × 패스 4 = 최대 32 동시 읽기 — 단일 인스턴스 기준 충분히 보수적이다.
+const (
+	memberFanOut = 8
+	passFanOut   = 4
+)
 
 // memberScopeID — 목록 조회의 member= 스코프 결정(v1.1 목록 엔드포인트 공용). member 역할은
 // 항상 본인으로 강제하되, 가입 매칭 전(MemberID가 빈 값)이면 403 — 빈 문자열이 필터를 지워
@@ -796,6 +820,25 @@ func (s *Service) CreateMember(ctx context.Context, p Principal, mem *domain.Mem
 	if mem.Flags == nil {
 		mem.Flags = []domain.MemberFlag{} // 직렬화 계약: 항상 배열
 	}
+	// 정규화 → 검증(v2.36). 순서가 규칙이다(UpdateCenterIdentity·UpdateCenterBusiness와 같은
+	// 이유): 붙여넣기로 딸려 온 공백이나 "010-1234-5678" 하이픈 때문에 400이 나면 데스크는
+	// 무엇이 틀렸는지 볼 수 없다. 검증 대상은 요청 값이 아니라 **실제로 저장될 값**이다.
+	mem.Normalize()
+	if err := mem.Validate(); err != nil {
+		return nil, errors.Join(errBadRequest, err)
+	}
+	// **같은 번호 중복 등록은 막지 않는다** — 검수에서 "승인 경로(JoinApprove, v2.34)에는 중복
+	// 번호 409가 있는데 데스크 손등록에는 없다"는 비대칭이 결함으로 지적됐고, 실제로 409를
+	// 넣어 봤다가 되돌렸다(P71). 그 비대칭은 누락이 아니라 **설계**다:
+	//
+	//   부모 번호로 자녀 둘을 등록하는 건 실제로 흔하다(store/memory.go betterPhoneMatch 주석).
+	//   그래서 이 저장소는 같은 번호 회원 여럿을 **지원하고**, 그 상태에서 매칭이 흔들리지 않도록
+	//   전순서 규칙(미연결 우선 → ID 오름차순)까지 두 스토어가 공유한다
+	//   (TestJoinMatchIsDeterministicForSharedPhone). 데스크에서 막으면 가족 등록이 불가능해진다.
+	//
+	// 승인 경로에만 409가 있는 이유는 거기서만 **앱 계정이 레코드에 붙기** 때문이다: 중복이
+	// 생기면 앱 연결은 한쪽에, 회원권·기록은 다른 쪽에 남는다. 데스크 등록에는 그 결합이 없다.
+	// 오등록(같은 사람을 두 번)은 화면이 경고할 문제이지 서버가 거절할 문제가 아니다.
 	// 체형 포즈 시퀀스(v2.10): []는 "센터 기본 사용"(nil)으로 정규화하고, 커스텀을 보냈을 때만
 	// 검증한다. **nil이 의미를 가지므로** Flags식 nil→[] 정규화를 이 필드엔 하지 않는다
 	// (도메인 필드 주석 참조 — 저장 상태는 nil-또는-검증된-커스텀 둘뿐).
@@ -805,7 +848,16 @@ func (s *Service) CreateMember(ctx context.Context, p Principal, mem *domain.Mem
 			return nil, err
 		}
 	}
-	if mem.Consent.Sensitive && mem.Consent.SignedAt == nil {
+	// 동의 시각은 **서버가 기록한다**(v2.37, P73 — UpdateMember의 v1.2 불변식을 등록 경로에도).
+	// 종전엔 `SignedAt == nil`일 때만 채워서, 어드민이 항상 실어 보내는 데스크 PC 시계값이 그대로
+	// 저장됐다 — 민감정보 동의의 "언제"라는 준법 기록이 PC 시계 오차만큼 틀렸다. 클라이언트가
+	// 값을 실었으면 "지금 동의했다"는 뜻만 취하고 시각은 서버 것으로 바꾼다. 신규 레코드에 철회
+	// 시각이 있을 수는 없으므로 revoked_at은 비운다.
+	mem.Consent.RevokedAt = nil
+	switch {
+	case !mem.Consent.General && !mem.Consent.Sensitive:
+		mem.Consent.SignedAt = nil // 동의가 하나도 없는데 서명 시각만 남는 모순을 막는다
+	case mem.Consent.Sensitive || mem.Consent.SignedAt != nil:
 		now := time.Now().UTC()
 		mem.Consent.SignedAt = &now
 	}
@@ -923,6 +975,18 @@ func (s *Service) UpdateMember(ctx context.Context, p Principal, id string, body
 				return nil, err
 			}
 		}
+		// 정규화 → 검증(v2.36, CreateMember와 같은 규칙). 여기가 없으면 등록은 막고 수정은
+		// 여는 셈이라, PUT 한 번으로 이름·번호를 지워 그 회원의 앱 연결을 끊을 수 있었다.
+		//
+		// **status 화이트리스트가 특히 중요하다**: 이 경로는 body를 domain.Member에 그대로
+		// 언마샬하므로 `{"status":"withdrawn"}` 한 줄이면 그 회원이 수정·발급·계약이 전부 막힌
+		// 종단 상태로 굳는데(guardMemberNotWithdrawn), 되돌릴 API가 없고 **실제 파기(번호
+		// 가명화·계정 삭제)는 일어나지 않아** 개인정보는 그대로 남는 가짜 탈퇴가 된다.
+		// 진짜 탈퇴 경로는 회원 본인의 DELETE /v1/me 하나뿐이다(v2.11).
+		existing.Normalize()
+		if err := existing.Validate(); err != nil {
+			return nil, errors.Join(errBadRequest, err)
+		}
 	}
 	// 쓰기 정규화(v2.28) — **SaveMember 앞**이라 PUT 한 번이 null 문서를 고친다. 머지 PUT은
 	// 기존 문서 위에 언마샬하므로 flags를 안 실은 요청이면 문서의 null이 그대로 남고(위
@@ -1016,10 +1080,13 @@ func stampPassStatus(pass *domain.Pass) {
 // hydratePassesRemaining — 리스트 전체에 hydratePassRemaining을 적용한다(GET /v1/passes, GET
 // /v1/members의 임베드 passes[]에서 공용으로 사용, v1.1 정합 패치).
 func (s *Service) hydratePassesRemaining(ctx context.Context, centerID string, passes []domain.Pass) ([]domain.Pass, error) {
-	for i := range passes {
-		if err := s.hydratePassRemaining(ctx, centerID, &passes[i]); err != nil {
-			return nil, err
-		}
+	// 패스마다 원장을 읽는다 — 서로 독립이라 동시에(v2.38, P74). 각 고루틴은 자기 인덱스의 원소만
+	// 만지므로 슬라이스 공유가 안전하다.
+	err := forEachParallel(ctx, len(passes), passFanOut, func(ctx context.Context, i int) error {
+		return s.hydratePassRemaining(ctx, centerID, &passes[i])
+	})
+	if err != nil {
+		return nil, err
 	}
 	return passes, nil
 }
@@ -1418,6 +1485,7 @@ func (s *Service) RefundPass(ctx context.Context, p Principal, passID string, us
 		}
 	}
 	var txUsed int
+	var txQuote domain.RefundResult
 	updated, err := s.store.UpdatePassWithLedgerAndContracts(ctx, p.CenterID, passID,
 		func(fresh *domain.Pass, entries []domain.Ledger) (*domain.Ledger, error) {
 			if fresh.Status == domain.PassStatusRefunded {
@@ -1425,8 +1493,17 @@ func (s *Service) RefundPass(ctx context.Context, p Principal, passID string, us
 			}
 			remaining := domain.Sum(entries)
 			txUsed = usedFromLedger(entries)
+			// 정산도 트랜잭션이 본 원장으로(v2.37, P73) — 그 결과를 패스에 **함께 기록**한다.
+			// 종전엔 마감 뒤 같은 입력으로 다시 계산해 응답에만 실었고 DB엔 금액이 남지 않았다
+			// (domain.Pass.RefundedAmount 주석). 재시도(mutate 재호출)마다 다시 계산되므로 값이
+			// 트랜잭션이 확정한 원장과 어긋날 수 없다.
+			txQuote = domain.SettleRefund(fresh.PaidAmount, fresh.TotalSessions, txUsed, rate, paidSum)
+			now := time.Now().UTC()
+			refunded := txQuote.Refund
 			fresh.Status = domain.PassStatusRefunded
 			fresh.Remaining = 0 // 마감 후 잔여는 항상 0(아래 refund 엔트리가 원장에서도 0으로 맞춘다)
+			fresh.RefundedAmount = &refunded
+			fresh.RefundedAt = &now
 			if remaining == 0 {
 				// 이미 0이면 원장을 더럽히지 않는다 — 부분 실패 재시도가 refund를 중복 적재해
 				// 원장을 음수로 끌어내리지 않게 하는 가드이기도 하다.
@@ -1449,7 +1526,7 @@ func (s *Service) RefundPass(ctx context.Context, p Principal, passID string, us
 		return nil, domain.RefundResult{}, err
 	}
 	pass = updated
-	quote = domain.SettleRefund(pass.PaidAmount, pass.TotalSessions, txUsed, rate, paidSum)
+	quote = txQuote // 트랜잭션이 기록한 그 값 — 응답과 저장본이 같은 숫자를 말한다
 
 	// ---- 아래는 마감 **이후**의 뒷정리다(남은 갭, P13 후속 — v2.15에서 계약 무효화는 위
 	// 트랜잭션 안으로 들어갔고, 미납 회차 종결만 남았다) ----
@@ -1507,21 +1584,18 @@ func (s *Service) refundBasis(ctx context.Context, centerID string, pass *domain
 			break
 		}
 	}
-	all, err := s.store.ListPayments(ctx, centerID)
+	// 이 패스의 결제만 읽는다(v2.38, P74) — 종전엔 센터 전체 결제를 읽고 pass_id로 걸러, 환불 견적
+	// 1건의 비용이 센터의 누적 결제 수에 비례했다.
+	passPayments, err := s.store.ListPaymentsByPass(ctx, centerID, pass.ID)
 	if err != nil {
 		return 0, 0, nil, nil, err
 	}
-	passPayments := []domain.Payment{}
 	paidSum := 0
 	// 실수납은 "지금까지 들어온 돈" — 미래 paid_at은 세지 않는다(P12 감사 M5). 경계는 생성
 	// 게이트와 **같은 값**(now + 허용 오차)을 쓴다: 게이트가 시계 오차로 통과시킨 paid_at을
 	// 정산이 다시 떨어뜨리면, 방금 기록한 결제가 몇 분간 "받은 적 없는 돈"이 된다.
 	asOf := time.Now().UTC().Add(paidAtClockSkew)
-	for _, pay := range all {
-		if pay.PassID != pass.ID {
-			continue
-		}
-		passPayments = append(passPayments, pay)
+	for _, pay := range passPayments {
 		paidSum += pay.PaidSum(asOf)
 	}
 	if len(passPayments) == 0 {
@@ -1719,7 +1793,9 @@ func (s *Service) CreateBooking(ctx context.Context, p Principal, req BookingCre
 		return nil, errors.Join(errBadRequest, errors.New("슬롯 날짜가 홀딩(일시정지) 기간이에요"))
 	}
 	// 트레이너 휴무일 예약 거부(v1.4 — recurring 선행 생성만 거르고 일반 예약은 뚫리던 갭).
-	// 스태프 레코드가 아직 없으면(미시딩 dev) 검사를 건너뛴다.
+	// 스태프 레코드가 아직 없으면(미시딩 dev — ErrNotFound) 검사를 건너뛴다. **부재와 장애는
+	// 가른다**(v2.37, P73 — P56 B7~B9와 같은 규약): 종전 `err == nil`은 스토어 순단에 퇴사자·
+	// 휴무일 거부가 통째로 꺼져 예약이 조용히 성립했다. 장애면 멈춘다.
 	if st, err := s.store.GetStaff(ctx, p.CenterID, pass.TrainerID); err == nil {
 		// 퇴사자 앞으로는 새 예약을 잡을 수 없다(v2.0 — 휴무일 거부와 같은 자리). 없으면
 		// 퇴사 처리로 비운 선행 조건이 곧바로 다시 채워져 이관→퇴사 여정이 무한 반복된다.
@@ -1732,6 +1808,8 @@ func (s *Service) CreateBooking(ctx context.Context, p Principal, req BookingCre
 		if st.IsOffday(slotDate) {
 			return nil, errors.Join(errBadRequest, errors.New("담당 코치의 휴무일이에요"))
 		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return nil, err
 	}
 	kind := req.Kind
 	if kind == "" {
@@ -2013,8 +2091,20 @@ func (s *Service) CreateRecurring(ctx context.Context, p Principal, req Recurrin
 	// 퇴사자 앞으로는 고정 스케줄도 만들 수 없다(v2.0 — CreateBooking과 같은 규칙).
 	// 규칙 저장 **전에** 본다: 아래 선행 생성 루프의 GetStaff(휴무일 조회)는 이미 규칙이
 	// 저장된 뒤라 거기서 막으면 유령 규칙이 남는다.
-	if st, err := s.store.GetStaff(ctx, p.CenterID, pass.TrainerID); err == nil && !st.IsActive() {
-		return nil, errors.Join(errBadRequest, errors.New("퇴사 처리된 코치예요 — 담당을 먼저 이관해주세요"))
+	// 부재(ErrNotFound)만 통과, 장애는 전파(v2.37, P73 — CreateBooking과 같은 규약). 휴무일도
+	// 여기서 함께 받아 둔다: 종전엔 규칙 저장 **뒤** 같은 스태프를 한 번 더 읽어 휴무일을 얻었고
+	// 그 두 번째 읽기는 `err == nil`이라 순단 시 휴무일이 빈 집합이 돼 휴무일에 예약이 잡혔다.
+	// 한 번 읽어 두 곳에 쓰면 그 창 자체가 없다.
+	offdays := map[string]bool{}
+	if st, err := s.store.GetStaff(ctx, p.CenterID, pass.TrainerID); err == nil {
+		if !st.IsActive() {
+			return nil, errors.Join(errBadRequest, errors.New("퇴사 처리된 코치예요 — 담당을 먼저 이관해주세요"))
+		}
+		for _, d := range st.Offdays {
+			offdays[d] = true
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return nil, err
 	}
 	if err := s.hydratePassRemaining(ctx, p.CenterID, pass); err != nil {
 		return nil, err
@@ -2058,12 +2148,6 @@ func (s *Service) CreateRecurring(ctx context.Context, p Principal, req Recurrin
 	policy, err := s.store.GetPolicy(ctx, p.CenterID)
 	if err != nil {
 		return nil, err
-	}
-	offdays := map[string]bool{}
-	if staff, err := s.store.GetStaff(ctx, p.CenterID, pass.TrainerID); err == nil {
-		for _, d := range staff.Offdays {
-			offdays[d] = true
-		}
 	}
 	keys := domain.ExpandSlotKeys(*r, time.Now().In(domain.KST), recurringExpandWeeks, offdays)
 	created := 0
@@ -2577,7 +2661,16 @@ func (s *Service) ListHwChecks(ctx context.Context, p Principal, hwID, memberQue
 	if err != nil {
 		return nil, err
 	}
-	all, err := s.store.ListHwChecks(ctx, p.CenterID)
+	// 회원이 정해졌으면 **그 회원 것만** 읽는다(v2.38, P74). hwChecks는 회원×배정×날짜로 가장 빨리
+	// 쌓이는 컬렉션이고, 이 경로는 앱 홈 탭이 열릴 때마다(회원 전원이 매일) 탄다 — 종전엔 센터
+	// 전체를 읽고 Go에서 걸렀다(회원 role은 memberScopeID가 본인으로 강제하므로 늘 이 분기다).
+	// 아래 Go 필터는 그대로 둔다: hw_id·date·트레이너 소유는 여전히 여기서 거른다.
+	var all []domain.HwCheck
+	if memberID != "" {
+		all, err = s.store.ListHwChecksByMember(ctx, p.CenterID, memberID)
+	} else {
+		all, err = s.store.ListHwChecks(ctx, p.CenterID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -2836,15 +2929,13 @@ func (s *Service) CreatePayment(ctx context.Context, p Principal, req PaymentCre
 // 검사의 기준축을 매출 집계(revenueByMonth도 Total을 쓴다)와 같게 맞춘다 — 상한을 실수납으로
 // 재면 "미납 회차만 잔뜩 적힌 중복 결제"가 매출만 부풀리며 통과한다.
 func (s *Service) recordedPaymentTotal(ctx context.Context, centerID, passID string) (int, error) {
-	all, err := s.store.ListPayments(ctx, centerID)
+	pays, err := s.store.ListPaymentsByPass(ctx, centerID, passID) // 패스 것만(v2.38, P74)
 	if err != nil {
 		return 0, err
 	}
 	sum := 0
-	for _, pay := range all {
-		if pay.PassID == passID {
-			sum += pay.Total
-		}
+	for _, pay := range pays {
+		sum += pay.Total
 	}
 	return sum, nil
 }
@@ -2916,7 +3007,14 @@ func (s *Service) ListPayments(ctx context.Context, p Principal, memberQuery str
 	if err != nil {
 		return nil, err
 	}
-	all, err := s.store.ListPayments(ctx, p.CenterID)
+	// 회원이 정해졌으면 그 회원 결제만 읽는다(v2.38, P74) — 앱 마이 탭이 회원마다 부르는 경로가
+	// 센터 전체 결제를 읽지 않게. owner 무필터 조회만 전량이다.
+	var all []domain.Payment
+	if memberID != "" {
+		all, err = s.store.ListPaymentsByMember(ctx, p.CenterID, memberID)
+	} else {
+		all, err = s.store.ListPayments(ctx, p.CenterID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -3466,12 +3564,30 @@ func (s *Service) RestoreBodyPhoto(ctx context.Context, p Principal, id string) 
 // 순서가 뒤바뀌면 오브젝트가 기록 없이 버킷에 영원히 남는다 — 지웠다는 사실조차
 // 추적할 수 없다. Storage 삭제가 실패하면 메타를 남겨 다음 훑기에서 다시 시도한다.
 func (s *Service) purgeBodyPhoto(ctx context.Context, centerID string, bp domain.BodyPhoto) error {
-	if bp.StoragePath != "" {
-		if _, err := s.media.DeleteObjects(ctx, []string{bp.StoragePath}); err != nil {
+	if path, ok := ownedBodyPhotoPath(bp); ok {
+		if _, err := s.media.DeleteObjects(ctx, []string{path}); err != nil {
 			return err
 		}
 	}
 	return s.store.DeleteBodyPhoto(ctx, centerID, bp.ID)
+}
+
+// ownedBodyPhotoPath — 파기로 지울 파일 경로. **그 회원의 체형사진 폴더 안**일 때만 돌려준다(v2.38, P74
+// 감사 후속). 생성 경로는 v2.38부터 400으로 막지만 그 전에 저장된 레코드가 남의 경로(`staff/photos/…`
+// 등 — 사진 URL로 노출되는 이름)를 가리키면, 파기(회원 즉시 삭제·30일 유예 뒤·탈퇴)가 **남의 파일을
+// 지우는 원시 연산**이 된다. 폴더 밖이면 파일은 두고(로그 한 줄) 메타만 지운다 — 그 파일은 버킷
+// 대조(service_body_photo_reconcile — `members/{id}/body/` 아래만 나열한다)의 범위 밖이라 그대로 남고,
+// 주인(다른 회원·스태프 사진)의 수명 주기를 따른다.
+func ownedBodyPhotoPath(bp domain.BodyPhoto) (string, bool) {
+	if bp.StoragePath == "" {
+		return "", false
+	}
+	if !domain.BodyPhotoPathOwnedBy(bp.StoragePath, bp.MemberID) {
+		log.Printf("purge: 체형사진 %s의 storage_path가 회원(%s) 폴더 밖이라 파일은 지우지 않아요: %q",
+			bp.ID, bp.MemberID, bp.StoragePath)
+		return "", false
+	}
+	return bp.StoragePath, true
 }
 
 // bodyPhotoPurgeBatch — 한 번 훑을 때 파기하는 최대 건수. 조회 요청에 얹혀 도는
@@ -3563,6 +3679,29 @@ func (s *Service) CreateBodyPhoto(ctx context.Context, p Principal, req BodyPhot
 	// 타임라인이 그 자리에서 영구히 실패 타일을 그린다(삭제 API도 없다).
 	if strings.TrimSpace(req.StoragePath) == "" {
 		return nil, errors.Join(errBadRequest, errors.New("storage_path가 비어 있어요"))
+	}
+	// storage_path는 **이 회원의 폴더** 안이어야 한다(v2.38, P74). 종전엔 "비어 있지 않은가"만 봐서,
+	// 레코드의 소유(member_id)는 스코프로 지키면서 그 레코드가 **가리키는 파일**은 임의 문자열을
+	// 받았다 — 남의 경로를 가리키는 메타가 생기면 목록이 깨지고, 소프트 삭제 뒤 파기(purgeBodyPhoto)가
+	// 남의 파일을 대상으로 DeleteObjects를 시도한다. 접두사는 storage.rules와 앱(BodyPhotoStoragePath)이
+	// 공유하는 규약 그대로: members/{memberId}/body/{fileName}.
+	if !domain.BodyPhotoPathOwnedBy(req.StoragePath, req.MemberID) {
+		return nil, errors.Join(errBadRequest, errors.New("storage_path는 이 회원의 체형사진 폴더(members/{member_id}/body/) 안이어야 해요"))
+	}
+	// date·direction 검증(v2.37, P73 — CreateInbody v2.9와 같은 규칙). 종전엔 둘 다 무검증이라
+	// 형식이 깨진 날짜 한 건이 회원 앱 타임라인 전체를 실패로 접었다(앱은 DateTime.parse가
+	// 던지는 예외를 목록 단위로 잡는다). 앱 자체 업로드는 항상 KST 오늘을 보내므로 정상 경로엔
+	// 영향이 없고, 직접 호출·마이그레이션·수기 편집만 여기서 막힌다.
+	if _, err := time.Parse("2006-01-02", req.Date); err != nil {
+		return nil, errors.Join(errBadRequest, errors.New("date는 YYYY-MM-DD 형식이어야 해요"))
+	}
+	if req.Date > today() {
+		return nil, errors.Join(errBadRequest, errors.New("미래 날짜의 체형사진은 저장할 수 없어요"))
+	}
+	switch req.Direction {
+	case domain.DirFront, domain.DirSide, domain.DirBack:
+	default:
+		return nil, errors.Join(errBadRequest, errors.New("direction은 front|side|back 중 하나여야 해요"))
 	}
 	bp := &domain.BodyPhoto{
 		MemberID: req.MemberID, Pose: req.Pose, Direction: req.Direction,
@@ -3714,9 +3853,21 @@ func (s *Service) DeleteInbody(ctx context.Context, p Principal, id string) erro
 // 종전엔 이 경로가 없어 owner 외 전원을 Firestore 콘솔에서 손으로 심어야 했고, SetOffdays·
 // UpdateStaffProfile이 GetStaff 선행이라 "이미 있는 스태프 수정"만 가능했다.
 //
-// 임시 비밀번호는 만들되 **응답에 담지 않는다**: 어드민이 생성 직후 클라이언트 SDK의
-// sendPasswordResetEmail로 초대 메일을 보내는 설계라, 비밀번호가 서버 응답·로그를 타지 않는다.
-func (s *Service) CreateStaff(ctx context.Context, p Principal, req domain.StaffCreate) (*domain.Staff, error) {
+// v2.36: 최초 비밀번호를 **응답에 담는다**(StaffCreated.InitialPassword). 종전 설계는 난수를
+// 걸고 어드민 프론트가 sendPasswordResetEmail을 보내는 것이었는데, 메일이 스팸함으로 가거나
+// 도메인 메일이 막힌 헬스장에서 초대가 통째로 멈췄다. 이제 관리자가 화면에서 값을 읽어 구두로
+// 전달할 수 있고, 재설정 메일 경로는 **그대로 남아 있다**(Settings.tsx 초대 모달·Login.tsx).
+//
+// StaffCreated — *domain.Staff 임베딩이라 JSON이 종전과 **같은 평평한 모양**을 유지한다
+// (기존 필드 전부 최상위 + initial_password 한 칸 추가). 구버전 클라이언트가 그대로 파싱된다.
+type StaffCreated struct {
+	*domain.Staff
+	// 새로 만든 계정에만 채운다. 빈 값 = 이미 있던 계정(재초대·재고용)이라 그 사람이 정한
+	// 비밀번호가 살아 있다는 뜻이다 — 기본값을 적으면 관리자가 틀린 값을 불러 준다.
+	InitialPassword string `json:"initial_password,omitempty"`
+}
+
+func (s *Service) CreateStaff(ctx context.Context, p Principal, req domain.StaffCreate) (*StaffCreated, error) {
 	if !p.IsOwner() {
 		return nil, ErrForbidden // 급여(payout)가 붙는 레코드다 — 트레이너의 동료·자기 생성 금지(P13)
 	}
@@ -3726,9 +3877,14 @@ func (s *Service) CreateStaff(ctx context.Context, p Principal, req domain.Staff
 	}
 	// 계정 확보는 검증 통과 후에만 — 오타 하나로 Firebase에 고아 계정이 쌓이지 않게 한다.
 	// 이미 그 이메일의 계정이 있으면 uid를 재사용한다(재초대: 기존 비밀번호·로그인 유지).
-	uid, err := s.users.EnsureUser(ctx, req.Email)
+	uid, created, err := s.users.EnsureUser(ctx, req.Email)
 	if err != nil {
 		return nil, err
+	}
+	// 새로 만든 계정에만 최초 비밀번호를 안내한다(CenterCreated.InitialPassword와 같은 규약).
+	initialPW := ""
+	if created {
+		initialPW = s.cfg.InitialStaffPassword
 	}
 	if existing, err := s.store.GetStaff(ctx, p.CenterID, uid); err == nil {
 		if existing.IsActive() {
@@ -3737,7 +3893,14 @@ func (s *Service) CreateStaff(ctx context.Context, p Principal, req domain.Staff
 		}
 		// 퇴사자는 이 판정에서 제외한다(계약 v2.0): 409로 막으면 **재고용이 영구 차단된다**
 		// (같은 이메일 = 같은 Firebase 계정 = 같은 uid라 다른 경로가 없다). 재초대는 곧 복직이다.
-		return s.rehireStaff(ctx, p, existing, req)
+		//
+		// 재고용은 계정이 이미 있으므로 created=false → initialPW="" 다. 복직자는 자기가 쓰던
+		// 비밀번호로 그대로 들어온다(퇴사 때 EnableUser로 잠금만 풀린다).
+		rehired, err := s.rehireStaff(ctx, p, existing, req)
+		if err != nil {
+			return nil, err
+		}
+		return &StaffCreated{Staff: rehired, InitialPassword: initialPW}, nil
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return nil, err
 	}
@@ -3777,7 +3940,7 @@ func (s *Service) CreateStaff(ctx context.Context, p Principal, req domain.Staff
 		payout = *req.Payout
 	}
 	st := &domain.Staff{
-		UID: uid, Role: req.Role, Name: req.Name, Color: color, Payout: payout,
+		UID: uid, Role: req.Role, Name: req.Name, Email: req.Email, Color: color, Payout: payout,
 		Offdays: []string{},               // 직렬화 계약: 항상 배열
 		Status:  domain.StaffStatusActive, // v2.0 — 신규 스태프는 항상 재직
 	}
@@ -3792,7 +3955,7 @@ func (s *Service) CreateStaff(ctx context.Context, p Principal, req domain.Staff
 	if err := s.store.SaveStaff(ctx, p.CenterID, st); err != nil {
 		return nil, err
 	}
-	return st, nil
+	return &StaffCreated{Staff: st, InitialPassword: initialPW}, nil
 }
 
 // ListStaff — 본인 급여(payout)만 보이고 타인 급여는 가린다(P13: 트레이너가 타인 매출을 보면 안 됨).
@@ -3816,6 +3979,14 @@ func (s *Service) ListStaff(ctx context.Context, p Principal) ([]domain.Staff, e
 	for i, st := range list {
 		if st.UID != p.UID {
 			st.Payout = domain.Payout{}
+			// 로그인 ID는 급여와 같은 선에 둔다(v2.36) — 동료의 계정 식별자를 알 이유가 없고,
+			// 이 응답은 **회원 앱의 코치 소개**도 함께 쓴다.
+			st.Email = ""
+		}
+		if p.IsMember() {
+			// 회원에게는 자기 것도 없다 — 회원 uid는 스태프 uid와 겹치지 않으므로 위 분기로도
+			// 지워지지만, "회원에게 스태프 이메일은 나가지 않는다"를 조건으로 못 박아 둔다.
+			st.Email = ""
 		}
 		if p.IsMember() && !st.IsActive() {
 			st.Profile = domain.StaffProfile{}
@@ -3838,6 +4009,9 @@ func (s *Service) rehireStaff(ctx context.Context, p Principal, st *domain.Staff
 	}
 	st.Name = req.Name
 	st.Role = req.Role
+	// 재고용도 이메일을 갱신한다(v2.36): 같은 계정으로 돌아오는 경로라 값은 같지만, v2.36
+	// 이전에 만들어져 email이 빈 레코드가 이 경로로 **채워진다**. 백필 수단이 따로 없다.
+	st.Email = req.Email
 	if req.Color != "" {
 		st.Color = req.Color
 	}

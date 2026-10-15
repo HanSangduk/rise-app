@@ -26,11 +26,21 @@ type CenterCreate struct {
 	Owner domain.StaffCreate `json:"owner"`
 }
 
-// CenterCreated — 생성 결과. 임시 비밀번호는 담기지 않는다(CreateStaff와 같은 규약 —
-// 초대 메일은 어드민 프론트가 sendPasswordResetEmail로 보낸다).
+// CenterCreated — 생성 결과.
+//
+// InitialPassword — 대표 계정에 걸린 **최초 비밀번호**(v2.36). 종전엔 담기지 않았다: 난수를
+// 걸고 비밀번호 재설정 메일로 넘기는 설계였는데, **센터 생성 경로에는 그 메일을 보내는 코드가
+// 없어서**(어드민 Centers.tsx는 안내 문구만 그렸다) 새 센터 대표는 메일도 비밀번호도 없이
+// 계정만 받았다 — 로그인할 방법이 없는 계정이다.
+//
+// **계정을 이번에 새로 만들었을 때만 채운다.** 이미 있던 계정을 재사용했다면(EnsureUser의
+// created=false) 그 사람이 이미 정한 비밀번호가 살아 있고, 여기에 기본값을 적으면 관리자가
+// 틀린 값을 불러 주게 된다. 빈 문자열 = "그 계정의 기존 비밀번호를 쓰세요"라는 뜻이고,
+// 화면이 그 두 경우를 다르게 그린다.
 type CenterCreated struct {
-	Center domain.Center `json:"center"`
-	Owner  *domain.Staff `json:"owner"`
+	Center          domain.Center `json:"center"`
+	Owner           *domain.Staff `json:"owner"`
+	InitialPassword string        `json:"initial_password,omitempty"`
 }
 
 // CreateCenter — POST /v1/admin/centers(superadmin 전용). 세 조각을 순서대로 만든다:
@@ -79,19 +89,24 @@ func (s *Service) CreateCenter(ctx context.Context, p Principal, req CenterCreat
 		return nil, err
 	}
 	// ③ 최초 owner — 계정 확보 → 교차 센터 가드 → 인덱스 → 레코드(CreateStaff 순서 규약).
-	st, err := s.createFirstOwner(ctx, center.ID, owner)
+	st, created, err := s.createFirstOwner(ctx, center.ID, owner)
 	if err != nil {
 		return nil, err
 	}
-	return &CenterCreated{Center: center, Owner: st}, nil
+	out := &CenterCreated{Center: center, Owner: st}
+	if created {
+		out.InitialPassword = s.cfg.InitialStaffPassword
+	}
+	return out, nil
 }
 
 // createFirstOwner — 새 센터의 첫 스태프. CreateStaff의 코어와 같은 순서지만 판정이 다르다:
 // 새 센터라 색 배정 조회·재고용 분기가 없고, 대신 **교차 센터 가드**가 핵심이다.
-func (s *Service) createFirstOwner(ctx context.Context, centerID string, req domain.StaffCreate) (*domain.Staff, error) {
-	uid, err := s.users.EnsureUser(ctx, req.Email)
+// created — 이번 호출이 로그인 계정을 새로 만들었는가(최초 비밀번호를 안내해도 되는가).
+func (s *Service) createFirstOwner(ctx context.Context, centerID string, req domain.StaffCreate) (*domain.Staff, bool, error) {
+	uid, created, err := s.users.EnsureUser(ctx, req.Email)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	// 교차 센터 이메일 재사용 차단(사전조사 CRITICAL): EnsureUser는 기존 계정의 uid를
 	// 재사용하는데, UserIndex는 uid당 1건이라 다른 센터에 연결된 계정을 여기 앉히면
@@ -99,18 +114,18 @@ func (s *Service) createFirstOwner(ctx context.Context, centerID string, req dom
 	// 떨어진다). 같은 센터 재호출(부분 실패 복구)만 통과시킨다.
 	if idx, err := s.store.GetUserIndex(ctx, uid); err == nil {
 		if idx.CenterID != centerID {
-			return nil, errors.Join(ErrConflict,
+			return nil, false, errors.Join(ErrConflict,
 				errors.New("이미 다른 센터에 연결된 계정이에요 — 센터마다 다른 이메일을 써주세요"))
 		}
 	} else if !errors.Is(err, store.ErrNotFound) {
-		return nil, err
+		return nil, false, err
 	}
 	payout := domain.DefaultPayout()
 	if req.Payout != nil {
 		payout = *req.Payout
 	}
 	st := &domain.Staff{
-		UID: uid, Role: req.Role, Name: req.Name,
+		UID: uid, Role: req.Role, Name: req.Name, Email: req.Email,
 		Color:   domain.PickStaffColor(nil), // 새 센터 — 쓰인 색이 없다
 		Payout:  payout,
 		Offdays: []string{},
@@ -119,12 +134,12 @@ func (s *Service) createFirstOwner(ctx context.Context, centerID string, req dom
 	st.Profile.Normalize()
 	// 인덱스 먼저(CreateStaff 규약) — 인덱스만 남으면 재호출이 이어서 완성한다.
 	if err := s.store.SaveUserIndex(ctx, &store.UserIndex{UID: uid, Role: req.Role, CenterID: centerID}); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := s.store.SaveStaff(ctx, centerID, st); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return st, nil
+	return st, created, nil
 }
 
 // ListCenters — GET /v1/admin/centers(superadmin 전용). **기본 센터 ∪ 신원 등록 센터**(v2.35).

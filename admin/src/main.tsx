@@ -42,6 +42,24 @@ const queryClient = new QueryClient({
   },
 });
 
+// 배포 직후 열려 있던 탭(P74 — 화면별 코드 분할): 아직 받지 않은 화면 조각(/assets/X-옛해시.js)을
+// 부르면 새 배포에는 그 파일이 없어 실패한다(Hosting은 없는 경로에 index.html을 돌려준다). 단일 번들이던
+// 때는 없던 실패다. 새 index를 받도록 **한 번만** 새로 고친다 — 10분 안에 또 실패하면(오프라인·청크만 막힌
+// 망처럼 진짜 실패) 되풀이하지 않고 ErrorBoundary 카드에 맡긴다. 창을 30초로 두면 부팅→실패가 30초 넘게 걸리는
+// 망에서 매번 창 밖이라 새로고침이 끝없이 돈다(P74 반박). 저장소가 막힌 환경도 되풀이를 막을 수 없으니 카드로.
+// (짝: firebase.json의 "/" no-cache — 새로 고친 탭이 1시간 캐시된 옛 index를 다시 받지 않게.)
+const CHUNK_RELOAD_KEY = "rize-admin-chunk-reload-at";
+window.addEventListener("vite:preloadError", () => {
+  try {
+    const last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? 0);
+    if (Date.now() - last < 10 * 60_000) return;
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+  } catch {
+    return;
+  }
+  window.location.reload();
+});
+
 // ErrorBoundary를 **프로바이더 바깥**에 한 겹 더 둔다. App 안쪽 경계는 자기 자식만 잡으므로
 // AuthProvider·QueryClientProvider 자신의 렌더 예외(예: 세션 복원 중 던지는 경우)는 그 위로
 // 빠져나가 흰 화면이 된다 — 대표에겐 한국어 한 줄도 없는 죽은 탭이다. 같은 컴포넌트를 재사용해

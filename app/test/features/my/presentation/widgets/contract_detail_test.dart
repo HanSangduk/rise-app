@@ -173,13 +173,16 @@ void main() {
   group('상세 시트', () {
     Future<void> open(WidgetTester tester, ContractItem c, {double? penaltyRate}) async {
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: Builder(
-              builder: (context) => TextButton(
-                onPressed: () =>
-                    showContractDetailSheet(context, contract: c, penaltyRate: penaltyRate),
-                child: const Text('열기'),
+        // showRiseSheet는 세션 감시자(_SessionSheetGuard)를 달아 연다 — 앱과 같은 DI 루트가 필요하다.
+        ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () =>
+                      showContractDetailSheet(context, contract: c, penaltyRate: penaltyRate),
+                  child: const Text('열기'),
+                ),
               ),
             ),
           ),
@@ -265,13 +268,16 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: Builder(
-              builder: (context) => TextButton(
-                onPressed: () => showContractDetailSheet(context,
-                    contract: c, penaltyRate: c.penaltyRate),
-                child: const Text('열기'),
+        // showRiseSheet는 세션 감시자(_SessionSheetGuard)를 달아 연다 — 앱과 같은 DI 루트가 필요하다.
+        ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => TextButton(
+                  onPressed: () => showContractDetailSheet(context,
+                      contract: c, penaltyRate: c.penaltyRate),
+                  child: const Text('열기'),
+                ),
               ),
             ),
           ),

@@ -140,10 +140,19 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// superadminAllowedPath — /v1 · /api/v1 두 마운트를 모두 커버해야 해서 접두사가 아니라
-// 세그먼트로 판정한다. /me는 어드민 로그인 부트스트랩(fetchMe)이 역할 판별에 쓴다.
+// superadminAllowedPath — /v1 · /api/v1 두 마운트를 모두 커버한다. /me는 어드민 로그인
+// 부트스트랩(fetchMe)이 역할 판별에 쓴다.
+//
+// **경로 파라미터 자리까지 포함한 정확한 형태로 판정한다**(v2.37, P73). 종전 판정은
+// `strings.Contains(path, "/admin/") || strings.HasSuffix(path, "/me")`였는데, `{id}`가 경로의
+// 마지막 세그먼트인 라우트(`DELETE /v1/inbody/{id}` 등)에 id=`me`를 주거나, `{id}` 뒤에 정적
+// 세그먼트가 붙는 라우트(`POST /v1/bookings/{id}/complete`)에 id=`admin`을 주면 문자열이 우연히
+// 조건을 만족해 이 관문을 지나갔다. 데이터가 새지는 않았다(CenterID=""로 내려간 조회가 스토어에서
+// 먼저 실패한다) — 하지만 그 결과가 403이 아니라 500이라 "관문 하나가 87곳을 대신한다"는 위
+// 불변식이 특정 경로에서 조용히 깨져 있었다. 마운트 접두사(/api)만 벗기고 나머지는 상수 비교다.
 func superadminAllowedPath(path string) bool {
-	return strings.Contains(path, "/admin/") || strings.HasSuffix(path, "/me")
+	p := strings.TrimPrefix(path, "/api")
+	return p == "/v1/me" || strings.HasPrefix(p, "/v1/admin/")
 }
 
 func (a *Authenticator) resolve(r *http.Request) (Principal, error) {

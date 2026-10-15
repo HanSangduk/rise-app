@@ -41,7 +41,7 @@ func newTestRouterSharing(t *testing.T) (http.Handler, *Service, store.Store) {
 	if err != nil {
 		t.Fatalf("NewAuthenticator: %v", err)
 	}
-	svc := NewService(st, cfg, auth.Provisioner())
+	svc := NewService(st, cfg, auth.Provisioner(testInitialPassword))
 	return NewRouter(NewHandlers(svc), auth, nil), svc, st
 }
 

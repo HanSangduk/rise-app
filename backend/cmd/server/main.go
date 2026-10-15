@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -67,7 +68,7 @@ func main() {
 	// 트레이너 프로필 사진 업로드(v2.25)도 같은 버킷을 쓴다 — 다만 **미설정 시 동작이
 	// 반대다**: 파기는 no-op으로 떨어져도 서비스가 돌지만, 업로드는 503으로 거부한다
 	// (조용히 성공하면 "저장했어요"가 거짓말이 된다 — MediaUploader 주석).
-	svc := api.NewService(st, cfg, authenticator.Provisioner()).
+	svc := api.NewService(st, cfg, authenticator.Provisioner(cfg.InitialStaffPassword)).
 		WithMediaPurger(authenticator.MediaPurger(ctx, cfg.StorageBucket)).
 		WithMediaUploader(authenticator.MediaUploader(ctx, cfg.StorageBucket))
 	if cfg.DevSeed && !cfg.UseFirestore {
@@ -113,8 +114,10 @@ func main() {
 	// 건너뛰어 Firestore gRPC 정리 없이 죽는다. 리스너 오류든 SIGTERM이든 같은 경로로 나간다.
 	serveErr := make(chan error, 1)
 	go func() {
-		log.Printf("라이즈 백엔드 listening on :%s (firestore=%v, firebase_auth=%v, center=%s)",
-			cfg.Port, cfg.UseFirestore, cfg.FirebaseProject != "", cfg.DefaultCenterID)
+		// go=…: 운영 빌드가 실제로 어떤 Go(표준 라이브러리)로 컴파일됐는지의 유일한 관측점(P74 — go.mod의
+		// toolchain 줄은 빌더가 GOTOOLCHAIN=auto일 때만 강제된다. Cloud Run 로그에서 이 줄로 확인한다).
+		log.Printf("라이즈 백엔드 listening on :%s (firestore=%v, firebase_auth=%v, center=%s, go=%s)",
+			cfg.Port, cfg.UseFirestore, cfg.FirebaseProject != "", cfg.DefaultCenterID, runtime.Version())
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serveErr <- err
 		}

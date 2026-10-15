@@ -13,6 +13,7 @@ import 'package:rise_member/features/booking/domain/booking_models.dart';
 import 'package:rise_member/features/booking/domain/booking_repository.dart';
 import 'package:rise_member/features/booking/domain/booking_rules.dart';
 import 'package:rise_member/features/home/presentation/home_view_model.dart';
+import 'package:rise_member/features/my/presentation/my_view_model.dart';
 
 part 'booking_view_model.g.dart';
 
@@ -173,6 +174,8 @@ class BookingViewModel extends _$BookingViewModel {
     if (result case Ok()) {
       // 홈의 "다음 예약" 카드도 같은 데이터를 보므로 함께 갱신(크로스탭 stale 방지).
       ref.invalidate(homeViewModelProvider);
+      // 마이 탭의 회원권 카드(예약 가능 판정에 쓰는 열린 예약 수)도 같은 사실을 본다(P73).
+      ref.invalidate(myViewModelProvider);
       refresh();
     }
     return result;
@@ -184,6 +187,10 @@ class BookingViewModel extends _$BookingViewModel {
     if (result case Ok()) {
       // 취소 직후 홈 "다음 예약" 카드가 낡은 예약을 계속 보여주지 않게 동반 갱신.
       ref.invalidate(homeViewModelProvider);
+      // 컷오프 뒤 취소는 원장에 -1(또는 유예)을 남기고, 취소 확인 다이얼로그가 "차감 여부는
+      // 마이 탭 이용내역에서 확인할 수 있어요"라고 **약속**한다. 마이 탭을 새로고침하지 않으면
+      // 그 약속을 따라간 회원이 차감 전 잔여·이용내역을 본다(P73).
+      ref.invalidate(myViewModelProvider);
       refresh();
     }
     return result;

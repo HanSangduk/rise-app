@@ -16,6 +16,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/ramsang/rise-backend/internal/domain"
 )
@@ -251,6 +252,74 @@ func TestCreateBodyPhotoValidatesPoseAndPath(t *testing.T) {
 	noPath.StoragePath = ""
 	if _, err := s.CreateBodyPhoto(ctx, trainerP(), noPath); !errors.Is(err, errBadRequest) {
 		t.Errorf("빈 storage_path = %v, want 400 (가리킬 파일이 없는 레코드)", err)
+	}
+
+	// v2.37(P73) — date·direction도 검증한다. 형식이 깨진 날짜 한 건이 회원 앱 타임라인 전체를
+	// 실패로 접었다(CreateInbody는 v2.9부터 같은 검사를 하고 있었다).
+	for name, mutate := range map[string]func(r *BodyPhotoCreateRequest){
+		"빈 date":     func(r *BodyPhotoCreateRequest) { r.Date = "" },
+		"형식 밖 date":  func(r *BodyPhotoCreateRequest) { r.Date = "2026-13-99" },
+		"시각 섞인 date": func(r *BodyPhotoCreateRequest) { r.Date = "2026-09-01T09:00:00Z" },
+		"미래 date": func(r *BodyPhotoCreateRequest) {
+			r.Date = time.Now().In(domain.KST).AddDate(0, 0, 1).Format("2006-01-02")
+		},
+		"빈 direction":  func(r *BodyPhotoCreateRequest) { r.Direction = "" },
+		"미지 direction": func(r *BodyPhotoCreateRequest) { r.Direction = "diagonal" },
+	} {
+		bad := valid
+		mutate(&bad)
+		if _, err := s.CreateBodyPhoto(ctx, trainerP(), bad); !errors.Is(err, errBadRequest) {
+			t.Errorf("%s = %v, want 400", name, err)
+		}
+	}
+	for _, dir := range []string{domain.DirFront, domain.DirSide, domain.DirBack} {
+		ok := valid
+		ok.Direction = dir
+		ok.StoragePath = "members/" + mem.ID + "/body/20260824-stand-" + dir + "-1.jpg"
+		if _, err := s.CreateBodyPhoto(ctx, trainerP(), ok); err != nil {
+			t.Errorf("정상 direction %q가 거부됨: %v", dir, err)
+		}
+	}
+
+	// v2.38(P74) — storage_path는 **이 회원의 폴더** 안이어야 한다. 종전엔 비어 있지만 않으면 남의
+	// 경로·버킷 밖 경로도 받아, 파기(purge)가 그 경로에 DeleteObjects를 시도할 수 있었다.
+	for name, path := range map[string]string{
+		"남의 회원 폴더":  "members/someone-else/body/20260824-stand-front-1.jpg",
+		"스태프 사진 경로": "staff/photos/x.jpg",
+		"상위 폴더 탈출":  "members/" + mem.ID + "/body/../../x.jpg",
+		"하위 폴더":     "members/" + mem.ID + "/body/sub/x.jpg",
+		"파일명 없음":    "members/" + mem.ID + "/body/",
+		"접두사만 비슷":   "members/" + mem.ID + "-evil/body/x.jpg",
+		"루트 다른 컬렉션": "pending/" + mem.ID + ".jpg",
+	} {
+		bad := valid
+		bad.StoragePath = path
+		if _, err := s.CreateBodyPhoto(ctx, trainerP(), bad); !errors.Is(err, errBadRequest) {
+			t.Errorf("%s(%q) = %v, want 400", name, path, err)
+		}
+	}
+}
+
+func TestBodyPhotoPathOwnedBy(t *testing.T) {
+	cases := []struct {
+		path, member string
+		want         bool
+	}{
+		{"members/m1/body/a.jpg", "m1", true},
+		{"members/m1/body/20260824-stand-front-1755000000000.jpg", "m1", true},
+		{"members/m1/body/", "m1", false},
+		{"members/m1/body/a/b.jpg", "m1", false},
+		{"members/m1/body/..", "m1", false},
+		{"members/m2/body/a.jpg", "m1", false},
+		{"members/m1x/body/a.jpg", "m1", false},
+		{"members/m1/body/a.jpg", "", false},
+		{"members//body/a.jpg", "", false},
+		{"members/m1/body/a.jpg", "m1/", false},
+	}
+	for _, c := range cases {
+		if got := domain.BodyPhotoPathOwnedBy(c.path, c.member); got != c.want {
+			t.Errorf("BodyPhotoPathOwnedBy(%q, %q) = %v, want %v", c.path, c.member, got, c.want)
+		}
 	}
 }
 

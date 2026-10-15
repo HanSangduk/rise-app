@@ -1120,6 +1120,34 @@ func (m *Memory) ListPayments(_ context.Context, centerID string) ([]domain.Paym
 	return out, nil
 }
 
+func (m *Memory) ListPaymentsByMember(_ context.Context, centerID, memberID string) ([]domain.Payment, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	prefix := centerID + "/"
+	out := []domain.Payment{}
+	for key, p := range m.payments {
+		if strings.HasPrefix(key, prefix) && p.MemberID == memberID {
+			out = append(out, *p)
+		}
+	}
+	sortByDocID(out, paymentDocID) // order.go — Firestore와 같은 규칙
+	return out, nil
+}
+
+func (m *Memory) ListPaymentsByPass(_ context.Context, centerID, passID string) ([]domain.Payment, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	prefix := centerID + "/"
+	out := []domain.Payment{}
+	for key, p := range m.payments {
+		if strings.HasPrefix(key, prefix) && p.PassID == passID {
+			out = append(out, *p)
+		}
+	}
+	sortByDocID(out, paymentDocID) // order.go — Firestore와 같은 규칙
+	return out, nil
+}
+
 // ---- 전자계약(Contract, v1.1 정합 패치) ----
 
 func (m *Memory) CreateContract(_ context.Context, centerID string, c *domain.Contract) (string, error) {
@@ -1381,11 +1409,18 @@ func (m *Memory) SaveCheckinRecord(_ context.Context, centerID string, c *Checki
 // ---- 센터 신원(멀티센터 Phase A) ----
 
 // GetCenter — 미등록이면 빈 값(Firestore 구현과 같은 규약 — 읽기가 상태를 만들지 않는다).
+//
+// 등록된 값은 읽기 시점에 Normalize한다(v2.37, P73 — Firestore 구현·GetPolicy/GetBusiness/
+// GetFacility/GetCheckinQR와 같은 규약). 종전엔 Center만 저장값을 그대로 돌려줘, 빈 status
+// 문서(손편집·구버전)가 Memory에선 ""로, 운영에선 "active"로 다르게 관측됐다. ID는 맵 키가
+// 진실이라 Normalize 뒤에 되돌린다(Firestore가 문서 키를 되돌리는 것과 같은 순서).
 func (m *Memory) GetCenter(_ context.Context, centerID string) (*domain.Center, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if c, ok := m.centers[centerID]; ok {
 		cp := *c
+		cp.Normalize()
+		cp.ID = centerID
 		return &cp, nil
 	}
 	return &domain.Center{ID: centerID}, nil
@@ -1405,11 +1440,14 @@ func (m *Memory) ListCenters(_ context.Context) ([]domain.Center, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := []domain.Center{}
-	for _, c := range m.centers {
+	for id, c := range m.centers {
 		if c.Name == "" {
 			continue
 		}
-		out = append(out, *c)
+		cp := *c
+		cp.Normalize()
+		cp.ID = id // 키 원문이 계약(GetCenter와 같은 순서)
+		out = append(out, cp)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil

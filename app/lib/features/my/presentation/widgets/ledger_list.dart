@@ -69,13 +69,18 @@ class _LedgerListState extends State<LedgerList> {
                 ),
               ),
           if (hasMoreRow)
-            InkWell(
-              onTap: () => setState(() => _expanded = true),
-              child: RiseRow(
-                showDivider: false,
-                minHeight: 44,
-                child: Text('… 이전 내역 $rest건', style: const TextStyle(color: AppColors.muted, fontSize: 12)),
-                trailing: const Text('전체', style: TextStyle(color: AppColors.muted, fontSize: 11)),
+            // 스크린리더가 "버튼"으로 읽게 — InkWell만으로는 탭 동작만 있고 역할이 없다(수업 기록 "더 보기"와 같은 구성).
+            Semantics(
+              container: true,
+              button: true,
+              child: InkWell(
+                onTap: () => setState(() => _expanded = true),
+                child: RiseRow(
+                  showDivider: false,
+                  minHeight: 44,
+                  child: Text('… 이전 내역 $rest건', style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+                  trailing: const Text('전체', style: TextStyle(color: AppColors.muted, fontSize: 11)),
+                ),
               ),
             ),
         ],
