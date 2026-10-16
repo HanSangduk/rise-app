@@ -55,9 +55,15 @@ class AuthRepositoryImpl implements AuthRepository {
     // 걸리면 로그인 못 한 채로 리젝이 온다(왕복 며칠). 이 스위치를 켠 상태에서 Firebase는
     // **콘솔에 등록된 테스트 번호만** 받아준다 — 실번호로는 인증이 되레 실패하므로,
     // 이 분기가 일반 회원의 인증을 우회시키는 통로가 되지 않는다.
-    if (kDebugMode || normalized == AuthConfig.reviewPhoneE164) {
-      await _auth.setSettings(appVerificationDisabledForTesting: true);
-    }
+    //
+    // **요청마다 켜고 끈다**(P77): 이 스위치는 Auth 인스턴스에 남는다(프로세스 전역). 종전엔 켜기만 해서
+    // 같은 실행에서 심사 번호 다음에 다른 번호를 넣으면 앱 검증이 꺼진 채 나갔다 — 실번호였다면 위 이유로
+    // 거부된다(심사자가 심사 번호 뒤 자기 번호를 넣어 보는 경우 등).
+    // ⚠️ **iOS에선 끄기가 먹지 않는다**: FlutterFire iOS 플러그인이 true일 때만 적용한다
+    // (FLTFirebaseAuthPlugin setSettings `if (settings.appVerificationDisabledForTesting)` — 6.5.7·6.7.0·7.0.0
+    // 동일, 실기기 실측 P77). Android는 값을 그대로 적용해 여기서 꺼진다. iOS는 앱을 다시 켜야 풀린다 —
+    // 심사자 경로 한정(LOW)이라 네이티브 채널로 우회하지 않았다(다시 열 조건: 심사 리젝 사유로 나오면).
+    await _auth.setSettings(appVerificationDisabledForTesting: skipAppVerificationFor(normalized));
 
     final completer = Completer<Result<PhoneVerificationSession>>();
     void completeOnce(Result<PhoneVerificationSession> result) {
@@ -260,6 +266,12 @@ class AuthRepositoryImpl implements AuthRepository {
     );
   }
 }
+
+/// 전화 인증의 앱 검증(Play Integrity·reCAPTCHA·APNs)을 건너뛸지 — 디버그 빌드이거나 심사 번호일 때만.
+/// 요청마다 이 값을 **그대로** setSettings에 넣는다(켜기만 하면 스위치가 남는다 — P77). [debug]는 시험용 주입.
+@visibleForTesting
+bool skipAppVerificationFor(String normalizedPhone, {bool debug = kDebugMode}) =>
+    debug || normalizedPhone == AuthConfig.reviewPhoneE164;
 
 /// FirebaseAuthException → 한국어 도메인 Failure. 화면은 `message`를 그대로 보여 준다.
 @visibleForTesting

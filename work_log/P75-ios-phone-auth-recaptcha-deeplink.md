@@ -108,6 +108,8 @@ completed: 2026-10-16
 - [x] 교차검증 루프 — 외부 조사 1팀 → 반박(opus, 새 컨텍스트) 1라운드: CRITICAL·HIGH 0 → 지적 반영 → 2차 변이 6/6
 - [x] 측정 흔적 원복 — Generated.xcconfig·flutter_export_environment.sh(`--config-only --release`), project.pbxproj
       (Flutter 마이그레이션 objectVersion 60→54 + 내 drive 런이 띄운 Xcode의 재저장: 빈 inputPaths 제거·SPM 주석 변경)
+      > **정정(P77)**: 빈 inputPaths 제거·SPM 주석 변경은 Xcode가 아니라 빌드가 부른 `pod install`(CocoaPods Xcodeproj 젬)의
+      > 재직렬화다 — Xcode GUI 없이도 재현(work_log/P77).
       → "HEAD − P73 리터럴 6줄"로, 권한 600→644, Xcode 종료, 아이폰 시험 앱 삭제, 에뮬레이터 종료, 서명 깨진
       build/ios/iphoneos/Runner.app 삭제
 

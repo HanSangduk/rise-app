@@ -1,0 +1,5 @@
+# Xcode가 실행 중에 만드는 개인 설정 · 결과물(run.sh는 파생 데이터·결과 번들을 $TMPDIR에 둔다)
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/
+DerivedData/
+*.xcresult
