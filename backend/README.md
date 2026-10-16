@@ -473,7 +473,7 @@ law.go.kr 헤더 [시행 2026. 7. 1.] 확인)
 |---|---|
 | 식별자(취급자) | `uid` · `role` · `center_id` |
 | 접속일시 | `time`(RFC3339Nano UTC → LogEntry.timestamp) |
-| 접속지 정보 | `remote_ip`(RealIP 결과: True-Client-IP → X-Real-IP → XFF **첫** 값 순 — **셋 다 클라이언트가 지정할 수 있어 위조 가능**) · `xff_last`(XFF **마지막** 값 = 프록시(GFE)가 덧붙인 값 → **신뢰 값**; Hosting 리라이트 경유는 끝값이 Hosting 프록시라 `x_forwarded_for`의 끝에서 둘째가 클라이언트) · `x_forwarded_for`(원 헤더 전체, 512자 클립) · `user_agent`(512자 클립) |
+| 접속지 정보 | `remote_ip`(RealIP 결과: True-Client-IP → X-Real-IP → XFF **첫** 값 순 — **셋 다 클라이언트가 지정할 수 있어 위조 가능**) · `xff_last`(XFF **마지막** 값 = 프록시(GFE)가 덧붙인 값 → **신뢰 값**; Hosting 리라이트 경유는 끝값이 Hosting 프록시라 `x_forwarded_for`의 끝에서 둘째가 클라이언트) · `x_forwarded_for`(원 헤더 전체, 512자 클립) · `user_agent`(512자 클립) · `peer_addr`(RealIP가 덮기 전 TCP 피어 — 앞단 프록시 내부 주소, v2.39) · `ip_headers`(True-Client-IP·X-Real-IP 등 IP 헤더의 **존재**만, v2.39 — RealIP 이전 실측용) |
 | 처리한 정보주체 | `subject.member_id`(path `/members/{id}` · 쿼리 `member` · 핸들러 훅 `setAccessSubject`) · `subject.resource_id`(그 외 `{id}`) · `subject.staff_uid`(`{uid}`) |
 | 수행업무 | `method` · `route`(chi 패턴) · `path`(쿼리 제외) · `status`(헤더 미기록이면 타임아웃 504 / 그 외 500) · `aborted`(패닉으로 끊긴 요청만 true — 헤더가 이미 나갔으면 status는 나간 값 유지) · `latency_ms` · `bytes` |
 | 상관 | `request_id` · `logging.googleapis.com/trace`(Cloud Run 요청 로그와 연결, `GCP_PROJECT` 있을 때만) · `severity`(INFO / 401·403·429 WARNING / 5xx ERROR) · `message` |

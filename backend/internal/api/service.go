@@ -3703,11 +3703,31 @@ func (s *Service) CreateBodyPhoto(ctx context.Context, p Principal, req BodyPhot
 	default:
 		return nil, errors.Join(errBadRequest, errors.New("direction은 front|side|back 중 하나여야 해요"))
 	}
+	// 문서 ID = storage_path 해시(v2.39, P76): 같은 파일의 메타는 하나다. 앱은 메타 POST가 실패하면 같은 경로로
+	// POST만 다시 하는데, 첫 요청이 커밋되고 응답만 잃었으면 종전엔 레코드가 둘이 됐다(하나를 지우면 파기가 파일을
+	// 지워 남은 하나가 영구 실패 타일). 이제 재시도는 기존 레코드를 그대로 돌려받는다(200 — 응답 모양 동일).
 	bp := &domain.BodyPhoto{
+		ID:       domain.BodyPhotoDocID(req.StoragePath),
 		MemberID: req.MemberID, Pose: req.Pose, Direction: req.Direction,
 		Date: req.Date, StoragePath: req.StoragePath, Blurred: req.Blurred,
 	}
 	id, err := s.store.CreateBodyPhoto(ctx, p.CenterID, bp)
+	if errors.Is(err, store.ErrAlreadyExists) {
+		existing, gerr := s.store.GetBodyPhoto(ctx, p.CenterID, bp.ID)
+		if gerr != nil {
+			return nil, gerr
+		}
+		if existing.IsDeleted() {
+			// 스태프가 지운(유예 중) 사진을 늦게 도착한 재시도가 되살리지 않는다.
+			return nil, errors.Join(ErrConflict, errors.New("이미 삭제된 사진이에요 — 다시 촬영해주세요"))
+		}
+		if existing.MemberID != req.MemberID || existing.Pose != req.Pose ||
+			existing.Direction != req.Direction || existing.Date != req.Date {
+			// 멱등은 **같은 요청**에만 — 같은 파일에 내용이 다른 기록 요청은 재시도가 아니라 클라이언트 오류다.
+			return nil, errors.Join(ErrConflict, errors.New("같은 사진 파일에 다른 내용의 기록이 이미 있어요"))
+		}
+		return existing, nil
+	}
 	if err != nil {
 		return nil, err
 	}

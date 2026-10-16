@@ -10,7 +10,7 @@ import (
 
 // NewRouter — chi 라우터. API계약_v1.md의 모든 엔드포인트를 그대로 매핑한다(단일 진실 문서 기준).
 //
-// 미들웨어 순서(v2.30, P61): RequestID → RealIP → recoverJSON → Timeout → cors → [v1 클로저:
+// 미들웨어 순서(v2.30, P61 · capturePeer v2.39 P76): RequestID → capturePeer → RealIP → recoverJSON → Timeout → cors → [v1 클로저:
 // accessLog → auth.Middleware → 핸들러]. 접속기록(accesslog.go)은 v1 클로저 **안**에 있어
 // /healthz·/health·/api/health·/v1/public/*(클로저 밖)는 기록되지 않는다 — 의도다(무인증 표면,
 // 정보주체 처리 없음). chi middleware.Logger는 v2.30에서 **제거**했다: RequestURI에 쿼리가 통째로
@@ -20,6 +20,9 @@ func NewRouter(h *Handlers, auth *Authenticator, corsOrigins []string) http.Hand
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
+	// RealIP **앞**에서 원래 TCP 피어를 붙잡아 둔다(P76 계측 — accesslog.go peer_addr). RealIP는 r.RemoteAddr를
+	// 위조 가능한 헤더 값으로 덮어써서, 그 뒤에서는 실제 피어(Cloud Run 앞단 GFE·Hosting 에지)를 알 수 없다.
+	r.Use(capturePeer)
 	r.Use(middleware.RealIP)
 	// chi 기본 Recoverer 대신 계약 포맷 500 + 구조화 스택 로그(health.go 주석 — P35 M-7).
 	r.Use(recoverJSON)

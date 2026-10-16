@@ -211,7 +211,7 @@ func (f *Firestore) ListJoinRequests(ctx context.Context, centerID string) ([]Jo
 		}
 		out = append(out, *jr)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) }) // 최신 먼저
+	sortJoinRequestsNewest(out) // 최신 먼저, 동률은 ID(order.go — Memory와 같은 규칙)
 	return out, nil
 }
 
@@ -239,7 +239,7 @@ func (f *Firestore) ListJoinRequestsByUID(ctx context.Context, uid string) ([]Jo
 		}
 		out = append(out, *jr)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) }) // 최신 먼저
+	sortJoinRequestsNewest(out) // 최신 먼저, 동률은 ID(order.go — Memory와 같은 규칙)
 	return out, nil
 }
 
@@ -381,7 +381,7 @@ func (f *Firestore) ListMembers(ctx context.Context, centerID, trainerID, q stri
 		}
 		out = append(out, *mem)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sortMembersByName(out) // 동명이인은 ID(order.go)
 	return out, nil
 }
 
@@ -523,7 +523,7 @@ func (f *Firestore) ListLedger(ctx context.Context, centerID, memberID, passID s
 		}
 		out = append(out, *e)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].At.After(out[j].At) }) // 최신 먼저
+	sortLedgerNewest(out) // 최신 먼저, 동률은 ID(order.go)
 	return out, nil
 }
 
@@ -737,7 +737,7 @@ func (f *Firestore) ledgerInTx(tx *firestore.Transaction, centerID, memberID, pa
 		}
 		out = append(out, *e)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
+	sortLedgerNewest(out) // 최신 먼저, 동률은 ID(order.go)
 	return out, nil
 }
 
@@ -980,7 +980,7 @@ func collectBookings(iter *firestore.DocumentIterator) ([]domain.Booking, error)
 		}
 		out = append(out, *b)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].SlotKey < out[j].SlotKey })
+	sortBookingsBySlot(out) // 같은 슬롯은 ID(order.go)
 	return out, nil
 }
 
@@ -1354,7 +1354,7 @@ func (f *Firestore) ListStaff(ctx context.Context, centerID string) ([]domain.St
 		s.Normalize() // v2.0: status 필드가 없는 기존 문서를 active로 승격(GetPolicy와 같은 자리)
 		out = append(out, *s)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sortStaffByName(out) // 동명이인은 UID(order.go)
 	return out, nil
 }
 
@@ -1632,6 +1632,17 @@ func (f *Firestore) ListContracts(ctx context.Context, centerID, memberID, statu
 // ---- 체형사진 ----
 
 func (f *Firestore) CreateBodyPhoto(ctx context.Context, centerID string, bp *domain.BodyPhoto) (string, error) {
+	if bp.ID != "" {
+		// 호출자가 정한 ID(storage_path 해시 — P76)는 **없을 때만 생성**한다. Create는 문서가 있으면
+		// AlreadyExists로 실패하는 원자 연산이라 동시 재시도 둘 중 하나만 이긴다(확인 후 Set이면 둘 다 쓴다).
+		if _, err := f.center(centerID).Collection("bodyPhotos").Doc(bp.ID).Create(ctx, toDoc(bp)); err != nil {
+			if status.Code(err) == codes.AlreadyExists {
+				return "", ErrAlreadyExists
+			}
+			return "", err
+		}
+		return bp.ID, nil
+	}
 	ref := f.center(centerID).Collection("bodyPhotos").NewDoc()
 	bp.ID = ref.ID
 	if _, err := ref.Set(ctx, toDoc(bp)); err != nil {
@@ -1724,7 +1735,7 @@ func (f *Firestore) ListBodyPhotos(ctx context.Context, centerID, memberID strin
 		}
 		out = append(out, *bp)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Date > out[j].Date })
+	sortBodyPhotos(out) // 최신 먼저, 같은 날은 ID(order.go)
 	return out, nil
 }
 
@@ -1769,7 +1780,7 @@ func (f *Firestore) ListWorkoutLogs(ctx context.Context, centerID, memberID stri
 		out = append(out, *wl)
 	}
 	// 정렬은 서버 인덱스 대신 여기서(복합 인덱스 요구 회피 — Memory 구현과 동일하게 최신 먼저).
-	sort.Slice(out, func(i, j int) bool { return out[i].Date > out[j].Date })
+	sortWorkoutLogs(out) // 최신 먼저, 같은 날은 ID(order.go)
 	return out, nil
 }
 

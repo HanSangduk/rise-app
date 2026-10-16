@@ -103,7 +103,7 @@ func (m *Memory) ListWorkoutLogs(_ context.Context, centerID, memberID string) (
 		}
 		out = append(out, *wl)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Date > out[j].Date }) // 최신 먼저
+	sortWorkoutLogs(out) // 최신 먼저, 같은 날은 ID(order.go)
 	return out, nil
 }
 
@@ -310,7 +310,7 @@ func (m *Memory) ListJoinRequests(_ context.Context, centerID string) ([]JoinReq
 			out = append(out, *jr)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) }) // 최신 먼저
+	sortJoinRequestsNewest(out) // 최신 먼저, 동률은 ID(order.go)
 	return out, nil
 }
 
@@ -328,7 +328,7 @@ func (m *Memory) ListJoinRequestsByUID(_ context.Context, uid string) ([]JoinReq
 			out = append(out, *jr)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) }) // 최신 먼저
+	sortJoinRequestsNewest(out) // 최신 먼저, 동률은 ID(order.go)
 	return out, nil
 }
 
@@ -371,7 +371,7 @@ func (m *Memory) ListMembers(_ context.Context, centerID, trainerID, q string) (
 		}
 		out = append(out, *mem)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sortMembersByName(out) // 동명이인은 ID(order.go)
 	return out, nil
 }
 
@@ -506,7 +506,7 @@ func (m *Memory) listLedgerLocked(centerID, memberID, passID string) []domain.Le
 		}
 		out = append(out, *e)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].At.After(out[j].At) }) // 최신 먼저
+	sortLedgerNewest(out) // 최신 먼저, 동률은 ID(order.go)
 	return out
 }
 
@@ -783,7 +783,7 @@ func (m *Memory) ListBookingsByMember(_ context.Context, centerID, memberID stri
 			out = append(out, *b)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].SlotKey < out[j].SlotKey })
+	sortBookingsBySlot(out) // 같은 슬롯은 ID(order.go)
 	return out, nil
 }
 
@@ -797,7 +797,7 @@ func (m *Memory) ListBookings(_ context.Context, centerID string) ([]domain.Book
 			out = append(out, *b)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].SlotKey < out[j].SlotKey })
+	sortBookingsBySlot(out) // 같은 슬롯은 ID(order.go)
 	return out, nil
 }
 
@@ -1042,7 +1042,7 @@ func (m *Memory) ListStaff(_ context.Context, centerID string) ([]domain.Staff, 
 			out = append(out, cp)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sortStaffByName(out) // 동명이인은 UID(order.go)
 	return out, nil
 }
 
@@ -1264,6 +1264,8 @@ func (m *Memory) CreateBodyPhoto(_ context.Context, centerID string, bp *domain.
 	defer m.mu.Unlock()
 	if bp.ID == "" {
 		bp.ID = m.nextID("photo")
+	} else if _, ok := m.photos[scoped(centerID, bp.ID)]; ok {
+		return "", ErrAlreadyExists // 호출자가 정한 ID는 "없을 때만 생성"(Firestore Create와 같은 규칙, P76)
 	}
 	cp := *bp
 	m.photos[scoped(centerID, bp.ID)] = &cp
@@ -1335,7 +1337,7 @@ func (m *Memory) ListBodyPhotos(_ context.Context, centerID, memberID string) ([
 			out = append(out, *bp)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Date > out[j].Date })
+	sortBodyPhotos(out) // 최신 먼저, 같은 날은 ID(order.go)
 	return out, nil
 }
 

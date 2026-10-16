@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -21,6 +23,16 @@ func BodyPhotoPathOwnedBy(storagePath, memberID string) bool {
 	}
 	name := storagePath[len(prefix):]
 	return name != "" && !strings.Contains(name, "/") && name != "." && name != ".."
+}
+
+// BodyPhotoDocID — 체형사진 메타의 문서 ID를 storage_path에서 정한다(v2.39, P76). 같은 파일을 가리키는
+// 메타는 하나뿐이어야 한다 — 앱은 메타 POST가 실패하면 **같은 경로로** POST만 다시 하는데(고아 파일을 안
+// 만들려고), 첫 POST가 커밋되고 응답만 잃었으면 재시도가 레코드를 하나 더 만들었다. 경로가 곧 키이면
+// 저장소의 "없을 때만 생성"이 동시 재시도까지 하나로 모은다. 경로(`members/{id}/body/…`)엔 문서 ID에 못 쓰는
+// '/'가 있어 해시로 접는다 — 접두 "bp_" + SHA-256 앞 32자(128비트, 충돌은 사실상 없다).
+func BodyPhotoDocID(storagePath string) string {
+	sum := sha256.Sum256([]byte(storagePath))
+	return "bp_" + hex.EncodeToString(sum[:16])
 }
 
 // BodyPhoto — 체형 분석 사진 메타(API계약 v1). 실제 이미지는 Storage에, 여기는 메타만 보관한다.

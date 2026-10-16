@@ -117,6 +117,11 @@ type accessLine struct {
 	XForwardedFor string `json:"x_forwarded_for,omitempty"` // 원 헤더 전체(512자 클립) — remote_ip 교차 확인용
 	XFFLast       string `json:"xff_last,omitempty"`        // XFF 마지막 값 = 프록시(GFE)가 덧붙인 값 — 신뢰 가능한 접속지
 	UserAgent     string `json:"user_agent,omitempty"`      // 512자 클립
+	// 클라이언트 IP 신뢰 경계 계측(P76): RealIP가 덮기 **전**의 TCP 피어(포트 제외 — Cloud Run에선 앞단 프록시의
+	// 내부 주소라 개인정보가 아니다)와, RealIP가 믿는 위조 가능 헤더들의 **존재**(이름만 — 값은 싣지 않는다).
+	// chi RealIP를 신뢰 프록시 기반 ClientIPFrom*로 옮길 때 홉 수·피어 대역을 정하는 실측 자료다.
+	PeerAddr  string   `json:"peer_addr,omitempty"`
+	IPHeaders []string `json:"ip_headers,omitempty"`
 	// 처리한 정보주체
 	Subject *accessSubject `json:"subject,omitempty"`
 	// Cloud Run 요청 로그와의 상관 키(30일 안에서 httpRequest.remoteIp 등으로 교차 확인)
@@ -239,6 +244,8 @@ func writeAccessLine(out io.Writer, project string, r *http.Request, ww middlewa
 		RemoteIP:      remoteIP(r.RemoteAddr),
 		XForwardedFor: clip(r.Header.Get("X-Forwarded-For"), maxHeaderChars),
 		XFFLast:       xffLast(r.Header.Get("X-Forwarded-For")),
+		PeerAddr:      remoteIP(peerAddrFrom(r.Context())),
+		IPHeaders:     presentIPHeaders(r.Header),
 		UserAgent:     clip(r.Header.Get("User-Agent"), maxHeaderChars),
 		Subject:       subject,
 		Trace:         traceField(project, r.Header.Get("X-Cloud-Trace-Context")),
@@ -300,4 +307,35 @@ func traceField(project, header string) string {
 		return ""
 	}
 	return "projects/" + project + "/traces/" + id
+}
+
+// ---- 클라이언트 IP 신뢰 경계 계측(P76) ----
+
+type peerAddrKey struct{}
+
+// capturePeer — RealIP보다 **앞**에서 원래 r.RemoteAddr를 컨텍스트에 남긴다(router.go). 접속기록 peer_addr의 출처.
+func capturePeer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), peerAddrKey{}, r.RemoteAddr)))
+	})
+}
+
+func peerAddrFrom(ctx context.Context) string {
+	v, _ := ctx.Value(peerAddrKey{}).(string)
+	return v
+}
+
+// ipHeaderNames — RealIP가 믿거나(True-Client-IP·X-Real-IP) 프록시가 쓸 수 있는(Forwarded·Fastly-Client-IP·
+// X-Client-IP) 클라이언트 IP 헤더. 순서 고정(로그 비교가 쉬우라고).
+var ipHeaderNames = []string{"True-Client-IP", "X-Real-IP", "Forwarded", "Fastly-Client-IP", "X-Client-IP"}
+
+// presentIPHeaders — 위 헤더 중 **있는 것의 이름만**. 값은 싣지 않는다(위조 가능 값이고, 고른 값은 remote_ip에 있다).
+func presentIPHeaders(h http.Header) []string {
+	var out []string
+	for _, name := range ipHeaderNames {
+		if h.Get(name) != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }

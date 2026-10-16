@@ -5,6 +5,10 @@ import "errors"
 // ErrNotFound — 조회 미존재. API 레이어가 404로 매핑한다.
 var ErrNotFound = errors.New("store: not found")
 
+// ErrAlreadyExists — 호출자가 정한 문서 ID로 "없을 때만 생성"했는데 이미 있다(P76 — 체형사진 메타 멱등).
+// 서비스가 기존 레코드를 읽어 같은 요청의 재시도인지 판단한다(API 매핑은 서비스의 몫).
+var ErrAlreadyExists = errors.New("store: already exists")
+
 // ErrStateConflict — 기대 상태가 아닌 레코드에 대한 전이 시도(예: confirmed가 아닌 예약의
 // complete/noshow/cancel). 서비스 레벨 가드와 별개로 락/트랜잭션 **안에서** 재검증해
 // 동시 이중 호출의 이중 차감을 막는다(P01 2R MEDIUM-5). API 레이어가 400으로 매핑한다.

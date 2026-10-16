@@ -389,6 +389,8 @@ type Store interface {
 	ListContracts(ctx context.Context, centerID, memberID, status string) ([]domain.Contract, error)
 
 	// ---- 체형사진(동의 게이트는 서비스 레이어, P8) ----
+	// CreateBodyPhoto — bp.ID가 비면 스토어가 ID를 정한다. **비어 있지 않으면 그 ID로 없을 때만 생성**하고,
+	// 이미 있으면 ErrAlreadyExists(P76 — 서비스가 storage_path 해시를 넘겨 메타 POST 재시도를 멱등으로 만든다).
 	CreateBodyPhoto(ctx context.Context, centerID string, bp *domain.BodyPhoto) (string, error)
 	ListBodyPhotos(ctx context.Context, centerID, memberID string) ([]domain.BodyPhoto, error)
 	// GetBodyPhoto — 단건 조회(삭제 표시된 것도 돌려준다 — 복원·파기가 읽어야 한다).

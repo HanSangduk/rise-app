@@ -48,7 +48,7 @@ POST /v1/hw-checks {hw_id, date, done:[...]}
 
 GET  /v1/stats?range=ytd&scope=me|center   scope=me → 본인 스코프(P45), by_trainer는 owner만
 POST /v1/payments  POST /v1/payments/{id}/installments/{i}/pay
-GET  /v1/body-photos?member=  POST /v1/body-photos (동의 검증 P8 · storage_path는 members/{member_id}/body/{file}만 v2.38)
+GET  /v1/body-photos?member=  POST /v1/body-photos (동의 검증 P8 · storage_path는 members/{member_id}/body/{file}만 v2.38 · 같은 storage_path 재요청은 기존 레코드 200, 유예 삭제·내용 불일치는 409 v2.39)
 DELETE /v1/body-photos/{id}  POST /v1/body-photos/{id}/restore  POST /v1/body-photos/purge (v2.14)
 GET  /v1/inbody?member=  POST /v1/inbody
 GET  /v1/staff  POST /v1/staff/{uid}/offdays
@@ -3538,6 +3538,9 @@ privacy.html이 "개인정보처리시스템 접속기록 2년 이상 보관·�
  "xff_last":"10.0.0.1",                ← XFF **마지막** 값(있을 때만) = 프록시(GFE)가 덧붙인 값 → **신뢰 값**.
                                           Hosting 리라이트 경유는 끝값이 Hosting 프록시라 끝에서 둘째가 클라이언트
  "user_agent":"…",                     ← 있을 때만, 512자 클립·초과 시 "…"
+ "peer_addr":"169.254.1.1",            ← (v2.39) RealIP가 덮기 전의 TCP 피어, 포트 없음 — 앞단 프록시 주소
+ "ip_headers":["X-Real-IP"],           ← (v2.39) True-Client-IP·X-Real-IP·Forwarded·Fastly-Client-IP·X-Client-IP 중
+                                          요청에 있던 것의 **이름만**(있을 때만, 값은 싣지 않는다)
  "subject":{"member_id":"m1"},         ← 처리한 정보주체(있을 때만). member_id | resource_id | staff_uid
  "logging.googleapis.com/trace":"projects/rize-218c1/traces/<TRACE_ID>"   ← GCP_PROJECT 있고
                                         X-Cloud-Trace-Context 있을 때만. Cloud Run 요청 로그와 상관
@@ -4389,3 +4392,54 @@ storage_path   정확히 members/{member_id}/body/{fileName} — 세그먼트 4�
   세 번째 사용처(`route_not_found`·`media_not_configured`·`rate_limited`), ②는 이미 거부돼야 했던 입력의
   400 확대다. **`rate_limited` 문자열은 바꾸지 말 것**(앱이 code로 분기하게 될 때의 판별자).
 - 제한 대상이 아닌 경로에는 429가 나지 않는다 — 어드민의 어떤 화면도 이번 변경으로 새 에러를 보지 않는다.
+
+## v2.39 체형사진 메타 POST 멱등 · 목록 동률 순서 확정 (2026-10-16, P76, 이 섹션도 계약의 일부)
+
+P74가 "안 하기로 한 것"으로 남긴 항목 중 필요한 것을 마저 했다(work_log/P76). 와이어 변경은 ① 하나다.
+
+### ① `POST /v1/body-photos` — 같은 `storage_path`는 같은 레코드 (멱등)
+
+```
+같은 storage_path로 다시 POST     200 + 처음 만든 레코드(같은 id) — 새 레코드를 만들지 않는다
+그 레코드가 삭제(유예) 상태        409 {error:"이미 삭제된 사진이에요 — 다시 촬영해주세요"}
+같은 경로에 내용이 다름            409 {error:"같은 사진 파일에 다른 내용의 기록이 이미 있어요"} — 회원·pose·방향·날짜 중
+                                   하나라도 다르면. 멱등은 같은 요청에만(앱의 재시도는 내용이 같다)
+id                                 이제 storage_path에서 정해진다("bp_" + SHA-256 앞 32자) — 클라이언트는
+                                   종전대로 응답의 id만 쓴다(형식을 해석하지 말 것)
+```
+
+**왜**: 앱은 Storage 업로드가 끝난 뒤 메타 POST가 실패하면 **같은 경로로 POST만 다시** 한다(고아 파일을 안
+만들려고 경로를 재사용한다 — `CameraViewModel.pendingRetry`). 그런데 첫 POST가 서버에선 커밋되고 응답만 잃었다면
+(망 끊김) 재시도가 레코드를 하나 더 만들었다 — 파일 하나를 레코드 둘이 가리키고, 하나를 지우면 파기가 파일을 지워
+남은 하나가 영구 실패 타일("사진 파일을 찾지 못했어요")이 됐다(P74 반박 라운드가 짚은 HEAD부터의 결함).
+문서 ID가 경로에서 정해지므로 동시에 도착한 재시도 둘도 저장소의 "없을 때만 생성"(Firestore `Create`)으로 하나가 된다.
+
+**호환**: 앱 구버전·신버전 모두 응답 모양이 같다(200 + 레코드). 기존 레코드(무작위 id)는 그대로다 — 배포 전에 첫
+POST가 나가고 배포 뒤에 재시도가 온 한 건만 종전처럼 둘이 될 수 있다(일회성).
+
+### ② 목록의 동률 순서 확정 (와이어 무변경 — 순서만 결정적으로)
+
+가입 요청(본인별·센터별) · 원장 · 회원 · 스태프 · 예약 · 체형사진 · 수업 기록 목록은 1차 키(생성 시각·이름·슬롯·
+날짜)가 같으면 **문서 ID로** 가른다 — 최신 먼저인 시각 목록(가입 요청·원장)은 ID 내림차순, 나머지는 ID 오름차순
+(`store/order.go`, 인바디·회원권과 같은 규약). 종전엔 동률의 순서가 로컬(Memory)에선 호출마다 바뀌었고, `/v1/me`의
+`join_request`는 목록의 **첫 항목 = 현재 상태**라 시험이 300회 중 72회 틀린 답을 냈다(운영 Firestore는 별개 요청이
+같은 µs를 받기 어려워 사실상 영향 없음).
+
+### ③ 접속기록(v2.30) 필드 2개 추가 — 클라이언트 IP 신뢰 경계 계측 (로그 형식, 와이어 무변경)
+
+```
+peer_addr    RealIP가 덮어쓰기 전의 TCP 피어(포트 제외). Cloud Run에선 앞단 프록시의 내부 주소 — 개인정보 아님
+ip_headers   True-Client-IP · X-Real-IP · Forwarded · Fastly-Client-IP · X-Client-IP 중 요청에 **있던 것의 이름만**
+             (값은 싣지 않는다 — 위조 가능 값이고, RealIP가 고른 값은 종전대로 remote_ip)
+```
+
+**왜**: v2.38 ①의 한계(공개 경로 키·접속기록 `remote_ip`가 위조 가능한 헤더에서 온다)를 닫으려면 chi `RealIP`를 신뢰
+프록시 기반 `ClientIPFrom*`로 옮겨야 하는데, 신뢰할 홉 수·프록시 대역을 잘못 고르면 모든 요청이 프록시 IP 하나로
+모여 공개 경로가 일제히 429가 된다. 운영 30일 실측(work_log/P76): Hosting 경유(`/api/v1`)는 XFF가 언제나
+`사용자, Google 에지` 두 칸이고 에지는 goog.json 대역(cloud.json 아님), 앱 직결(`/v1`)은 회원 성공 요청이 기록
+대상이 아니라 모양을 볼 수 없었다. 다음 배포 뒤 Hosting 경유는 스태프 요청마다, 앱 직결은 **기록 대상인 줄**(만료
+토큰의 401 · 403 · 429)에서 실제 피어와 헤더 모양이 남는다 — 회원 성공 요청은 종전대로 기록하지 않는다.
+
+### 무변경
+- 엔드포인트·인가·에러 포맷. ①의 409는 기존 `{error}` 본문(`ErrConflict`) 그대로다.
+

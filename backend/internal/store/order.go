@@ -68,6 +68,89 @@ func sortInbody(rows []domain.Inbody) {
 	})
 }
 
+// ---- 1차 키 + 문서 ID 타이브레이커(P76) ----
+//
+// 아래 목록들은 1차 키 하나로만 sort.Slice를 돌리고 있었다. 1차 키는 겹칠 수 있다(같은 µs에 만든
+// 가입 요청 — 맥의 실시각 해상도는 1µs다, 동명이인, 같은 슬롯의 그룹 예약, 같은 날 찍은 체형사진
+// 여러 장, 한 트랜잭션이 같은 시각으로 쓴 원장 두 줄). 그러면 동률의 상대 순서가 Memory에선 맵 순회로
+// 호출마다 뒤바뀌고, Firestore에선 불안정 정렬이 정한 임의 순서가 된다 — sortPasses·sortInbody가
+// 막은 바로 그 부류다. 실측: `TestMeJoinRequestFollowsSelectedCenter`가 300회 중 72회 실패했다
+// (/v1/me의 join_request는 목록의 **첫 항목 = 현재 상태**라 순서가 곧 답이다).
+//
+// 동률의 방향: "최신 먼저"인 시각 목록(가입 요청·원장)은 **ID 내림차순** — Memory의 ID는 발급 순
+// 시퀀스라 나중에 만든 것이 앞에 와서 1차 키의 뜻과 맞는다. 날짜·이름·슬롯 목록은 sortInbody와
+// 같은 **ID 오름차순**.
+
+// sortJoinRequestsNewest — 가입 요청: created_at 내림차순, 동률이면 문서 ID 내림차순.
+func sortJoinRequestsNewest(rows []JoinRequest) {
+	sort.Slice(rows, func(i, j int) bool {
+		if !rows[i].CreatedAt.Equal(rows[j].CreatedAt) {
+			return rows[i].CreatedAt.After(rows[j].CreatedAt)
+		}
+		return rows[i].ID > rows[j].ID
+	})
+}
+
+// sortLedgerNewest — 원장: at 내림차순, 동률이면 문서 ID 내림차순.
+func sortLedgerNewest(rows []domain.Ledger) {
+	sort.Slice(rows, func(i, j int) bool {
+		if !rows[i].At.Equal(rows[j].At) {
+			return rows[i].At.After(rows[j].At)
+		}
+		return rows[i].ID > rows[j].ID
+	})
+}
+
+// sortMembersByName — 회원: 이름 오름차순, 동명이인은 문서 ID 오름차순.
+func sortMembersByName(rows []domain.Member) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Name != rows[j].Name {
+			return rows[i].Name < rows[j].Name
+		}
+		return rows[i].ID < rows[j].ID
+	})
+}
+
+// sortStaffByName — 스태프: 이름 오름차순, 동명이인은 UID(문서 ID) 오름차순.
+func sortStaffByName(rows []domain.Staff) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Name != rows[j].Name {
+			return rows[i].Name < rows[j].Name
+		}
+		return rows[i].UID < rows[j].UID
+	})
+}
+
+// sortBookingsBySlot — 예약: slot_key 오름차순, 같은 슬롯(그룹 수업)이면 문서 ID 오름차순.
+func sortBookingsBySlot(rows []domain.Booking) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].SlotKey != rows[j].SlotKey {
+			return rows[i].SlotKey < rows[j].SlotKey
+		}
+		return rows[i].ID < rows[j].ID
+	})
+}
+
+// sortBodyPhotos — 체형사진: date 내림차순, 같은 날이면 문서 ID 오름차순(sortInbody와 같은 규칙).
+func sortBodyPhotos(rows []domain.BodyPhoto) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Date != rows[j].Date {
+			return rows[i].Date > rows[j].Date
+		}
+		return rows[i].ID < rows[j].ID
+	})
+}
+
+// sortWorkoutLogs — 수업 기록: date 내림차순, 같은 날이면 문서 ID 오름차순(sortInbody와 같은 규칙).
+func sortWorkoutLogs(rows []domain.WorkoutLog) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Date != rows[j].Date {
+			return rows[i].Date > rows[j].Date
+		}
+		return rows[i].ID < rows[j].ID
+	})
+}
+
 // 컬렉션별 "문서 ID" 추출자. 대부분은 엔티티 ID가 곧 문서 ID다 — Firestore의 Create* 구현이
 // ref.ID를 그대로 엔티티 ID에 넣는다(그래서 ID 오름차순 = 문서 ID 오름차순).
 // (passes는 위 sortPasses가 담당한다 — 문서 ID로 정렬하지 않는 유일한 컬렉션)

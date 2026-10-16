@@ -126,6 +126,12 @@ func runStoreConformance(t *testing.T, newStore func(t *testing.T) Store) {
 	t.Run("HwChecksFilteredByMember", func(t *testing.T) {
 		testHwChecksByMember(t, newStore(t))
 	})
+	t.Run("ListsTieBreakByDocID", func(t *testing.T) {
+		testListTieBreak(t, newStore(t))
+	})
+	t.Run("BodyPhotoGivenIDIsCreateOnce", func(t *testing.T) {
+		testBodyPhotoCreateOnce(t, newStore(t))
+	})
 }
 
 // ---- 개별 계약 ----
@@ -2121,5 +2127,231 @@ func testHwChecksByMember(t *testing.T, st Store) {
 	}
 	if none == nil || len(none) != 0 {
 		t.Errorf("체크 없는 회원 = %#v, want 빈 슬라이스(null이면 와이어가 [] 대신 null)", none)
+	}
+}
+
+// 1차 키가 같은 목록은 문서 ID로 가른다(P76 · order.go). 같은 키를 일부러 만들어 두 스토어가 **같은 순서**를
+// 내는지 본다 — 가입 요청·원장(최신 먼저)은 동률이면 ID 내림차순, 이름·날짜·슬롯 목록은 ID 오름차순.
+// Memory는 맵 순회라 타이브레이커가 없으면 호출마다 뒤바뀐다 — 그래서 여러 번 부른다(가입 요청은
+// /v1/me가 **첫 항목 = 현재 상태**로 읽어 300회 중 72회 틀린 답이 나갔다).
+func testListTieBreak(t *testing.T, st Store) {
+	ctx := context.Background()
+	center := conformanceCenter(t)
+	at := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	ordered := func(ids []string, desc bool) []string {
+		out := append([]string(nil), ids...)
+		sort.Strings(out)
+		if desc {
+			for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+		return out
+	}
+	only := func(got []string, keep []string) []string {
+		set := map[string]bool{}
+		for _, k := range keep {
+			set[k] = true
+		}
+		out := []string{}
+		for _, g := range got {
+			if set[g] {
+				out = append(out, g)
+			}
+		}
+		return out
+	}
+	check := func(label string, got, want []string) {
+		t.Helper()
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("%s = %v, want %v", label, got, want)
+		}
+	}
+	const rounds = 8
+
+	// 가입 요청 — 같은 created_at 3건(본인별·센터별 두 목록).
+	uid := "u_tie_" + center
+	var jr []string
+	for i := 0; i < 3; i++ {
+		id, err := st.CreateJoinRequest(ctx, &JoinRequest{CenterID: center, UID: uid,
+			Name: fmt.Sprintf("동률%d", i), Phone: fmt.Sprintf("010-7000-%04d", i), CreatedAt: at})
+		if err != nil {
+			t.Fatalf("CreateJoinRequest: %v", err)
+		}
+		jr = append(jr, id)
+	}
+	// 삽입 순서는 c,a,d,b — Go의 작은 맵은 순회가 "삽입 순서의 회전"이라, 삽입 순서가 정렬 순서와 같으면 타이브레이커가
+	// 없어도 우연히 맞는 판이 생긴다(변이 검사에서 13% 생존). 어떤 회전으로도 a,b,c,d가 안 되게 넣는다.
+	order4 := []string{"c", "a", "d", "b"}
+	// 회원 동명이인 4명.
+	var mem []string
+	for i, k := range order4 {
+		id, err := st.SaveMember(ctx, center, &domain.Member{ID: "tie_m_" + k, Name: "동명이인",
+			Phone: fmt.Sprintf("010-7100-%04d", i), Status: domain.MemberStatusActive})
+		if err != nil {
+			t.Fatalf("SaveMember: %v", err)
+		}
+		mem = append(mem, id)
+	}
+	// 스태프 동명이인 4명.
+	staff := []string{"tie_s_c", "tie_s_a", "tie_s_d", "tie_s_b"}
+	for _, uidS := range staff {
+		if err := st.SaveStaff(ctx, center, &domain.Staff{UID: uidS, Role: domain.RoleTrainer, Name: "동명",
+			Status: domain.StaffStatusActive, Offdays: []string{}}); err != nil {
+			t.Fatalf("SaveStaff: %v", err)
+		}
+	}
+	// 같은 시각의 원장 3줄 · 같은 날 체형사진 3장 · 같은 날 수업 기록 3건.
+	var led, photos, logs []string
+	for i, k := range order4 {
+		id, err := st.AppendLedger(ctx, center, &domain.Ledger{MemberID: "m_tie", PassID: "p_tie", Delta: 1,
+			Reason: domain.ReasonIssue, By: "owner1", At: at})
+		if err != nil {
+			t.Fatalf("AppendLedger: %v", err)
+		}
+		led = append(led, id)
+		pid, err := st.CreateBodyPhoto(ctx, center, &domain.BodyPhoto{ID: "tie_p_" + k, MemberID: "m_tie", Pose: "stand",
+			Direction: "front", Date: "2026-09-01", StoragePath: fmt.Sprintf("members/m_tie/body/20260901-stand-front-%d.jpg", i)})
+		if err != nil {
+			t.Fatalf("CreateBodyPhoto: %v", err)
+		}
+		photos = append(photos, pid)
+		// Firestore는 수업 기록 ID를 스스로 정한다(무작위) — 기대값은 돌려받은 ID로 만든다.
+		lid, err := st.CreateWorkoutLog(ctx, center, &domain.WorkoutLog{ID: "tie_w_" + k, MemberID: "m_tie", TrainerID: "t1",
+			Date: "2026-09-01", Title: "1:1 PT"})
+		if err != nil {
+			t.Fatalf("CreateWorkoutLog: %v", err)
+		}
+		logs = append(logs, lid)
+	}
+	// 같은 슬롯의 그룹 예약 4건 — 회원·코치가 다르다(정원 4), 지정 ID는 c,a,d,b 순.
+	var books []string
+	for i, who := range order4 {
+		pass := &domain.Pass{MemberID: "m_" + who, TrainerID: "t_" + who, Product: "PT", PaidAmount: 1_000_000,
+			TotalSessions: 5, Remaining: 5, ValidFrom: "2026-01-01", ValidUntil: "2026-12-31",
+			Status: domain.PassStatusActive, Holds: []domain.Hold{}}
+		if err := st.IssuePass(ctx, center, pass, &domain.Ledger{MemberID: "m_" + who, Delta: 5,
+			Reason: domain.ReasonIssue, By: "owner1", At: at}, nil); err != nil {
+			t.Fatalf("IssuePass(%d): %v", i, err)
+		}
+		b := &domain.Booking{ID: "tie_b_" + who, SlotKey: "20260901-10", MemberID: "m_" + who, TrainerID: "t_" + who,
+			PassID: pass.ID, Kind: domain.BookingKindPT, Status: domain.BookingConfirmed}
+		if err := st.BookAtomic(ctx, center, b.SlotKey, 4, b); err != nil {
+			t.Fatalf("BookAtomic(%d): %v", i, err)
+		}
+		books = append(books, b.ID)
+	}
+
+	for r := 0; r < rounds; r++ {
+		byUID, err := st.ListJoinRequestsByUID(ctx, uid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := []string{}
+		for _, x := range byUID {
+			ids = append(ids, x.ID)
+		}
+		check("ListJoinRequestsByUID(동률)", ids, ordered(jr, true))
+		byCenter, err := st.ListJoinRequests(ctx, center)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = ids[:0]
+		for _, x := range byCenter {
+			ids = append(ids, x.ID)
+		}
+		check("ListJoinRequests(동률)", only(ids, jr), ordered(jr, true))
+
+		ms, err := st.ListMembers(ctx, center, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = ids[:0]
+		for _, x := range ms {
+			ids = append(ids, x.ID)
+		}
+		check("ListMembers(동명이인)", only(ids, mem), ordered(mem, false))
+
+		ss, err := st.ListStaff(ctx, center)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = ids[:0]
+		for _, x := range ss {
+			ids = append(ids, x.UID)
+		}
+		check("ListStaff(동명이인)", only(ids, staff), ordered(staff, false))
+
+		ls, err := st.ListLedger(ctx, center, "m_tie", "p_tie")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = ids[:0]
+		for _, x := range ls {
+			ids = append(ids, x.ID)
+		}
+		check("ListLedger(같은 시각)", ids, ordered(led, true))
+
+		ps, err := st.ListBodyPhotos(ctx, center, "m_tie")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = ids[:0]
+		for _, x := range ps {
+			ids = append(ids, x.ID)
+		}
+		check("ListBodyPhotos(같은 날)", ids, ordered(photos, false))
+
+		ws, err := st.ListWorkoutLogs(ctx, center, "m_tie")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = ids[:0]
+		for _, x := range ws {
+			ids = append(ids, x.ID)
+		}
+		check("ListWorkoutLogs(같은 날)", ids, ordered(logs, false))
+
+		bs, err := st.ListBookings(ctx, center)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = ids[:0]
+		for _, x := range bs {
+			ids = append(ids, x.ID)
+		}
+		check("ListBookings(같은 슬롯)", only(ids, books), ordered(books, false))
+	}
+}
+
+// CreateBodyPhoto(P76): ID가 주어지면 **없을 때만 생성**하고 이미 있으면 ErrAlreadyExists — 덮어쓰지 않는다.
+// 서비스가 storage_path 해시를 넘겨 메타 POST 재시도를 하나로 모으는 근거다. Firestore는 Create(원자),
+// Memory는 락 안의 존재 확인. ID가 비면 종전대로 스토어가 정한다.
+func testBodyPhotoCreateOnce(t *testing.T, st Store) {
+	ctx := context.Background()
+	center := conformanceCenter(t)
+	id := domain.BodyPhotoDocID("members/m_once/body/20261016-stand-front-1.jpg")
+	first := &domain.BodyPhoto{ID: id, MemberID: "m_once", Pose: "stand", Direction: "front", Date: "2026-10-16",
+		StoragePath: "members/m_once/body/20261016-stand-front-1.jpg"}
+	got, err := st.CreateBodyPhoto(ctx, center, first)
+	if err != nil || got != id {
+		t.Fatalf("주어진 ID 생성 = %q, %v, want %q", got, err, id)
+	}
+	dup := *first
+	dup.Pose = "tpose" // 다른 내용으로 같은 ID — 덮어쓰면 안 된다
+	if _, err := st.CreateBodyPhoto(ctx, center, &dup); !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("같은 ID 두 번째 생성 = %v, want ErrAlreadyExists", err)
+	}
+	saved, err := st.GetBodyPhoto(ctx, center, id)
+	if err != nil || saved.Pose != "stand" {
+		t.Fatalf("저장본 = %+v, %v — 두 번째 생성이 첫 문서를 덮어썼다", saved, err)
+	}
+	auto, err := st.CreateBodyPhoto(ctx, center, &domain.BodyPhoto{MemberID: "m_once", Pose: "stand", Direction: "side",
+		Date: "2026-10-16", StoragePath: "members/m_once/body/20261016-stand-side-2.jpg"})
+	if err != nil || auto == "" || auto == id {
+		t.Fatalf("ID 없는 생성 = %q, %v — 스토어가 새 ID를 정해야 한다", auto, err)
+	}
+	if list, _ := st.ListBodyPhotos(ctx, center, "m_once"); len(list) != 2 {
+		t.Errorf("레코드 %d개, want 2", len(list))
 	}
 }

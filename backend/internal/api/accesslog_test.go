@@ -517,3 +517,45 @@ func TestAccessLogClipsLongHeaders(t *testing.T) {
 		t.Errorf("멀티바이트 UA 클립 길이=%d(룬)", len([]rune(ko)))
 	}
 }
+
+// 클라이언트 IP 신뢰 경계 계측(P76) — RealIP가 덮어쓰기 **전**의 TCP 피어(peer_addr)와 IP 관련 헤더의 **존재**
+// (값이 아니라 이름만)를 싣는다. chi RealIP → 신뢰 프록시 기반 ClientIPFrom*로 옮기려면 Cloud Run 직결·Hosting
+// 경유 두 경로의 실제 피어 대역과 헤더 모양을 알아야 하는데(잘못 고르면 모든 요청이 프록시 IP 하나로 모여 공개
+// 경로가 일제히 429), 지금 로그엔 RealIP가 덮은 값만 남는다. 피어는 GFE 내부 주소라 개인정보가 아니다.
+func TestAccessLogRecordsRawPeerAndIPHeaderPresence(t *testing.T) {
+	r, buf, _ := newAccessLogRouter(t, config.Config{})
+	alReq(r, http.MethodGet, "/v1/me", "owner1", domain.RoleOwner, "", map[string]string{
+		"True-Client-IP":  "7.7.7.7",
+		"X-Real-IP":       "6.6.6.6",
+		"X-Forwarded-For": "1.1.1.1, 35.191.0.1",
+	})
+	lines := accessLines(t, buf)
+	if len(lines) != 1 {
+		t.Fatalf("라인 수=%d, want 1: %s", len(lines), buf.String())
+	}
+	l := lines[0]
+	if l["peer_addr"] != "192.0.2.1" { // httptest 기본 RemoteAddr "192.0.2.1:1234"에서 포트를 뗀 값
+		t.Errorf("peer_addr=%v, want 192.0.2.1 — RealIP가 덮기 전의 TCP 피어여야 한다(미들웨어가 RealIP 뒤면 7.7.7.7이 된다)", l["peer_addr"])
+	}
+	if l["remote_ip"] == l["peer_addr"] {
+		t.Errorf("remote_ip와 peer_addr가 같다(%v) — 위조 헤더가 있는데 둘이 같으면 피어를 RealIP 뒤에서 읽은 것", l["peer_addr"])
+	}
+	hdrs, _ := l["ip_headers"].([]any)
+	if fmt.Sprint(hdrs) != "[True-Client-IP X-Real-IP]" {
+		t.Errorf("ip_headers=%v, want [True-Client-IP X-Real-IP](이름만, 정해진 순서)", l["ip_headers"])
+	}
+	if strings.Contains(buf.String(), "6.6.6.6") {
+		t.Error("X-Real-IP의 **값**이 줄에 실렸다 — 존재만 남긴다(값은 RealIP가 고른 remote_ip 하나로 충분)")
+	}
+
+	// 헤더가 없으면 ip_headers는 생략되고 peer_addr는 남는다.
+	buf.Reset()
+	alReq(r, http.MethodGet, "/v1/me", "owner1", domain.RoleOwner, "", nil)
+	lines = accessLines(t, buf)
+	if _, present := lines[0]["ip_headers"]; present {
+		t.Errorf("헤더 없이 ip_headers가 실렸다: %v", lines[0]["ip_headers"])
+	}
+	if lines[0]["peer_addr"] != "192.0.2.1" {
+		t.Errorf("peer_addr=%v, want 192.0.2.1", lines[0]["peer_addr"])
+	}
+}

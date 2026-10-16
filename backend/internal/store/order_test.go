@@ -13,7 +13,10 @@ package store
 
 import (
 	"context"
+	"math/rand"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ramsang/rise-backend/internal/domain"
 )
@@ -243,6 +246,67 @@ func assertIDs(t *testing.T, round int, name string, got, want []string) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("%d회차 %s = %v, want %v — Firestore(문서 ID 오름차순)와 순서가 다르다", round, name, got, want)
+		}
+	}
+}
+
+// order.go 비교자의 동률 규칙(P76) — 입력을 여러 번 섞어도 같은 순서가 나와야 한다. 저장소 배선은
+// conformance_test.go의 ListsTieBreakByDocID가 두 스토어로 잰다.
+func TestTieBreakComparatorsAreDeterministic(t *testing.T) {
+	at := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	rng := rand.New(rand.NewSource(76))
+	shuffle := func(n int, swap func(i, j int)) { rng.Shuffle(n, swap) }
+	join := func(ids ...string) string { return strings.Join(ids, " ") }
+
+	for round := 0; round < 50; round++ {
+		jr := []JoinRequest{{ID: "jreq_000001", CreatedAt: at}, {ID: "jreq_000003", CreatedAt: at},
+			{ID: "jreq_000002", CreatedAt: at}, {ID: "jreq_000004", CreatedAt: at.Add(time.Microsecond)}}
+		shuffle(len(jr), func(i, j int) { jr[i], jr[j] = jr[j], jr[i] })
+		sortJoinRequestsNewest(jr)
+		if got := join(jr[0].ID, jr[1].ID, jr[2].ID, jr[3].ID); got != "jreq_000004 jreq_000003 jreq_000002 jreq_000001" {
+			t.Fatalf("가입 요청 = %s — 최신 먼저, 동률은 ID 내림차순(나중에 만든 것이 앞)", got)
+		}
+
+		led := []domain.Ledger{{ID: "l2", At: at}, {ID: "l1", At: at}, {ID: "l3", At: at.Add(-time.Second)}}
+		shuffle(len(led), func(i, j int) { led[i], led[j] = led[j], led[i] })
+		sortLedgerNewest(led)
+		if got := join(led[0].ID, led[1].ID, led[2].ID); got != "l2 l1 l3" {
+			t.Fatalf("원장 = %s", got)
+		}
+
+		ms := []domain.Member{{ID: "m3", Name: "김"}, {ID: "m1", Name: "김"}, {ID: "m2", Name: "가"}}
+		shuffle(len(ms), func(i, j int) { ms[i], ms[j] = ms[j], ms[i] })
+		sortMembersByName(ms)
+		if got := join(ms[0].ID, ms[1].ID, ms[2].ID); got != "m2 m1 m3" {
+			t.Fatalf("회원 = %s", got)
+		}
+
+		ss := []domain.Staff{{UID: "t2", Name: "박"}, {UID: "t1", Name: "박"}, {UID: "t0", Name: "최"}}
+		shuffle(len(ss), func(i, j int) { ss[i], ss[j] = ss[j], ss[i] })
+		sortStaffByName(ss)
+		if got := join(ss[0].UID, ss[1].UID, ss[2].UID); got != "t1 t2 t0" {
+			t.Fatalf("스태프 = %s", got)
+		}
+
+		bs := []domain.Booking{{ID: "b2", SlotKey: "20260901-10"}, {ID: "b1", SlotKey: "20260901-10"}, {ID: "b0", SlotKey: "20260901-11"}}
+		shuffle(len(bs), func(i, j int) { bs[i], bs[j] = bs[j], bs[i] })
+		sortBookingsBySlot(bs)
+		if got := join(bs[0].ID, bs[1].ID, bs[2].ID); got != "b1 b2 b0" {
+			t.Fatalf("예약 = %s", got)
+		}
+
+		ph := []domain.BodyPhoto{{ID: "p2", Date: "2026-09-01"}, {ID: "p1", Date: "2026-09-01"}, {ID: "p9", Date: "2026-08-31"}}
+		shuffle(len(ph), func(i, j int) { ph[i], ph[j] = ph[j], ph[i] })
+		sortBodyPhotos(ph)
+		if got := join(ph[0].ID, ph[1].ID, ph[2].ID); got != "p1 p2 p9" {
+			t.Fatalf("체형사진 = %s", got)
+		}
+
+		wl := []domain.WorkoutLog{{ID: "w2", Date: "2026-09-01"}, {ID: "w1", Date: "2026-09-01"}, {ID: "w9", Date: "2026-08-31"}}
+		shuffle(len(wl), func(i, j int) { wl[i], wl[j] = wl[j], wl[i] })
+		sortWorkoutLogs(wl)
+		if got := join(wl[0].ID, wl[1].ID, wl[2].ID); got != "w1 w2 w9" {
+			t.Fatalf("수업 기록 = %s", got)
 		}
 	}
 }
